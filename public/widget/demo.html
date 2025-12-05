@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClayPixels Widget Demo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      min-height: 100vh;
+    }
+    .header {
+      background: #1a1a1a;
+      color: white;
+      padding: 20px 40px;
+    }
+    .header h1 {
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+    .header p {
+      color: #888;
+      font-size: 14px;
+    }
+    .main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 40px;
+    }
+    .demo-section {
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      margin-bottom: 30px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .demo-section h2 {
+      font-size: 20px;
+      margin-bottom: 20px;
+      color: #333;
+    }
+    .viewer-container {
+      width: 100%;
+      height: 500px;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #000;
+    }
+    .code-block {
+      background: #1a1a1a;
+      color: #e0e0e0;
+      padding: 20px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .code-block .comment {
+      color: #6a9955;
+    }
+    .code-block .tag {
+      color: #569cd6;
+    }
+    .code-block .attr {
+      color: #9cdcfe;
+    }
+    .code-block .string {
+      color: #ce9178;
+    }
+    .input-group {
+      margin-bottom: 20px;
+    }
+    .input-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #333;
+    }
+    .input-group input {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 16px;
+    }
+    .btn {
+      background: #3b82f6;
+      color: white;
+      padding: 12px 24px;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    .btn:hover {
+      background: #2563eb;
+    }
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 20px;
+      margin-top: 20px;
+    }
+    .feature {
+      background: #f8f9fa;
+      padding: 20px;
+      border-radius: 8px;
+    }
+    .feature h3 {
+      font-size: 16px;
+      margin-bottom: 8px;
+      color: #333;
+    }
+    .feature p {
+      font-size: 14px;
+      color: #666;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🎨 ClayPixels Widget Demo</h1>
+    <p>Embed 3D texture viewers on any website</p>
+  </div>
+
+  <div class="main">
+    <!-- Demo Viewer -->
+    <div class="demo-section">
+      <h2>Live Demo</h2>
+      <div class="input-group">
+        <label>Enter your Viewer ID to test:</label>
+        <div style="display:flex;gap:10px;">
+          <input type="text" id="viewer-id-input" placeholder="e.g., viewer_123456789_abc123 or RoYT" />
+          <button class="btn" onclick="loadViewer()">Load Viewer</button>
+        </div>
+      </div>
+      <div id="demo-viewer" class="viewer-container">
+        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:white;">
+          <p>Enter a Viewer ID above to see the widget in action</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Integration Guide -->
+    <div class="demo-section">
+      <h2>How to Embed on Your Website</h2>
+      
+      <h3 style="margin-bottom:15px;color:#333;">Option 1: Simple HTML (Recommended)</h3>
+      <div class="code-block">
+        <span class="comment">&lt;!-- Add this where you want the viewer --&gt;</span><br>
+        <span class="tag">&lt;div</span> <span class="attr">data-claypixels-viewer</span>=<span class="string">"YOUR_VIEWER_ID"</span> <span class="attr">style</span>=<span class="string">"width:100%;height:500px;"</span><span class="tag">&gt;&lt;/div&gt;</span><br><br>
+        <span class="comment">&lt;!-- Add this before &lt;/body&gt; --&gt;</span><br>
+        <span class="tag">&lt;script</span> <span class="attr">src</span>=<span class="string">"https://claypixels.eu/widget/widget.js"</span><span class="tag">&gt;&lt;/script&gt;</span>
+      </div>
+
+      <h3 style="margin:25px 0 15px 0;color:#333;">Option 2: JavaScript API</h3>
+      <div class="code-block">
+        <span class="tag">&lt;div</span> <span class="attr">id</span>=<span class="string">"my-viewer"</span><span class="tag">&gt;&lt;/div&gt;</span><br><br>
+        <span class="tag">&lt;script</span> <span class="attr">src</span>=<span class="string">"https://claypixels.eu/widget/widget.js"</span><span class="tag">&gt;&lt;/script&gt;</span><br>
+        <span class="tag">&lt;script&gt;</span><br>
+        &nbsp;&nbsp;ClayPixels.init({<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;container: '#my-viewer',<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;viewerId: 'YOUR_VIEWER_ID',<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;onTextureUpload: function(data) {<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;console.log('Texture uploaded!', data);<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;}<br>
+        &nbsp;&nbsp;});<br>
+        <span class="tag">&lt;/script&gt;</span>
+      </div>
+    </div>
+
+    <!-- Features -->
+    <div class="demo-section">
+      <h2>Widget Features</h2>
+      <div class="features">
+        <div class="feature">
+          <h3>🖼️ Client-Side Processing</h3>
+          <p>Photos are processed directly in the browser using OpenCV.js. ArUco markers are detected and perspective is corrected automatically.</p>
+        </div>
+        <div class="feature">
+          <h3>💾 Local Storage</h3>
+          <p>Processed textures are stored in the browser's IndexedDB for instant loading. Original photos are backed up to the cloud.</p>
+        </div>
+        <div class="feature">
+          <h3>🎮 3D Viewer</h3>
+          <p>Full Three.js integration with auto-rotation, orbit controls, and smooth texture transitions.</p>
+        </div>
+        <div class="feature">
+          <h3>📱 Mobile Friendly</h3>
+          <p>Take photos directly from camera on mobile devices. Responsive design works on all screen sizes.</p>
+        </div>
+        <div class="feature">
+          <h3>🔒 Privacy First</h3>
+          <p>Heavy processing happens on user's device. Only original photos are uploaded as backup.</p>
+        </div>
+        <div class="feature">
+          <h3>⚡ Fast Loading</h3>
+          <p>Textures load instantly from local storage. No server round-trip needed for repeat visits.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Admin Setup -->
+    <div class="demo-section">
+      <h2>Enable Widget for Your Viewer</h2>
+      <p style="margin-bottom:15px;color:#666;">
+        To use the widget, you need to enable it in your viewer settings:
+      </p>
+      <ol style="margin-left:20px;color:#666;line-height:2;">
+        <li>Go to your <a href="/admin/viewers" style="color:#3b82f6;">Viewer Admin Panel</a></li>
+        <li>Select your viewer</li>
+        <li>Open Settings</li>
+        <li>Enable "Widget Embedding"</li>
+        <li>Choose Storage Mode:
+          <ul style="margin-left:20px;">
+            <li><strong>Hybrid</strong> (recommended) - Processed textures stored locally, originals backed up to cloud</li>
+            <li><strong>Local</strong> - Everything stays on user's device</li>
+            <li><strong>Server</strong> - Traditional server-side storage</li>
+          </ul>
+        </li>
+        <li>Copy your Viewer ID or Short Code</li>
+      </ol>
+    </div>
+  </div>
+
+  <script src="/widget/widget.js"></script>
+  <script>
+    function loadViewer() {
+      const viewerId = document.getElementById('viewer-id-input').value.trim();
+      if (!viewerId) {
+        alert('Please enter a Viewer ID');
+        return;
+      }
+
+      const container = document.getElementById('demo-viewer');
+      container.innerHTML = '';
+
+      ClayPixels.init({
+        container: container,
+        viewerId: viewerId,
+        onTextureUpload: function(data) {
+          console.log('Texture uploaded:', data);
+        },
+        onError: function(msg, err) {
+          console.error(msg, err);
+          container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:white;text-align:center;"><p>⚠️ ' + (err?.message || 'Failed to load viewer') + '</p></div>';
+        }
+      });
+    }
+  </script>
+</body>
+</html>
