@@ -2,7 +2,8 @@
 
 import { useRef, useState, useEffect } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls, PerspectiveCamera, Environment } from '@react-three/drei';
+import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
+import * as THREE from 'three';
 import { Button } from '@/components/ui/button';
 import { Camera, Download, X } from 'lucide-react';
 
@@ -30,7 +31,21 @@ function useScreenshot() {
   
   const takeScreenshot = (modelName: string) => {
     try {
-      // Render current frame
+      // Store original size
+      const originalWidth = gl.domElement.width;
+      const originalHeight = gl.domElement.height;
+      
+      // Set a fixed square size for screenshot (1:1 aspect ratio)
+      const screenshotSize = 1024;
+      gl.setSize(screenshotSize, screenshotSize);
+      
+      // Update camera aspect ratio
+      if ('aspect' in camera) {
+        (camera as THREE.PerspectiveCamera).aspect = 1;
+        (camera as THREE.PerspectiveCamera).updateProjectionMatrix();
+      }
+      
+      // Render at new size
       gl.render(scene, camera);
       
       // Get canvas data
@@ -46,6 +61,13 @@ function useScreenshot() {
           
           // Cleanup
           URL.revokeObjectURL(url);
+        }
+        
+        // Restore original size
+        gl.setSize(originalWidth, originalHeight);
+        if ('aspect' in camera) {
+          (camera as THREE.PerspectiveCamera).aspect = originalWidth / originalHeight;
+          (camera as THREE.PerspectiveCamera).updateProjectionMatrix();
         }
       }, 'image/png');
     } catch (error) {
@@ -113,17 +135,48 @@ export function TexturePreview3D({
         </DialogHeader>
 
         <div className="flex-1 relative bg-gray-900 rounded-lg overflow-hidden">
-          <Canvas>
-            <PerspectiveCamera makeDefault position={[0, 0, 5]} />
+          <Canvas shadows>
+            <PerspectiveCamera makeDefault position={[0, 0, 8]} />
             
-            {/* Lighting */}
-            <ambientLight intensity={0.5} />
-            <directionalLight position={[10, 10, 5]} intensity={1} />
-            <directionalLight position={[-10, -10, -5]} intensity={0.5} />
-            <pointLight position={[0, 5, 0]} intensity={0.5} />
+            {/* Lighting - matching museum viewer setup */}
+            <ambientLight />
+            <hemisphereLight args={[0xffffff, 0x444444, 1.8]} />
             
-            {/* Environment */}
-            <Environment preset="studio" />
+            {/* Key light - soft spotlight with penumbra for diffused edges */}
+            <spotLight 
+              position={[20, 30, 20]} 
+              intensity={5}
+              angle={0.6}
+              penumbra={1}
+              decay={0}
+            />
+            
+            {/* Fill light - soft from front-left */}
+            <spotLight 
+              position={[-20, 20, 20]} 
+              intensity={4}
+              angle={0.6}
+              penumbra={1}
+              decay={0}
+            />
+            
+            {/* Back light - soft illumination from back */}
+            <spotLight 
+              position={[0, 10, -30]} 
+              intensity={4}
+              angle={0.6}
+              penumbra={1}
+              decay={0}
+            />
+            
+            {/* Bottom fill light - soft from below */}
+            <spotLight 
+              position={[0, -20, 10]} 
+              intensity={3}
+              angle={0.8}
+              penumbra={1}
+              decay={0}
+            />
             
             {/* 3D Model with texture */}
             <Model3D 
@@ -140,8 +193,8 @@ export function TexturePreview3D({
               enablePan={true}
               autoRotate={autoRotate}
               autoRotateSpeed={2}
-              minDistance={2}
-              maxDistance={10}
+              minDistance={3}
+              maxDistance={20}
             />
 
             {/* Screenshot handler (inside Canvas to access Three.js context) */}

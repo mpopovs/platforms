@@ -23,6 +23,9 @@ export interface ViewerSettings {
   showModelName?: boolean; // Show 3D model name in viewer overlay (default: true)
   displayModes?: DisplayModeSettings;
   textureCycling?: TextureCyclingSettings;
+  // Lighting settings
+  ambientLightIntensity?: number; // Ambient light intensity (default: 0.6)
+  directionalLightIntensity?: number; // Directional light intensity (default: 0.8)
   // Widget settings
   widgetEnabled?: boolean; // Enable widget embedding (default: false)
   storageMode?: 'server' | 'local' | 'hybrid'; // Where to store processed textures (default: 'hybrid')

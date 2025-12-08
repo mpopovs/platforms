@@ -1289,7 +1289,7 @@ export async function processImage(file: File, options: TextureProcessingOptions
         const processedCanvas = await correctPerspective(canvas, markers, targetSize);
 
         if (processedCanvas) {
-          const dataUrl = processedCanvas.toDataURL('image/png');
+          const dataUrl = processedCanvas.toDataURL('image/webp', 0.92);
           return {
             dataUrl,
             width: processedCanvas.width,
@@ -1315,7 +1315,7 @@ export async function processImage(file: File, options: TextureProcessingOptions
       const processedCanvas = await correctPerspective(canvas, markers, targetSize);
 
       if (processedCanvas) {
-        const dataUrl = processedCanvas.toDataURL('image/png');
+        const dataUrl = processedCanvas.toDataURL('image/webp', 0.92);
         return {
           dataUrl,
           width: processedCanvas.width,

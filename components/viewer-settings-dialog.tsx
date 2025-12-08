@@ -18,6 +18,8 @@ interface ViewerSettingsDialogProps {
   rotationSpeed?: number;
   backgroundColor?: string;
   showModelName?: boolean;
+  ambientLightIntensity?: number;
+  directionalLightIntensity?: number;
   models?: ViewerModelRow[];
   onSave?: () => void;
   currentPin?: string | null;
@@ -37,6 +39,8 @@ export function ViewerSettingsDialog({
   rotationSpeed: initialRotationSpeed,
   backgroundColor: initialBackgroundColor,
   showModelName: initialShowModelName,
+  ambientLightIntensity: initialAmbientLightIntensity,
+  directionalLightIntensity: initialDirectionalLightIntensity,
   models = [],
   onSave,
   currentPin,
@@ -57,6 +61,8 @@ export function ViewerSettingsDialog({
   const [rotationSpeed, setRotationSpeed] = useState(initialRotationSpeed ?? 0.5);
   const [backgroundColor, setBackgroundColor] = useState(initialBackgroundColor ?? '#000000');
   const [showModelName, setShowModelName] = useState(initialShowModelName ?? true);
+  const [ambientLightIntensity, setAmbientLightIntensity] = useState(initialAmbientLightIntensity ?? 0.6);
+  const [directionalLightIntensity, setDirectionalLightIntensity] = useState(initialDirectionalLightIntensity ?? 0.8);
   
   // Widget Embedding Settings
   const [widgetEnabled, setWidgetEnabled] = useState(initialWidgetEnabled ?? false);
@@ -100,6 +106,8 @@ export function ViewerSettingsDialog({
           rotationSpeed,
           backgroundColor,
           showModelName,
+          ambientLightIntensity,
+          directionalLightIntensity,
           widgetEnabled,
           storageMode,
           enableArucoDetection,
@@ -290,6 +298,57 @@ export function ViewerSettingsDialog({
             <p className="text-xs text-gray-500 -mt-2">
               Display the model name overlay in the viewer
             </p>
+
+            {/* Lighting Settings */}
+            <div className="border-t pt-4 mt-4">
+              <h4 className="font-medium text-xs text-gray-700 mb-3">💡 Lighting</h4>
+              
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="ambientLightIntensity" className="text-xs">
+                    Ambient Light Intensity
+                  </Label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      id="ambientLightIntensity"
+                      type="range"
+                      min="0"
+                      max="2"
+                      step="0.1"
+                      value={ambientLightIntensity}
+                      onChange={(e) => setAmbientLightIntensity(parseFloat(e.target.value))}
+                      className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <span className="text-xs font-mono w-10 text-right">{ambientLightIntensity.toFixed(1)}</span>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Overall scene brightness (default: 0.6)
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="directionalLightIntensity" className="text-xs">
+                    Directional Light Intensity
+                  </Label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      id="directionalLightIntensity"
+                      type="range"
+                      min="0"
+                      max="2"
+                      step="0.1"
+                      value={directionalLightIntensity}
+                      onChange={(e) => setDirectionalLightIntensity(parseFloat(e.target.value))}
+                      className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <span className="text-xs font-mono w-10 text-right">{directionalLightIntensity.toFixed(1)}</span>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Side lighting intensity for highlights & shadows (default: 0.8)
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* PIN Management Section */}

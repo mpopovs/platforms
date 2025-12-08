@@ -4,7 +4,7 @@ import { useState, useEffect, use, useCallback } from 'react';
 import { useActionState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Eye, Copy, ArrowLeft, Settings, Trash2, LinkIcon, QrCode, Download, Map as MapIcon, FileImage, Palette, Upload, Plus, RefreshCw } from 'lucide-react';
+import { Eye, Copy, ArrowLeft, Settings, Trash2, LinkIcon, QrCode, Download, Map as MapIcon, FileImage, Palette, Upload, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { 
@@ -14,8 +14,7 @@ import {
   generateEmbedTokenAction,
   getViewerModelsWithTexturesAction,
   upload3DModelAction,
-  delete3DModelAction,
-  replaceModelFileAction
+  delete3DModelAction
 } from '@/app/actions';
 import type { ViewerModelWithTexture } from '@/lib/types/viewer';
 import { ViewerSettingsDialog } from '@/components/viewer-settings-dialog';
@@ -39,6 +38,8 @@ type Viewer = {
     backgroundColor?: string;
     rotationSpeed?: number;
     showModelName?: boolean;
+    ambientLightIntensity?: number;
+    directionalLightIntensity?: number;
     widgetEnabled?: boolean;
     storageMode?: 'server' | 'local' | 'hybrid';
     enableArucoDetection?: boolean;
@@ -155,89 +156,6 @@ function UploadModelDialog({
   );
 }
 
-type ReplaceModelState = {
-  success?: boolean;
-  error?: string;
-  message?: string;
-  newUrl?: string;
-};
-
-function ReplaceModelDialog({ 
-  modelId,
-  viewerId,
-  modelName,
-  onSuccess 
-}: { 
-  modelId: string;
-  viewerId: string;
-  modelName: string;
-  onSuccess: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [state, action, isPending] = useActionState<ReplaceModelState, FormData>(
-    replaceModelFileAction,
-    {}
-  );
-
-  useEffect(() => {
-    if (state.success) {
-      setOpen(false);
-      onSuccess();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.success]);
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" title="Replace 3D Model File">
-          <RefreshCw className="h-4 w-4" />
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Replace 3D Model File</DialogTitle>
-          <DialogDescription>
-            Replace the 3D model file for &quot;{modelName}&quot;. All existing data (textures, QR codes, links) will be preserved.
-          </DialogDescription>
-        </DialogHeader>
-        <form action={action} className="space-y-4">
-          <input type="hidden" name="modelId" value={modelId} />
-          <input type="hidden" name="viewerId" value={viewerId} />
-
-          <div className="space-y-2">
-            <Label htmlFor="modelFile">New 3D Model File</Label>
-            <Input
-              id="modelFile"
-              name="modelFile"
-              type="file"
-              accept=".glb,.gltf,.obj"
-              required
-            />
-            <p className="text-xs text-gray-500">Supported formats: GLB, GLTF, OBJ (max 50MB)</p>
-          </div>
-
-          {state.error && (
-            <div className="p-3 text-sm text-red-600 bg-red-50 rounded-md">
-              {state.error}
-            </div>
-          )}
-
-          {state.success && (
-            <div className="p-3 text-sm text-green-600 bg-green-50 rounded-md">
-              {state.message}
-            </div>
-          )}
-
-          <Button type="submit" className="w-full" disabled={isPending}>
-            {isPending ? 'Replacing...' : 'Replace Model File'}
-          </Button>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 function ModelManagement({ viewerId, viewerShortCode, viewerName, widgetEnabled, initialModels }: ModelManagementProps) {
   const [models, setModels] = useState<ViewerModelWithTexture[]>(initialModels);
 
@@ -267,7 +185,6 @@ function ModelManagement({ viewerId, viewerShortCode, viewerName, widgetEnabled,
               viewerName={viewerName}
               widgetEnabled={widgetEnabled}
               onDelete={refreshModels}
-              onRefresh={refreshModels}
             />
           ))}
         </div>
@@ -281,15 +198,13 @@ function ModelCard({
   viewerId,
   viewerName,
   widgetEnabled,
-  onDelete,
-  onRefresh
+  onDelete
 }: {
   model: ViewerModelWithTexture;
   viewerId: string;
   viewerName: string;
   widgetEnabled: boolean;
   onDelete: () => void;
-  onRefresh: () => void;
 }) {
   const [showTexturesDialog, setShowTexturesDialog] = useState(false);
   const [showUVMapDialog, setShowUVMapDialog] = useState(false);
@@ -490,23 +405,15 @@ function ModelCard({
                 </div>
               )}
             </div>
-            <div className="flex items-center gap-1">
-              <ReplaceModelDialog
-                modelId={model.id}
-                viewerId={viewerId}
-                modelName={model.name}
-                onSuccess={onRefresh}
-              />
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                onClick={handleDeleteModel}
-                disabled={isDeleting}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-red-500 hover:text-red-700 hover:bg-red-50"
+              onClick={handleDeleteModel}
+              disabled={isDeleting}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
           </div>
 
           {shortLink && (
@@ -945,12 +852,13 @@ export default function ViewerDetailPage({ params }: { params: Promise<{ viewerI
                 rotationSpeed={viewer.settings.rotationSpeed}
                 backgroundColor={viewer.settings.backgroundColor}
                 showModelName={viewer.settings.showModelName}
+                ambientLightIntensity={viewer.settings.ambientLightIntensity}
+                directionalLightIntensity={viewer.settings.directionalLightIntensity}
                 widgetEnabled={viewer.settings.widgetEnabled}
                 storageMode={viewer.settings.storageMode}
                 enableArucoDetection={viewer.settings.enableArucoDetection}
                 defaultModelId={viewer.settings.defaultModelId}
                 models={models}
-                onSave={() => window.location.reload()}
                 currentPin={currentPin}
                 onGeneratePin={async () => {
                   const formData = new FormData();

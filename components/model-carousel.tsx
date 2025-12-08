@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, PerspectiveCamera, Environment } from '@react-three/drei';
+import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import type { ViewerModelWithTexture, DisplayModeSettings, TextureCyclingSettings, ViewerModelWithAllTextures, ModelTexturePair } from '@/lib/types/viewer';
 import { Maximize, Play } from 'lucide-react';
 import { Model3D, Model3DHandle } from './model-3d';
@@ -16,6 +16,8 @@ interface ModelCarouselProps {
   textureCycling?: TextureCyclingSettings;
   viewerId?: string; // Required for fetching all textures
   logoUrl?: string | null; // Logo to display in bottom-right corner
+  ambientLightIntensity?: number; // Ambient light intensity (default: 0.6)
+  directionalLightIntensity?: number; // Directional light intensity (default: 0.8)
 }
 
 type DisplayMode = 'standard' | 'new-upload' | 'showcase' | 'detailed';
@@ -33,7 +35,9 @@ export function ModelCarousel({
   displayModes,
   textureCycling,
   viewerId,
-  logoUrl
+  logoUrl,
+  ambientLightIntensity = 0.6,
+  directionalLightIntensity = 0.8
 }: ModelCarouselProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [sortedModels, setSortedModels] = useState<ViewerModelWithTexture[]>([]);
@@ -46,6 +50,7 @@ export function ModelCarousel({
   const [newTextureIds, setNewTextureIds] = useState<Set<string>>(new Set());
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
+  const [isModelLoading, setIsModelLoading] = useState(true);
   const pauseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const showcaseModeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const queueInitializedRef = useRef(false);
@@ -53,7 +58,7 @@ export function ModelCarousel({
   const model3DRef = useRef<Model3DHandle>(null);
   
   // Animation state
-  const [modelHasAnimations, setModelHasAnimations] = useState(false);
+  const [modelHasAnimations, setModelHasAnimations] = useState(false);;
   const [modelIsPlaying, setModelIsPlaying] = useState(false);
 
   // Default settings (museum-optimized) - memoized to prevent infinite loops
@@ -544,13 +549,52 @@ export function ModelCarousel({
 
   return (
     <div className="w-full h-full relative" style={{ backgroundColor }}>
-      <Canvas>
-        <PerspectiveCamera makeDefault position={[0, 0, 5]} />
+      <Canvas shadows>
+        <PerspectiveCamera makeDefault position={[0, 0, 8]} />
         
-        {/* Lighting - Ambient + Left/Right */}
-        <ambientLight intensity={0.6} />
-        <directionalLight position={[-5, 2, 2]} intensity={0.8} /> {/* Left light */}
-        <directionalLight position={[5, 2, 2]} intensity={0.8} />  {/* Right light */}
+        {/* Simple ambient light */}
+        <ambientLight />
+        
+        {/* Hemisphere light - sky/ground illumination */}
+        <hemisphereLight 
+          args={[0xffffff, 0x444444, ambientLightIntensity * 3]} 
+        />
+        
+        {/* Key light - soft spotlight with penumbra for diffused edges */}
+        <spotLight 
+          position={[20, 30, 20]} 
+          intensity={directionalLightIntensity * 3}
+          angle={0.6}
+          penumbra={1}
+          decay={0}
+        />
+        
+        {/* Fill light - soft from front-left */}
+        <spotLight 
+          position={[-20, 20, 20]} 
+          intensity={directionalLightIntensity * 2}
+          angle={0.6}
+          penumbra={1}
+          decay={0}
+        />
+        
+        {/* Back light - soft illumination from back */}
+        <spotLight 
+          position={[0, 10, -30]} 
+          intensity={directionalLightIntensity * 2}
+          angle={0.6}
+          penumbra={1}
+          decay={0}
+        />
+        
+        {/* Bottom fill light - soft from below */}
+        <spotLight 
+          position={[0, -20, 10]} 
+          intensity={directionalLightIntensity * 1.5}
+          angle={0.8}
+          penumbra={1}
+          decay={0}
+        />
         
         {/* 3D Model */}
         <Model3D 
@@ -561,6 +605,7 @@ export function ModelCarousel({
           modelId={currentModel.id}
           textureId={textureId}
           onAnimationStateChange={handleAnimationStateChange}
+          onLoadingChange={setIsModelLoading}
         />
         
         {/* Camera controls (optional - can disable for pure auto-rotation) */}
@@ -568,10 +613,17 @@ export function ModelCarousel({
           enableZoom={true}
           enablePan={false}
           autoRotate={false}
-          minDistance={2}
-          maxDistance={10}
+          minDistance={3}
+          maxDistance={20}
         />
       </Canvas>
+
+      {/* Loading spinner overlay */}
+      {isModelLoading && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="w-16 h-16 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+        </div>
+      )}
       
       {/* Highlight effect for new uploads */}
       {isHighlighted && settings.newUploadMode.highlightEffect !== 'none' && (

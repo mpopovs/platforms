@@ -12,6 +12,7 @@ export interface Model3DHandle {
   playAnimation: () => void;
   hasAnimations: boolean;
   isPlaying: boolean;
+  isLoading: boolean;
 }
 
 interface Model3DProps {
@@ -21,6 +22,7 @@ interface Model3DProps {
   modelId?: string;
   textureId?: string;
   onAnimationStateChange?: (hasAnimations: boolean, isPlaying: boolean) => void;
+  onLoadingChange?: (isLoading: boolean) => void;
 }
 
 /**
@@ -34,7 +36,8 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
   rotationSpeed = 0.5,
   modelId = '',
   textureId = '',
-  onAnimationStateChange
+  onAnimationStateChange,
+  onLoadingChange
 }, ref) => {
   const meshRef = useRef<THREE.Group>(null);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
@@ -45,6 +48,7 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
   const [hasAnimations, setHasAnimations] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Play animation function
   const playAnimation = useCallback(() => {
@@ -70,8 +74,16 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
   useImperativeHandle(ref, () => ({
     playAnimation,
     hasAnimations,
-    isPlaying
-  }), [playAnimation, hasAnimations, isPlaying]);
+    isPlaying,
+    isLoading
+  }), [playAnimation, hasAnimations, isPlaying, isLoading]);
+
+  // Notify parent of loading state changes
+  useEffect(() => {
+    if (onLoadingChange) {
+      onLoadingChange(isLoading);
+    }
+  }, [isLoading, onLoadingChange]);
 
   // Notify parent of animation state changes
   useEffect(() => {
@@ -301,6 +313,23 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
     }
   }, [model, texture]);
 
+  // Configure material for proper lighting response
+  useEffect(() => {
+    if (model) {
+      model.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          if (child.material) {
+            const material = child.material as THREE.MeshStandardMaterial;
+            // Ensure material responds to all light types
+            material.metalness = 0;
+            material.roughness = 0.8;
+            material.needsUpdate = true;
+          }
+        }
+      });
+    }
+  }, [model]);
+
   // Animation and rotation update in render loop
   useFrame((state, delta) => {
     if (meshRef.current) {
@@ -324,13 +353,14 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
     }
   }, [hasAnimations, model, playAnimation]);
 
+  // Update loading state when model is loaded
+  useEffect(() => {
+    setIsLoading(!model);
+  }, [model]);
+
   if (!model) {
-    return (
-      <mesh>
-        <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial color="#cccccc" />
-      </mesh>
-    );
+    // Return null instead of placeholder - parent will show spinner
+    return null;
   }
 
   return <primitive ref={meshRef} object={model} scale={1} />;

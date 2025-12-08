@@ -189,6 +189,8 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
           textureCycling={settings.textureCycling}
           viewerId={viewerId}
           logoUrl={config.logo_url}
+          ambientLightIntensity={settings.ambientLightIntensity}
+          directionalLightIntensity={settings.directionalLightIntensity}
         />
       </div>
     );
