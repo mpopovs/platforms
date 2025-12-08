@@ -729,7 +729,7 @@
       this.models = [];
       this.displayModels = []; // Models to actually display (filtered based on textures)
       this.currentModelIndex = 0;
-      this.currentTextureIndex = 0; // Index for cycling through textures on current model
+      this.currentItemIndex = 0; // Index for unified navigation through all items
       this.localTextures = new Map(); // modelId -> textures[]
       this.hasAnyTextures = false; // Track if any textures have been uploaded
 
@@ -903,59 +903,85 @@
       this.uploadButton.onclick = () => this.showUploadDialog();
       this.container.appendChild(this.uploadButton);
 
-      // Texture navigation (prev/next buttons for cycling textures)
-      this.textureNavContainer = document.createElement("div");
-      this.textureNavContainer.style.cssText = `
+      // Unified navigation (prev/next buttons for cycling through all textures across models)
+      this.navContainer = document.createElement("div");
+      this.navContainer.style.cssText = `
         position: absolute;
-        bottom: 80px;
-        right: 20px;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
         display: none;
         align-items: center;
         gap: 10px;
         z-index: 100;
       `;
 
-      this.prevTextureBtn = document.createElement("button");
-      this.prevTextureBtn.innerHTML = "◀";
-      this.prevTextureBtn.style.cssText = `
-        padding: 8px 12px;
+      this.prevBtn = document.createElement("button");
+      this.prevBtn.innerHTML = "◀";
+      this.prevBtn.title = "Previous";
+      this.prevBtn.style.cssText = `
+        padding: 10px 14px;
         background: rgba(255, 255, 255, 0.9);
         color: #333;
         border: none;
-        border-radius: 6px;
-        font-size: 14px;
+        border-radius: 8px;
+        font-size: 16px;
         cursor: pointer;
         transition: background 0.2s;
       `;
-      this.prevTextureBtn.onclick = () => this.switchTexture(-1);
+      this.prevBtn.onclick = () => this.switchItem(-1);
 
-      this.textureIndicator = document.createElement("span");
-      this.textureIndicator.style.cssText = `
+      this.navIndicator = document.createElement("span");
+      this.navIndicator.style.cssText = `
         color: white;
         font-size: 14px;
         text-shadow: 0 1px 3px rgba(0,0,0,0.5);
-        min-width: 60px;
+        min-width: 70px;
         text-align: center;
       `;
 
-      this.nextTextureBtn = document.createElement("button");
-      this.nextTextureBtn.innerHTML = "▶";
-      this.nextTextureBtn.style.cssText = `
-        padding: 8px 12px;
+      this.nextBtn = document.createElement("button");
+      this.nextBtn.innerHTML = "▶";
+      this.nextBtn.title = "Next";
+      this.nextBtn.style.cssText = `
+        padding: 10px 14px;
         background: rgba(255, 255, 255, 0.9);
         color: #333;
         border: none;
-        border-radius: 6px;
-        font-size: 14px;
+        border-radius: 8px;
+        font-size: 16px;
         cursor: pointer;
         transition: background 0.2s;
       `;
-      this.nextTextureBtn.onclick = () => this.switchTexture(1);
+      this.nextBtn.onclick = () => this.switchItem(1);
 
-      this.textureNavContainer.appendChild(this.prevTextureBtn);
-      this.textureNavContainer.appendChild(this.textureIndicator);
-      this.textureNavContainer.appendChild(this.nextTextureBtn);
-      this.container.appendChild(this.textureNavContainer);
+      this.navContainer.appendChild(this.prevBtn);
+      this.navContainer.appendChild(this.navIndicator);
+      this.navContainer.appendChild(this.nextBtn);
+      this.container.appendChild(this.navContainer);
+
+      // Auto-circulation pause/play button (bottom left)
+      this.autoCycleBtn = document.createElement("button");
+      this.autoCycleBtn.innerHTML = "⏸";
+      this.autoCycleBtn.title = "Pause auto-rotation";
+      this.autoCyclePaused = false;
+      this.autoCycleBtn.style.cssText = `
+        position: absolute;
+        bottom: 20px;
+        left: 20px;
+        display: none;
+        padding: 10px 14px;
+        background: rgba(255, 255, 255, 0.9);
+        color: #333;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        cursor: pointer;
+        transition: background 0.2s;
+        z-index: 100;
+      `;
+      this.autoCycleBtn.onclick = () => this.toggleAutoCycle();
+      this.container.appendChild(this.autoCycleBtn);
 
       // Logo (if present)
       if (this.viewerConfig?.logoUrl) {
@@ -993,76 +1019,162 @@
       }
 
       // Update UI based on textures
-      this.updateTextureUI();
+      this.currentItemIndex = 0;
+      this.updateNavUI();
     }
 
-    updateTextureUI() {
-      // Show/hide texture navigation
-      const currentModel = this.displayModels[this.currentModelIndex];
-      if (currentModel && this.textureNavContainer) {
-        const textures = this.localTextures.get(currentModel.id) || [];
-        if (textures.length > 1) {
-          this.textureNavContainer.style.display = "flex";
-          this.currentTextureIndex = this.currentTextureIndex || 0;
-          this.textureIndicator.textContent = `${
-            this.currentTextureIndex + 1
-          } / ${textures.length}`;
+    updateNavUI() {
+      // Build flat list of all items (model + texture combinations)
+      this.allItems = [];
+      for (const model of this.displayModels) {
+        const textures = this.localTextures.get(model.id) || [];
+        if (textures.length > 0) {
+          // Sort textures by upload date (newest first)
+          const sortedTextures = [...textures].sort(
+            (a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)
+          );
+          for (const tex of sortedTextures) {
+            this.allItems.push({ model, texture: tex });
+          }
         } else {
-          this.textureNavContainer.style.display = "none";
+          // Model without textures (shouldn't happen in displayModels, but fallback)
+          this.allItems.push({ model, texture: null });
+        }
+      }
+
+      // Show navigation if there are multiple items
+      if (this.navContainer) {
+        if (this.allItems.length > 1) {
+          this.navContainer.style.display = "flex";
+          this.navIndicator.textContent = `${this.currentItemIndex + 1} / ${this.allItems.length}`;
+          
+          // Also show the auto-cycle button
+          if (this.autoCycleBtn) {
+            this.autoCycleBtn.style.display = "block";
+          }
+        } else {
+          this.navContainer.style.display = "none";
+          if (this.autoCycleBtn) {
+            this.autoCycleBtn.style.display = "none";
+          }
         }
       }
     }
 
-    async switchTexture(direction) {
-      const currentModel = this.displayModels[this.currentModelIndex];
-      if (!currentModel) return;
+    async switchItem(direction) {
+      if (!this.allItems || this.allItems.length <= 1) return;
 
-      const textures = this.localTextures.get(currentModel.id) || [];
-      if (textures.length <= 1) return;
+      // Pause auto-cycle when manually switching
+      if (!this.autoCyclePaused && this.displayCycleInterval) {
+        this.toggleAutoCycle();
+      }
 
-      // Sort textures by upload date (newest first)
-      const sortedTextures = [...textures].sort(
-        (a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)
-      );
+      this.currentItemIndex = this.currentItemIndex || 0;
+      this.currentItemIndex =
+        (this.currentItemIndex + direction + this.allItems.length) %
+        this.allItems.length;
 
-      this.currentTextureIndex = this.currentTextureIndex || 0;
-      this.currentTextureIndex =
-        (this.currentTextureIndex + direction + sortedTextures.length) %
-        sortedTextures.length;
+      const item = this.allItems[this.currentItemIndex];
+      const needModelSwitch = this.displayModels[this.currentModelIndex]?.id !== item.model.id;
 
-      // Apply the selected texture
-      const selectedTexture = sortedTextures[this.currentTextureIndex];
-      if (selectedTexture && this.currentModel) {
-        const textureLoader = new THREE.TextureLoader();
-        try {
-          const texture = await new Promise((resolve, reject) => {
-            textureLoader.load(
-              selectedTexture.dataUrl,
-              resolve,
-              undefined,
-              reject
-            );
-          });
+      if (needModelSwitch) {
+        // Find the model index
+        this.currentModelIndex = this.displayModels.findIndex(m => m.id === item.model.id);
+        await this.loadModelWithTexture(item.model, item.texture);
+      } else {
+        // Just apply the texture
+        await this.applyTextureFromItem(item.texture);
+      }
 
-          texture.flipY = false;
-          texture.colorSpace = THREE.SRGBColorSpace;
+      // Update indicator
+      this.navIndicator.textContent = `${this.currentItemIndex + 1} / ${this.allItems.length}`;
+    }
 
-          this.currentModel.traverse((child) => {
-            if (child.isMesh) {
-              child.material.map = texture;
-              // Set color to white so texture displays without color tinting
-              if (child.material.color) {
-                child.material.color.setHex(0xffffff);
-              }
-              child.material.needsUpdate = true;
+    async loadModelWithTexture(modelData, textureItem) {
+      if (this.currentModel) {
+        this.threeScene.remove(this.currentModel);
+      }
+
+      if (this.modelNameDisplay) {
+        this.modelNameDisplay.textContent = modelData.name;
+      }
+
+      const loader = new THREE.GLTFLoader();
+
+      try {
+        const gltf = await new Promise((resolve, reject) => {
+          loader.load(modelData.model_file_url, resolve, undefined, reject);
+        });
+
+        this.currentModel = gltf.scene;
+
+        // Center and scale model
+        const box = new THREE.Box3().setFromObject(this.currentModel);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+        let scale = 2 / maxDim;
+
+        this.currentModel.scale.setScalar(scale);
+        this.currentModel.position.sub(center.multiplyScalar(scale));
+
+        // Apply specific texture
+        if (textureItem) {
+          await this.applyTextureFromItem(textureItem);
+        }
+
+        this.threeScene.add(this.currentModel);
+      } catch (error) {
+        console.error("Failed to load model:", error);
+      }
+    }
+
+    async applyTextureFromItem(textureItem) {
+      if (!textureItem || !this.currentModel) return;
+
+      const textureLoader = new THREE.TextureLoader();
+      try {
+        const texture = await new Promise((resolve, reject) => {
+          textureLoader.load(
+            textureItem.dataUrl,
+            resolve,
+            undefined,
+            reject
+          );
+        });
+
+        texture.flipY = false;
+        texture.colorSpace = THREE.SRGBColorSpace;
+
+        this.currentModel.traverse((child) => {
+          if (child.isMesh) {
+            child.material.map = texture;
+            if (child.material.color) {
+              child.material.color.setHex(0xffffff);
             }
-          });
+            child.material.needsUpdate = true;
+          }
+        });
+      } catch (error) {
+        console.error("Failed to apply texture:", error);
+      }
+    }
 
-          this.textureIndicator.textContent = `${
-            this.currentTextureIndex + 1
-          } / ${sortedTextures.length}`;
-        } catch (error) {
-          console.error("Failed to switch texture:", error);
+    toggleAutoCycle() {
+      if (this.autoCyclePaused) {
+        // Resume auto-cycle
+        this.autoCyclePaused = false;
+        this.autoCycleBtn.innerHTML = "⏸";
+        this.autoCycleBtn.title = "Pause auto-rotation";
+        this.startDisplayCycle();
+      } else {
+        // Pause auto-cycle
+        this.autoCyclePaused = true;
+        this.autoCycleBtn.innerHTML = "▶";
+        this.autoCycleBtn.title = "Resume auto-rotation";
+        if (this.displayCycleInterval) {
+          clearInterval(this.displayCycleInterval);
+          this.displayCycleInterval = null;
         }
       }
     }
@@ -1299,7 +1411,6 @@
       if (this.modelNameDisplay) {
         this.modelNameDisplay.textContent = modelData.name;
       }
-      this.currentTextureIndex = 0; // Reset texture index when loading new model
 
       const loader = new THREE.GLTFLoader();
 
@@ -1330,8 +1441,8 @@
 
         this.threeScene.add(this.currentModel);
 
-        // Update texture navigation UI
-        this.updateTextureUI();
+        // Update navigation UI
+        this.updateNavUI();
       } catch (error) {
         console.error("Failed to load model:", error);
       }
@@ -1415,6 +1526,9 @@
         clearInterval(this.displayCycleInterval);
       }
 
+      // Don't start if paused
+      if (this.autoCyclePaused) return;
+
       // Only cycle if there are multiple display models
       if (this.displayModels.length <= 1) return;
 
@@ -1433,6 +1547,14 @@
       // Check if smart ArUco detection is enabled for this viewer
       const enableArucoDetection =
         this.viewerConfig?.settings?.enableArucoDetection || false;
+
+      // Add spinner animation style if not already present
+      if (!document.getElementById('cp-spinner-style')) {
+        const style = document.createElement('style');
+        style.id = 'cp-spinner-style';
+        style.textContent = '@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }';
+        document.head.appendChild(style);
+      }
 
       // Create modal overlay
       const overlay = document.createElement("div");
@@ -1489,30 +1611,39 @@
       const resetSectionHTML = this.hasAnyTextures
         ? `
         <div style="margin-top:20px;padding-top:20px;border-top:1px solid #eee;text-align:center;">
-          <button id="cp-reset" style="padding:10px 20px;background:transparent;color:#dc3545;border:1px solid #dc3545;border-radius:8px;font-size:14px;cursor:pointer;">🗑️ Clear All My Artwork</button>
+          <button id="cp-reset" style="width:44px;height:44px;background:transparent;color:#dc3545;border:1px solid #dc3545;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;" title="Clear All">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+          </button>
         </div>
       `
         : "";
 
       dialog.innerHTML = `
-        <h2 style="margin:0 0 20px 0;font-size:24px;text-align:center;">📸 Upload Your Art!</h2>
+        <div style="display:flex;justify-content:flex-start;align-items:center;margin-bottom:20px;">
+          <button type="button" id="cp-cancel" style="width:44px;height:44px;background:#f0f0f0;border:none;border-radius:50%;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;" title="Close">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
+          </button>
+        </div>
         
         ${modelSectionHTML}
 
         <div style="margin-bottom:20px;">
-          <label style="display:block;margin-bottom:8px;font-weight:bold;text-align:center;">Take a photo of your painted texture:</label>
-          <input type="file" id="cp-file-input" accept="image/*" capture="environment" style="width:100%;padding:12px;border:2px dashed #3b82f6;border-radius:8px;font-size:16px;box-sizing:border-box;background:#f8fafc;cursor:pointer;" />
+          <label id="cp-select-btn" style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:24px 20px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:white;border:none;border-radius:16px;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(59,130,246,0.3);" title="Select Image">
+            <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+            <span style="font-weight:500;">Select Image</span>
+            <input type="file" id="cp-file-input" accept="image/*" style="display:none;" />
+          </label>
         </div>
 
         <div id="cp-preview" style="display:none;margin-bottom:20px;text-align:center;">
-          <img id="cp-preview-img" style="max-width:100%;max-height:200px;border-radius:8px;" />
-          <p id="cp-status" style="margin-top:10px;color:#666;"></p>
+          <img id="cp-preview-img" style="max-width:100%;max-height:200px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.1);" />
+          <p id="cp-status" style="margin-top:10px;color:#666;font-size:14px;"></p>
         </div>
 
-        <div style="display:flex;gap:10px;">
-          <button id="cp-cancel" style="flex:1;padding:14px;background:#f0f0f0;border:none;border-radius:8px;font-size:16px;cursor:pointer;">Cancel</button>
-          <button id="cp-upload" style="flex:1;padding:14px;background:#3b82f6;color:white;border:none;border-radius:8px;font-size:16px;cursor:pointer;font-weight:bold;" disabled>🎨 Upload</button>
-        </div>
+        <button type="button" id="cp-upload" style="width:100%;padding:16px;background:linear-gradient(135deg,#22c55e,#16a34a);color:white;border:none;border-radius:12px;font-size:16px;cursor:pointer;font-weight:bold;display:none;align-items:center;justify-content:center;gap:8px;box-shadow:0 4px 12px rgba(34,197,94,0.3);">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          Done
+        </button>
         ${resetSectionHTML}
       `;
 
@@ -1529,19 +1660,39 @@
       const modelSelect = dialog.querySelector("#cp-model-select");
       const detectedModelDiv = dialog.querySelector("#cp-detected-model");
       const modelNameSpan = dialog.querySelector("#cp-model-name");
+      const resetBtn = dialog.querySelector("#cp-reset");
 
       let selectedFile = null;
       let processedDataUrl = null;
       let detectedModel = null;
 
-      fileInput.onchange = async (e) => {
+      const selectBtn = dialog.querySelector("#cp-select-btn");
+      const spinnerSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`;
+      const selectBtnOriginalHTML = selectBtn.innerHTML;
+
+      // Handle file selection
+      const handleFileSelect = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
         selectedFile = e.target.files[0];
         if (!selectedFile) return;
 
+        // Show spinner and disable all buttons during processing
+        selectBtn.innerHTML = spinnerSvg + `<span style="font-weight:500;">Processing...</span>`;
+        selectBtn.style.pointerEvents = "none";
+        selectBtn.style.opacity = "0.7";
+        cancelBtn.disabled = true;
+        cancelBtn.style.opacity = "0.5";
+        if (resetBtn) {
+          resetBtn.disabled = true;
+          resetBtn.style.opacity = "0.5";
+        }
+
         preview.style.display = "block";
         previewImg.src = URL.createObjectURL(selectedFile);
-        uploadBtn.disabled = true;
-        detectedModelDiv.style.display = "none";
+        uploadBtn.style.display = "none";
+        if (detectedModelDiv) detectedModelDiv.style.display = "none";
 
         if (enableArucoDetection) {
           // SMART MODE: Auto-detect model from markers + perspective correction
@@ -1566,16 +1717,17 @@
                 modelSelect.value = detectedModel.modelId;
               }
 
-              status.textContent = "✅ Image processed successfully!";
+              status.textContent = "✅ Ready!";
+              uploadBtn.style.display = "flex";
               uploadBtn.disabled = false;
             } else {
               status.textContent =
-                "⚠️ Could not detect markers or identify model. Please ensure all 4 corner markers are visible.";
-              uploadBtn.disabled = true;
+                "⚠️ Could not detect markers. Please ensure all 4 corner markers are visible.";
+              uploadBtn.style.display = "none";
             }
           } catch (error) {
             status.textContent = "❌ Processing failed: " + error.message;
-            uploadBtn.disabled = true;
+            uploadBtn.style.display = "none";
           }
         } else {
           // STANDARD MODE: Perspective correction with manual model selection
@@ -1588,70 +1740,73 @@
             if (result) {
               processedDataUrl = result;
               previewImg.src = processedDataUrl;
-              status.textContent = "✅ Image processed successfully!";
-              uploadBtn.disabled = false;
+              status.textContent = "✅ Ready!";
             } else {
               // If ArUco processing fails, allow upload of original image
-              status.textContent =
-                "⚠️ Could not detect markers. Using original image.";
+              status.textContent = "⚠️ Using original image.";
               processedDataUrl = null;
-              uploadBtn.disabled = false;
             }
+            uploadBtn.style.display = "flex";
+            uploadBtn.disabled = false;
           } catch (error) {
-            status.textContent = "⚠️ Processing failed. Using original image.";
+            status.textContent = "⚠️ Using original image.";
             processedDataUrl = null;
+            uploadBtn.style.display = "flex";
             uploadBtn.disabled = false;
           }
         }
+
+        // Re-enable buttons after processing
+        selectBtn.innerHTML = selectBtnOriginalHTML;
+        selectBtn.style.pointerEvents = "auto";
+        selectBtn.style.opacity = "1";
+        cancelBtn.disabled = false;
+        cancelBtn.style.opacity = "1";
+        if (resetBtn) {
+          resetBtn.disabled = false;
+          resetBtn.style.opacity = "1";
+        }
       };
 
-      cancelBtn.onclick = () => document.body.removeChild(overlay);
+      // Bind the handler to file input
+      fileInput.onchange = handleFileSelect;
+
+      cancelBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        document.body.removeChild(overlay);
+      };
 
       // Reset button handler (only exists if user has textures)
-      const resetBtn = dialog.querySelector("#cp-reset");
       if (resetBtn) {
-        resetBtn.onclick = () => {
+        resetBtn.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
           document.body.removeChild(overlay);
           this.confirmReset();
         };
       }
 
-      uploadBtn.onclick = async () => {
+      uploadBtn.onclick = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
         if (!selectedFile) return;
         // For smart mode, we need detected model; for standard mode, user selects
         if (enableArucoDetection && !detectedModel) return;
 
         uploadBtn.disabled = true;
-        uploadBtn.textContent = "Uploading...";
+        uploadBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`;
 
         try {
           // In smart mode, use detected model; in standard mode, use selected model
           const modelId =
             enableArucoDetection && detectedModel
               ? detectedModel.modelId
-              : dialog.querySelector("#cp-model-select").value;
+              : dialog.querySelector("#cp-model-select")?.value || this.models[0]?.id;
 
-          // Upload original to server
-          const formData = new FormData();
-          formData.append("file", selectedFile);
-          formData.append("viewerId", this.viewerId);
-          formData.append("modelId", modelId);
-          formData.append("processedLocally", "true"); // Always process locally with ArUco
-
-          const response = await fetch(`${API_BASE}/api/widget/upload`, {
-            method: "POST",
-            body: formData,
-          });
-
-          const result = await response.json();
-
-          if (!response.ok) {
-            throw new Error(result.error || "Upload failed");
-          }
-
-          // For ArUco mode, save processed texture locally
-          // For simple mode, use the original image URL from response or create data URL
-          const textureId = result.textureId || `local_${Date.now()}`;
+          // Generate local texture ID
+          const textureId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
           // Get texture data URL - either processed (ArUco) or from original file (simple mode)
           let textureDataUrl = processedDataUrl;
@@ -1688,8 +1843,8 @@
           const hadTextures = this.hasAnyTextures;
           this.updateDisplayModels();
 
-          // Update UI (show reset button, texture nav)
-          this.updateTextureUI();
+          // Update UI (show reset button, nav)
+          this.updateNavUI();
 
           // If this is the first texture upload, restart the display cycle
           if (!hadTextures && this.hasAnyTextures) {
@@ -1709,8 +1864,8 @@
             const currentModelData = this.displayModels[this.currentModelIndex];
             if (currentModelData && currentModelData.id === modelId) {
               await this.applyTexture(currentModelData);
-              // Update texture nav after applying
-              this.updateTextureUI();
+              // Update nav after applying
+              this.updateNavUI();
             } else {
               // Switch to the model that just got a texture
               const modelWithNewTexture = this.displayModels.find(
@@ -1759,11 +1914,11 @@
     async clearLocalTextures() {
       await clearTexturesForViewer(this.viewerId);
       this.localTextures.clear();
-      this.currentTextureIndex = 0;
+      this.currentItemIndex = 0;
       this.updateDisplayModels();
 
       // Update UI elements
-      this.updateTextureUI();
+      this.updateNavUI();
 
       // Reload the default model
       if (this.displayModels.length > 0) {
