@@ -223,19 +223,19 @@ export function ModelCarousel({
       previousNewest.latest_texture?.uploaded_at !== newNewest.latest_texture?.uploaded_at;
 
     if (hasChanged) {
-      if (previousNewest && newNewest && previousNewest.id !== newNewest.id) {
-        // Jump to the new texture immediately
-        setCurrentIndex(0);
-      } else if (previousNewest && newNewest && previousNewest.id === newNewest.id) {
-        // Check if texture was updated for the same model
-        const prevTextureTime = previousNewest.latest_texture?.uploaded_at;
-        const newTextureTime = newNewest.latest_texture?.uploaded_at;
-        if (prevTextureTime !== newTextureTime) {
+      setSortedModels(sorted);
+      
+      // If there's a texture update (new or changed), jump to that model
+      if (previousNewest && newNewest) {
+        const hasNewTexture = previousNewest.id !== newNewest.id;
+        const hasUpdatedTexture = previousNewest.id === newNewest.id && 
+          previousNewest.latest_texture?.uploaded_at !== newNewest.latest_texture?.uploaded_at;
+        
+        if (hasNewTexture || hasUpdatedTexture) {
+          // Always jump to the newest texture (index 0 in sorted array)
           setCurrentIndex(0);
         }
       }
-
-      setSortedModels(sorted);
     }
   }, [models]);
 

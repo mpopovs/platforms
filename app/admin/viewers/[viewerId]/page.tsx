@@ -871,7 +871,6 @@ export default function ViewerDetailPage({ params }: { params: Promise<{ viewerI
                   const formData = new FormData();
                   formData.append('viewerId', viewer.id);
                   await generateEmbedTokenAction({}, formData);
-                  window.location.reload();
                 }}
                 embedCode={embedCode}
               />

@@ -56,6 +56,67 @@
   let cvReady = false;
 
   // ============================================
+  // Confetti Celebration Effect
+  // ============================================
+
+  function celebrateWithConfetti(container) {
+    const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2'];
+    const confettiCount = 100;
+    const confettiElements = [];
+
+    for (let i = 0; i < confettiCount; i++) {
+      const confetti = document.createElement('div');
+      confetti.style.cssText = `
+        position: absolute;
+        width: ${Math.random() * 10 + 5}px;
+        height: ${Math.random() * 10 + 5}px;
+        background-color: ${colors[Math.floor(Math.random() * colors.length)]};
+        top: 50%;
+        left: 50%;
+        opacity: 1;
+        transform: translate(-50%, -50%);
+        border-radius: ${Math.random() > 0.5 ? '50%' : '0'};
+        pointer-events: none;
+        z-index: 10000;
+      `;
+      container.appendChild(confetti);
+      confettiElements.push(confetti);
+
+      // Animate
+      const angle = Math.random() * Math.PI * 2;
+      const velocity = Math.random() * 200 + 100;
+      const vx = Math.cos(angle) * velocity;
+      const vy = Math.sin(angle) * velocity - 200; // Initial upward velocity
+      const gravity = 400;
+      const rotationSpeed = Math.random() * 720 - 360;
+      const startTime = Date.now();
+      const duration = 2000;
+
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = elapsed / duration;
+
+        if (progress >= 1) {
+          confetti.remove();
+          return;
+        }
+
+        const x = vx * progress;
+        const y = vy * progress + 0.5 * gravity * progress * progress;
+        const rotation = rotationSpeed * progress;
+        const opacity = 1 - progress;
+
+        confetti.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) rotate(${rotation}deg)`;
+        confetti.style.opacity = opacity;
+
+        requestAnimationFrame(animate);
+      };
+
+      requestAnimationFrame(animate);
+    }
+  }
+
+  // ============================================
   // IndexedDB Storage for Processed Textures
   // ============================================
 
@@ -815,10 +876,16 @@
       }
 
       if (this.hasAnyTextures) {
-        // User has uploaded textures - show only models with local textures
-        this.displayModels = modelsWithLocalTextures;
+        // User has uploaded textures - sort models by newest texture first
+        this.displayModels = modelsWithLocalTextures.sort((a, b) => {
+          const aTextures = this.localTextures.get(a.id) || [];
+          const bTextures = this.localTextures.get(b.id) || [];
+          const aNewest = aTextures.length > 0 ? Math.max(...aTextures.map(t => new Date(t.uploadedAt).getTime())) : 0;
+          const bNewest = bTextures.length > 0 ? Math.max(...bTextures.map(t => new Date(t.uploadedAt).getTime())) : 0;
+          return bNewest - aNewest; // Newest first
+        });
         console.log(
-          "Showing models with uploaded textures:",
+          "Showing models with uploaded textures (newest first):",
           this.displayModels.map((m) => m.name)
         );
       } else {
@@ -907,8 +974,9 @@
       this.textureNavContainer = document.createElement("div");
       this.textureNavContainer.style.cssText = `
         position: absolute;
-        bottom: 80px;
-        right: 20px;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
         display: none;
         align-items: center;
         gap: 10px;
@@ -997,16 +1065,38 @@
     }
 
     updateTextureUI() {
-      // Show/hide texture navigation
-      const currentModel = this.displayModels[this.currentModelIndex];
-      if (currentModel && this.textureNavContainer) {
-        const textures = this.localTextures.get(currentModel.id) || [];
-        if (textures.length > 1) {
+      // Show/hide texture navigation based on ALL stored textures (across all models)
+      if (this.textureNavContainer) {
+        const totalTextures = this.displayModels.reduce((count, model) => {
+          const textures = this.localTextures.get(model.id) || [];
+          return count + textures.length;
+        }, 0);
+        
+        console.log('[Widget] updateTextureUI - Total textures:', totalTextures);
+        
+        if (totalTextures > 0) {
           this.textureNavContainer.style.display = "flex";
-          this.currentTextureIndex = this.currentTextureIndex || 0;
-          this.textureIndicator.textContent = `${
-            this.currentTextureIndex + 1
-          } / ${textures.length}`;
+          // Calculate current texture's global index
+          let globalIndex = 0;
+          let found = false;
+          for (let i = 0; i < this.displayModels.length; i++) {
+            const model = this.displayModels[i];
+            const textures = this.localTextures.get(model.id) || [];
+            if (i === this.currentModelIndex) {
+              globalIndex += this.currentTextureIndex || 0;
+              found = true;
+              break;
+            }
+            globalIndex += textures.length;
+          }
+          
+          this.textureIndicator.textContent = `${globalIndex + 1} / ${totalTextures}`;
+          
+          // Enable buttons if more than one texture across all models
+          this.prevTextureBtn.disabled = totalTextures <= 1;
+          this.nextTextureBtn.disabled = totalTextures <= 1;
+          this.prevTextureBtn.style.opacity = totalTextures <= 1 ? '0.5' : '1';
+          this.nextTextureBtn.style.opacity = totalTextures <= 1 ? '0.5' : '1';
         } else {
           this.textureNavContainer.style.display = "none";
         }
@@ -1014,56 +1104,93 @@
     }
 
     async switchTexture(direction) {
-      const currentModel = this.displayModels[this.currentModelIndex];
-      if (!currentModel) return;
+      // Navigate through ALL textures across ALL models
+      const totalTextures = this.getTotalTextureCount();
+      if (totalTextures <= 1) return;
 
-      const textures = this.localTextures.get(currentModel.id) || [];
-      if (textures.length <= 1) return;
-
-      // Sort textures by upload date (newest first)
-      const sortedTextures = [...textures].sort(
-        (a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)
-      );
-
-      this.currentTextureIndex = this.currentTextureIndex || 0;
-      this.currentTextureIndex =
-        (this.currentTextureIndex + direction + sortedTextures.length) %
-        sortedTextures.length;
-
-      // Apply the selected texture
-      const selectedTexture = sortedTextures[this.currentTextureIndex];
-      if (selectedTexture && this.currentModel) {
-        const textureLoader = new THREE.TextureLoader();
-        try {
-          const texture = await new Promise((resolve, reject) => {
-            textureLoader.load(
-              selectedTexture.dataUrl,
-              resolve,
-              undefined,
-              reject
-            );
-          });
-
-          texture.flipY = false;
-          texture.colorSpace = THREE.SRGBColorSpace;
-
-          this.currentModel.traverse((child) => {
-            if (child.isMesh) {
-              child.material.map = texture;
-              // Set color to white so texture displays without color tinting
-              if (child.material.color) {
-                child.material.color.setHex(0xffffff);
-              }
-              child.material.needsUpdate = true;
-            }
-          });
-
-          this.textureIndicator.textContent = `${
-            this.currentTextureIndex + 1
-          } / ${sortedTextures.length}`;
-        } catch (error) {
-          console.error("Failed to switch texture:", error);
+      const currentGlobalIndex = this.getCurrentGlobalTextureIndex();
+      const nextGlobalIndex = (currentGlobalIndex + direction + totalTextures) % totalTextures;
+      
+      await this.loadTextureByGlobalIndex(nextGlobalIndex);
+    }
+    
+    getTotalTextureCount() {
+      return this.displayModels.reduce((count, model) => {
+        const textures = this.localTextures.get(model.id) || [];
+        return count + textures.length;
+      }, 0);
+    }
+    
+    getCurrentGlobalTextureIndex() {
+      let globalIndex = 0;
+      for (let i = 0; i < this.displayModels.length; i++) {
+        const model = this.displayModels[i];
+        const textures = this.localTextures.get(model.id) || [];
+        if (i === this.currentModelIndex) {
+          globalIndex += this.currentTextureIndex || 0;
+          break;
         }
+        globalIndex += textures.length;
+      }
+      return globalIndex;
+    }
+    
+    async loadTextureByGlobalIndex(globalIndex) {
+      let currentIndex = 0;
+      for (let i = 0; i < this.displayModels.length; i++) {
+        const model = this.displayModels[i];
+        const textures = this.localTextures.get(model.id) || [];
+        
+        if (globalIndex < currentIndex + textures.length) {
+          // Found the model and texture
+          const localTextureIndex = globalIndex - currentIndex;
+          
+          // Switch model if needed
+          if (i !== this.currentModelIndex) {
+            this.currentModelIndex = i;
+            await this.loadModel(model);
+          }
+          
+          // Apply texture
+          this.currentTextureIndex = localTextureIndex;
+          const sortedTextures = [...textures].sort(
+            (a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)
+          );
+          const selectedTexture = sortedTextures[localTextureIndex];
+          
+          if (selectedTexture && this.currentModel) {
+            const textureLoader = new THREE.TextureLoader();
+            try {
+              const texture = await new Promise((resolve, reject) => {
+                textureLoader.load(
+                  selectedTexture.dataUrl,
+                  resolve,
+                  undefined,
+                  reject
+                );
+              });
+
+              texture.flipY = false;
+              texture.colorSpace = THREE.SRGBColorSpace;
+
+              this.currentModel.traverse((child) => {
+                if (child.isMesh) {
+                  child.material.map = texture;
+                  if (child.material.color) {
+                    child.material.color.setHex(0xffffff);
+                  }
+                  child.material.needsUpdate = true;
+                }
+              });
+
+              this.updateTextureUI();
+            } catch (error) {
+              console.error("Failed to load texture:", error);
+            }
+          }
+          break;
+        }
+        currentIndex += textures.length;
       }
     }
 
@@ -1163,13 +1290,56 @@
       rightLight.position.set(5, 2, 2);
       this.threeScene.add(rightLight);
 
-      // Controls
-      if (typeof THREE.OrbitControls !== "undefined") {
-        this.controls = new THREE.OrbitControls(
+      // Controls - TrackballControls for smooth unlimited rotation
+      if (typeof THREE.TrackballControls !== "undefined") {
+        this.controls = new THREE.TrackballControls(
           this.threeCamera,
           this.threeRenderer.domElement
         );
-        this.controls.enableDamping = true;
+        this.controls.rotateSpeed = 2.5; // Responsive but smooth
+        this.controls.zoomSpeed = 1.2;
+        this.controls.panSpeed = 0.8;
+        this.controls.noZoom = false;
+        this.controls.noPan = false;
+        this.controls.staticMoving = false; // Enable inertia/momentum
+        this.controls.dynamicDampingFactor = 0.08; // Low value = more momentum, natural deceleration
+        this.controls.minDistance = 0.5; // Allow close zoom in
+        this.controls.maxDistance = 10; // Farthest zoom (limit zoom out)
+        
+        // Track user interaction
+        this.isUserInteracting = false;
+        this.lastInteractionTime = 0;
+        this.isMouseDown = false;
+        
+        const startInteraction = () => {
+          this.isUserInteracting = true;
+          this.isMouseDown = true;
+        };
+        
+        const endInteraction = () => {
+          this.isUserInteracting = false;
+          this.isMouseDown = false;
+          this.lastInteractionTime = Date.now();
+        };
+        
+        const onMove = () => {
+          if (this.isMouseDown) {
+            this.isUserInteracting = true;
+            this.lastInteractionTime = Date.now();
+          }
+        };
+        
+        this.threeRenderer.domElement.addEventListener('mousedown', startInteraction);
+        this.threeRenderer.domElement.addEventListener('mouseup', endInteraction);
+        this.threeRenderer.domElement.addEventListener('mousemove', onMove);
+        this.threeRenderer.domElement.addEventListener('touchstart', startInteraction);
+        this.threeRenderer.domElement.addEventListener('touchend', endInteraction);
+        this.threeRenderer.domElement.addEventListener('touchmove', onMove);
+        
+        // Also listen to control change events
+        this.controls.addEventListener('change', () => {
+          this.lastInteractionTime = Date.now();
+        });
       }
 
       // Handle resize
@@ -1230,7 +1400,7 @@
         // Check if already loaded
         if (
           typeof THREE.GLTFLoader !== "undefined" &&
-          typeof THREE.OrbitControls !== "undefined"
+          typeof THREE.TrackballControls !== "undefined"
         ) {
           resolve();
           return;
@@ -1263,14 +1433,14 @@
           });
         };
 
-        const loadOrbitControls = () => {
-          if (typeof THREE.OrbitControls !== "undefined") {
+        const loadTrackballControls = () => {
+          if (typeof THREE.TrackballControls !== "undefined") {
             return Promise.resolve();
           }
           return new Promise((res, rej) => {
-            if (document.querySelector('script[src*="OrbitControls.js"]')) {
+            if (document.querySelector('script[src*="TrackballControls.js"]')) {
               const wait = setInterval(() => {
-                if (typeof THREE.OrbitControls !== "undefined") {
+                if (typeof THREE.TrackballControls !== "undefined") {
                   clearInterval(wait);
                   res();
                 }
@@ -1283,14 +1453,14 @@
             }
             const controlsScript = document.createElement("script");
             controlsScript.src =
-              "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js";
+              "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TrackballControls.js";
             controlsScript.onload = res;
             controlsScript.onerror = rej;
             document.head.appendChild(controlsScript);
           });
         };
 
-        loadGLTFLoader().then(loadOrbitControls).then(resolve).catch(reject);
+        loadGLTFLoader().then(loadTrackballControls).then(resolve).catch(reject);
       });
     }
 
@@ -1390,10 +1560,15 @@
     animate() {
       requestAnimationFrame(() => this.animate());
 
-      // Auto-rotate model
-      if (this.currentModel) {
-        const speed = this.viewerConfig?.settings?.rotationSpeed || 0.5;
-        this.currentModel.rotation.y += speed * 0.01;
+      // Auto-rotate model on multiple axes when not being manually controlled
+      if (this.currentModel && !this.isUserInteracting) {
+        // Resume auto-rotation 1 second after user stops interacting
+        const timeSinceInteraction = Date.now() - this.lastInteractionTime;
+        if (timeSinceInteraction > 1000 || this.lastInteractionTime === 0) {
+          const speed = this.viewerConfig?.settings?.rotationSpeed || 0.5;
+          this.currentModel.rotation.y += speed * 0.01; // Horizontal spin
+          this.currentModel.rotation.x += speed * 0.005; // Slight tilt for dynamic look
+        }
       }
 
       if (this.controls) {
@@ -1413,23 +1588,11 @@
     }
 
     startDisplayCycle() {
+      // Auto-cycling disabled - widget now only displays the most recent texture
       // Clear any existing cycle
       if (this.displayCycleInterval) {
         clearInterval(this.displayCycleInterval);
       }
-
-      // Only cycle if there are multiple display models
-      if (this.displayModels.length <= 1) return;
-
-      const duration =
-        (this.viewerConfig?.settings?.textureCycling?.standardDisplayDuration ||
-          5) * 1000;
-
-      this.displayCycleInterval = setInterval(() => {
-        this.currentModelIndex =
-          (this.currentModelIndex + 1) % this.displayModels.length;
-        this.loadModel(this.displayModels[this.currentModelIndex]);
-      }, duration);
     }
 
     showUploadDialog() {
@@ -1694,38 +1857,24 @@
           // Update UI (show reset button, texture nav)
           this.updateTextureUI();
 
+          // Always switch to and load the model that just got a texture
+          const modelWithNewTexture = this.displayModels.find(
+            (m) => m.id === modelId
+          );
+          if (modelWithNewTexture) {
+            this.currentModelIndex =
+              this.displayModels.indexOf(modelWithNewTexture);
+            // Always load the model to ensure texture is applied correctly
+            await this.loadModel(modelWithNewTexture);
+          }
+
           // If this is the first texture upload, restart the display cycle
           if (!hadTextures && this.hasAnyTextures) {
-            // Find and load the model that just got a texture
-            const modelWithNewTexture = this.displayModels.find(
-              (m) => m.id === modelId
-            );
-            if (modelWithNewTexture) {
-              this.currentModelIndex =
-                this.displayModels.indexOf(modelWithNewTexture);
-              await this.loadModel(modelWithNewTexture);
-            }
-            // Restart cycle with new display models
             this.startDisplayCycle();
-          } else {
-            // Apply texture immediately if it's for current model
-            const currentModelData = this.displayModels[this.currentModelIndex];
-            if (currentModelData && currentModelData.id === modelId) {
-              await this.applyTexture(currentModelData);
-              // Update texture nav after applying
-              this.updateTextureUI();
-            } else {
-              // Switch to the model that just got a texture
-              const modelWithNewTexture = this.displayModels.find(
-                (m) => m.id === modelId
-              );
-              if (modelWithNewTexture) {
-                this.currentModelIndex =
-                  this.displayModels.indexOf(modelWithNewTexture);
-                await this.loadModel(modelWithNewTexture);
-              }
-            }
           }
+
+          // Celebrate first texture upload!
+          celebrateWithConfetti(this.container);
 
           // Callback
           if (this.onTextureUpload) {
