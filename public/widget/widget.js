@@ -1300,7 +1300,7 @@
         this.controls.zoomSpeed = 1.2;
         this.controls.panSpeed = 0.8;
         this.controls.noZoom = false;
-        this.controls.noPan = false;
+        this.controls.noPan = true; // Disable panning to keep object centered
         this.controls.staticMoving = false; // Enable inertia/momentum
         this.controls.dynamicDampingFactor = 0.08; // Low value = more momentum, natural deceleration
         this.controls.minDistance = 0.5; // Allow close zoom in
