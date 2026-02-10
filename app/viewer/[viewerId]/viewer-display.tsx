@@ -152,6 +152,34 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
     return () => clearInterval(interval);
   }, [viewerId]);
 
+  // Handle online event - refetch data when browser reconnects
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log('Browser reconnected, refetching data...');
+      setLoading(true);
+      fetch(`/api/viewer-models/${viewerId}`)
+        .then(response => {
+          if (response.ok) {
+            return response.json();
+          }
+          throw new Error('Failed to reload models');
+        })
+        .then(data => {
+          setModels(data.models || []);
+          setError('');
+          setLoading(false);
+        })
+        .catch(err => {
+          console.error('Error refetching models:', err);
+          setError('Failed to reload 3D models');
+          setLoading(false);
+        });
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [viewerId]);
+
   if (loading) {
     return (
       <div 
