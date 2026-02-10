@@ -50,6 +50,11 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Don't intercept API routes - let them go directly to the network
+  if (url.pathname.startsWith('/api/')) {
+    return;
+  }
+
   // Cache strategy for Supabase Storage URLs (textures and models)
   if (url.hostname.includes('supabase') && 
       (url.pathname.includes('/storage/v1/object/') || url.pathname.includes('/object/public/'))) {
