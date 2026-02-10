@@ -60,12 +60,21 @@
   // ============================================
 
   function celebrateWithConfetti(container) {
-    const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2'];
+    const colors = [
+      "#FF6B6B",
+      "#4ECDC4",
+      "#45B7D1",
+      "#FFA07A",
+      "#98D8C8",
+      "#F7DC6F",
+      "#BB8FCE",
+      "#85C1E2",
+    ];
     const confettiCount = 100;
     const confettiElements = [];
 
     for (let i = 0; i < confettiCount; i++) {
-      const confetti = document.createElement('div');
+      const confetti = document.createElement("div");
       confetti.style.cssText = `
         position: absolute;
         width: ${Math.random() * 10 + 5}px;
@@ -75,7 +84,7 @@
         left: 50%;
         opacity: 1;
         transform: translate(-50%, -50%);
-        border-radius: ${Math.random() > 0.5 ? '50%' : '0'};
+        border-radius: ${Math.random() > 0.5 ? "50%" : "0"};
         pointer-events: none;
         z-index: 10000;
       `;
@@ -880,8 +889,18 @@
         this.displayModels = modelsWithLocalTextures.sort((a, b) => {
           const aTextures = this.localTextures.get(a.id) || [];
           const bTextures = this.localTextures.get(b.id) || [];
-          const aNewest = aTextures.length > 0 ? Math.max(...aTextures.map(t => new Date(t.uploadedAt).getTime())) : 0;
-          const bNewest = bTextures.length > 0 ? Math.max(...bTextures.map(t => new Date(t.uploadedAt).getTime())) : 0;
+          const aNewest =
+            aTextures.length > 0
+              ? Math.max(
+                  ...aTextures.map((t) => new Date(t.uploadedAt).getTime())
+                )
+              : 0;
+          const bNewest =
+            bTextures.length > 0
+              ? Math.max(
+                  ...bTextures.map((t) => new Date(t.uploadedAt).getTime())
+                )
+              : 0;
           return bNewest - aNewest; // Newest first
         });
         console.log(
@@ -1071,9 +1090,12 @@
           const textures = this.localTextures.get(model.id) || [];
           return count + textures.length;
         }, 0);
-        
-        console.log('[Widget] updateTextureUI - Total textures:', totalTextures);
-        
+
+        console.log(
+          "[Widget] updateTextureUI - Total textures:",
+          totalTextures
+        );
+
         if (totalTextures > 0) {
           this.textureNavContainer.style.display = "flex";
           // Calculate current texture's global index
@@ -1089,14 +1111,16 @@
             }
             globalIndex += textures.length;
           }
-          
-          this.textureIndicator.textContent = `${globalIndex + 1} / ${totalTextures}`;
-          
+
+          this.textureIndicator.textContent = `${
+            globalIndex + 1
+          } / ${totalTextures}`;
+
           // Enable buttons if more than one texture across all models
           this.prevTextureBtn.disabled = totalTextures <= 1;
           this.nextTextureBtn.disabled = totalTextures <= 1;
-          this.prevTextureBtn.style.opacity = totalTextures <= 1 ? '0.5' : '1';
-          this.nextTextureBtn.style.opacity = totalTextures <= 1 ? '0.5' : '1';
+          this.prevTextureBtn.style.opacity = totalTextures <= 1 ? "0.5" : "1";
+          this.nextTextureBtn.style.opacity = totalTextures <= 1 ? "0.5" : "1";
         } else {
           this.textureNavContainer.style.display = "none";
         }
@@ -1109,18 +1133,19 @@
       if (totalTextures <= 1) return;
 
       const currentGlobalIndex = this.getCurrentGlobalTextureIndex();
-      const nextGlobalIndex = (currentGlobalIndex + direction + totalTextures) % totalTextures;
-      
+      const nextGlobalIndex =
+        (currentGlobalIndex + direction + totalTextures) % totalTextures;
+
       await this.loadTextureByGlobalIndex(nextGlobalIndex);
     }
-    
+
     getTotalTextureCount() {
       return this.displayModels.reduce((count, model) => {
         const textures = this.localTextures.get(model.id) || [];
         return count + textures.length;
       }, 0);
     }
-    
+
     getCurrentGlobalTextureIndex() {
       let globalIndex = 0;
       for (let i = 0; i < this.displayModels.length; i++) {
@@ -1134,30 +1159,30 @@
       }
       return globalIndex;
     }
-    
+
     async loadTextureByGlobalIndex(globalIndex) {
       let currentIndex = 0;
       for (let i = 0; i < this.displayModels.length; i++) {
         const model = this.displayModels[i];
         const textures = this.localTextures.get(model.id) || [];
-        
+
         if (globalIndex < currentIndex + textures.length) {
           // Found the model and texture
           const localTextureIndex = globalIndex - currentIndex;
-          
+
           // Switch model if needed
           if (i !== this.currentModelIndex) {
             this.currentModelIndex = i;
             await this.loadModel(model);
           }
-          
+
           // Apply texture
           this.currentTextureIndex = localTextureIndex;
           const sortedTextures = [...textures].sort(
             (a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)
           );
           const selectedTexture = sortedTextures[localTextureIndex];
-          
+
           if (selectedTexture && this.currentModel) {
             const textureLoader = new THREE.TextureLoader();
             try {
@@ -1274,19 +1299,27 @@
       this.canvasContainer.appendChild(this.threeRenderer.domElement);
 
       // Lighting - Ambient + Left/Right (configurable via viewer settings)
-      const ambientIntensity = this.viewerConfig?.settings?.ambientLightIntensity ?? 0.6;
-      const directionalIntensity = this.viewerConfig?.settings?.directionalLightIntensity ?? 0.8;
-      
+      const ambientIntensity =
+        this.viewerConfig?.settings?.ambientLightIntensity ?? 0.6;
+      const directionalIntensity =
+        this.viewerConfig?.settings?.directionalLightIntensity ?? 0.8;
+
       const ambientLight = new THREE.AmbientLight(0xffffff, ambientIntensity);
       this.threeScene.add(ambientLight);
 
       // Left light
-      const leftLight = new THREE.DirectionalLight(0xffffff, directionalIntensity);
+      const leftLight = new THREE.DirectionalLight(
+        0xffffff,
+        directionalIntensity
+      );
       leftLight.position.set(-5, 2, 2);
       this.threeScene.add(leftLight);
 
       // Right light
-      const rightLight = new THREE.DirectionalLight(0xffffff, directionalIntensity);
+      const rightLight = new THREE.DirectionalLight(
+        0xffffff,
+        directionalIntensity
+      );
       rightLight.position.set(5, 2, 2);
       this.threeScene.add(rightLight);
 
@@ -1305,39 +1338,51 @@
         this.controls.dynamicDampingFactor = 0.08; // Low value = more momentum, natural deceleration
         this.controls.minDistance = 0.5; // Allow close zoom in
         this.controls.maxDistance = 10; // Farthest zoom (limit zoom out)
-        
+
         // Track user interaction
         this.isUserInteracting = false;
         this.lastInteractionTime = 0;
         this.isMouseDown = false;
-        
+
         const startInteraction = () => {
           this.isUserInteracting = true;
           this.isMouseDown = true;
         };
-        
+
         const endInteraction = () => {
           this.isUserInteracting = false;
           this.isMouseDown = false;
           this.lastInteractionTime = Date.now();
         };
-        
+
         const onMove = () => {
           if (this.isMouseDown) {
             this.isUserInteracting = true;
             this.lastInteractionTime = Date.now();
           }
         };
-        
-        this.threeRenderer.domElement.addEventListener('mousedown', startInteraction);
-        this.threeRenderer.domElement.addEventListener('mouseup', endInteraction);
-        this.threeRenderer.domElement.addEventListener('mousemove', onMove);
-        this.threeRenderer.domElement.addEventListener('touchstart', startInteraction);
-        this.threeRenderer.domElement.addEventListener('touchend', endInteraction);
-        this.threeRenderer.domElement.addEventListener('touchmove', onMove);
-        
+
+        this.threeRenderer.domElement.addEventListener(
+          "mousedown",
+          startInteraction
+        );
+        this.threeRenderer.domElement.addEventListener(
+          "mouseup",
+          endInteraction
+        );
+        this.threeRenderer.domElement.addEventListener("mousemove", onMove);
+        this.threeRenderer.domElement.addEventListener(
+          "touchstart",
+          startInteraction
+        );
+        this.threeRenderer.domElement.addEventListener(
+          "touchend",
+          endInteraction
+        );
+        this.threeRenderer.domElement.addEventListener("touchmove", onMove);
+
         // Also listen to control change events
-        this.controls.addEventListener('change', () => {
+        this.controls.addEventListener("change", () => {
           this.lastInteractionTime = Date.now();
         });
       }
@@ -1460,7 +1505,10 @@
           });
         };
 
-        loadGLTFLoader().then(loadTrackballControls).then(resolve).catch(reject);
+        loadGLTFLoader()
+          .then(loadTrackballControls)
+          .then(resolve)
+          .catch(reject);
       });
     }
 

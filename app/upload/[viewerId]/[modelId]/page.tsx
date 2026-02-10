@@ -24,29 +24,24 @@ export default async function UploadTexturePage({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
+    <div className="min-h-screen">
       <div className="max-w-2xl mx-auto">
-        <div className="bg-white rounded-lg shadow-lg p-6 md:p-8">
+        <div className="bg-white rounded-lg shadow-lg  mt-6 p-6 md:p-8">
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              Upload Your Texture
-            </h1>
-            <p className="text-lg text-gray-600 mb-1">
               {viewer.name}
-            </p>
+            </h1>
             <p className="text-sm text-gray-500">
-              Model: {model.name}
+              {model.name}
             </p>
           </div>
 
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-            <h2 className="font-semibold text-blue-900 mb-2">Instructions:</h2>
-            <ol className="list-decimal list-inside space-y-1 text-sm text-blue-800">
-              <li>Take a photo of your colored texture with ArUco markers visible</li>
-              <li>Make sure all 4 ArUco markers (corner markers) are clearly visible</li>
-              <li>Upload the photo below</li>
-              <li>Your texture will be automatically cropped and applied to the 3D model!</li>
-            </ol>
+          {/* Placeholder for Animated Instructions */}
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg p-8 mb-6">
+            <div className="text-center">
+              <div className="text-6xl mb-4">Animēta instrukcija</div>
+              
+            </div>
           </div>
 
           <UploadTextureForm 

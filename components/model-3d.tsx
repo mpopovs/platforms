@@ -103,7 +103,13 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
     hasPlayedOnceRef.current = false;
     setHasAnimations(false);
     setIsPlaying(false);
-    mixerRef.current = null;
+    
+    // Cleanup previous mixer
+    if (mixerRef.current) {
+      mixerRef.current.stopAllAction();
+      mixerRef.current.uncacheRoot(mixerRef.current.getRoot());
+      mixerRef.current = null;
+    }
     animationsRef.current = [];
 
     const loadModelWithCache = async () => {
@@ -215,6 +221,35 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
     };
 
     loadModelWithCache();
+
+    // Cleanup function to dispose of previous model
+    return () => {
+      if (model) {
+        model.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            if (child.geometry) {
+              child.geometry.dispose();
+            }
+            if (child.material) {
+              if (Array.isArray(child.material)) {
+                child.material.forEach(mat => {
+                  if (mat.map) mat.map.dispose();
+                  mat.dispose();
+                });
+              } else {
+                if (child.material.map) child.material.map.dispose();
+                child.material.dispose();
+              }
+            }
+          }
+        });
+      }
+      
+      if (mixerRef.current) {
+        mixerRef.current.stopAllAction();
+        mixerRef.current.uncacheRoot(mixerRef.current.getRoot());
+      }
+    };
   }, [modelUrl, modelId]);
 
   // Load texture with IndexedDB caching
@@ -296,6 +331,13 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
     };
 
     loadTextureWithCache();
+
+    // Cleanup function to dispose of previous texture
+    return () => {
+      if (texture) {
+        texture.dispose();
+      }
+    };
   }, [textureUrl, modelId, textureId]);
 
   // Apply texture to model
@@ -313,9 +355,22 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
     }
   }, [model, texture]);
 
-  // Configure material for proper lighting response
+  // Configure material for proper lighting response and normalize model size
   useEffect(() => {
     if (model) {
+      // Normalize model size to fit camera view consistently
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const scale = 4 / maxDim; // Scale to fit within 4 units (camera is at z=8)
+      model.scale.setScalar(scale);
+      
+      // Center the model
+      const center = box.getCenter(new THREE.Vector3());
+      model.position.x = -center.x * scale;
+      model.position.y = -center.y * scale;
+      model.position.z = -center.z * scale;
+      
       model.traverse((child) => {
         if (child instanceof THREE.Mesh) {
           if (child.material) {
@@ -363,7 +418,7 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
     return null;
   }
 
-  return <primitive ref={meshRef} object={model} scale={1} />;
+  return <primitive ref={meshRef} object={model} />;
 });
 
 // Display name for debugging

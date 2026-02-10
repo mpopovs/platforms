@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Upload, CheckCircle, XCircle, Eye } from 'lucide-react';
 import { processImage } from '@/components/utils/imageProcessor';
 import { TexturePreview3D } from '@/components/texture-preview-3d';
+import { QueueStatus } from './queue-status';
 
 /**
  * Compress image before upload
@@ -110,11 +111,10 @@ export function UploadTextureForm({
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [processedPreview, setProcessedPreview] = useState<string | null>(null);
-  const [authorName, setAuthorName] = useState('');
-  const [authorAge, setAuthorAge] = useState('');
   const [uploading, setUploading] = useState(false);
   const [processing, setProcessing] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
+  const [showPreviewFor3D, setShowPreviewFor3D] = useState(false);
+  const [queueNumber, setQueueNumber] = useState<number | null>(null);
   const [result, setResult] = useState<{
     type: 'success' | 'error';
     message: string;
@@ -178,6 +178,8 @@ export function UploadTextureForm({
           type: 'success',
           message: '✅ ArUco markers detected! Texture cropped to 2048x2048 and ready to upload.'
         });
+        // Automatically show 3D preview
+        setShowPreviewFor3D(true);
       } else {
         console.log('❌ No ArUco markers detected');
         setResult({
@@ -196,20 +198,23 @@ export function UploadTextureForm({
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) {
+      e.preventDefault();
+    }
 
     if (!file) return;
 
+    // Close preview if open
+    setShowPreviewFor3D(false);
+    
     setUploading(true);
 
     const formData = new FormData();
 
-    // Add viewerId, modelId, and author info to the form data
+    // Add viewerId and modelId to the form data
     formData.append('viewerId', viewerId);
     formData.append('modelId', modelId);
-    formData.append('authorName', authorName);
-    formData.append('authorAge', authorAge);
 
     // If we have a processed image (ArUco cropped), upload both original and cropped
     if (processedPreview) {
@@ -255,12 +260,11 @@ export function UploadTextureForm({
       const data = await response.json();
 
       if (response.ok) {
+        setQueueNumber(data.queueNumber);
         setResult({
           type: 'success',
           message: data.message || 'Texture uploaded successfully!'
         });
-        // Show 3D preview after successful upload
-        setShowPreview(true);
       } else {
         setResult({
           type: 'error',
@@ -279,40 +283,6 @@ export function UploadTextureForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      {/* Author Information */}
-      <div className="space-y-4">
-        <div>
-          <label htmlFor="authorName" className="block text-sm font-medium text-gray-700 mb-1">
-            Your Name *
-          </label>
-          <input
-            type="text"
-            id="authorName"
-            value={authorName}
-            onChange={(e) => setAuthorName(e.target.value)}
-            required
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="Enter your name"
-          />
-        </div>
-        <div>
-          <label htmlFor="authorAge" className="block text-sm font-medium text-gray-700 mb-1">
-            Your Age *
-          </label>
-          <input
-            type="number"
-            id="authorAge"
-            value={authorAge}
-            onChange={(e) => setAuthorAge(e.target.value)}
-            required
-            min="1"
-            max="120"
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="Enter your age"
-          />
-        </div>
-      </div>
-
       <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-400 transition-colors">
         <input
           type="file"
@@ -328,28 +298,28 @@ export function UploadTextureForm({
           htmlFor="photo"
           className={`cursor-pointer block ${processing ? 'opacity-50 pointer-events-none' : ''}`}
         >
-          <Upload className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-          <p className="text-lg font-medium text-gray-700 mb-1">
-            {file ? file.name : 'Choose a photo'}
-          </p>
-          <p className="text-sm text-gray-500">
-            {processing ? 'Processing...' : 'or tap to take a photo'}
-          </p>
+          {processing ? (
+            <div className="text-6xl animate-pulse">⏳</div>
+          ) : file ? (
+            <div className="text-6xl">✅</div>
+          ) : (
+            // <Upload className="h-16 w-16 text-blue-400 mx-auto" />
+            "Foto"
+          )}
         </label>
       </div>
 
       {processing && (
-        <div className="rounded-lg p-4 bg-blue-50 border border-blue-200 text-blue-800">
-          <p className="text-sm">Processing image with ArUco markers...</p>
+        <div className="rounded-lg p-4 bg-blue-50 border border-blue-200 text-center">
+          <div className="text-4xl animate-spin inline-block">Process</div>
         </div>
       )}
 
       {preview && !processedPreview && (
-        <div className="rounded-lg overflow-hidden border border-gray-200">
-          <p className="text-xs text-gray-500 mb-2 p-2 bg-gray-50">Original Image</p>
+        <div className="rounded-lg overflow-hidden border-2 border-gray-300">
           <img
             src={preview}
-            alt="Original Preview"
+            alt="Preview"
             className="w-full h-auto"
           />
         </div>
@@ -357,21 +327,23 @@ export function UploadTextureForm({
 
       {processedPreview && (
         <div className="space-y-3">
-          <div className="rounded-lg overflow-hidden border border-green-200">
-            <p className="text-xs text-green-700 mb-2 p-2 bg-green-50">Processed Texture (ArUco Cropped)</p>
+          <div className="rounded-lg overflow-hidden border-4 border-green-400 shadow-lg">
+            <div className="text-center py-2 bg-green-50">
+              <span className="text-3xl">Griež</span>
+            </div>
             <img
               src={processedPreview}
-              alt="Processed Preview"
+              alt="Preview"
               className="w-full h-auto"
             />
           </div>
-          <details className="text-xs text-gray-600">
-            <summary className="cursor-pointer hover:text-gray-800">Show original image</summary>
+          <details>
+            <summary className="cursor-pointer text-center text-2xl hover:scale-110 transition-transform inline-block w-full">Foto</summary>
             {preview && (
-              <div className="mt-2 rounded-lg overflow-hidden border border-gray-200">
+              <div className="mt-2 rounded-lg overflow-hidden border-2 border-gray-300">
                 <img
                   src={preview}
-                  alt="Original Preview"
+                  alt="Preview"
                   className="w-full h-auto"
                 />
               </div>
@@ -380,67 +352,52 @@ export function UploadTextureForm({
         </div>
       )}
 
-      {result && (
+      {result && !queueNumber && (
         <div
-          className={`rounded-lg p-4 flex items-start gap-3 ${
+          className={`rounded-lg p-6 text-center ${
             result.type === 'success'
-              ? 'bg-green-50 text-green-800 border border-green-200'
-              : 'bg-red-50 text-red-800 border border-red-200'
+              ? 'bg-green-50 border-2 border-green-300'
+              : 'bg-amber-50 border-2 border-amber-300'
           }`}
         >
-          {result.type === 'success' ? (
-            <CheckCircle className="h-5 w-5 flex-shrink-0 mt-0.5" />
-          ) : (
-            <XCircle className="h-5 w-5 flex-shrink-0 mt-0.5" />
-          )}
-          <p className="text-sm">{result.message}</p>
+          <div className="text-5xl">
+            {result.type === 'success' ? '✅' : '⚠️'}
+          </div>
         </div>
       )}
 
-      <Button
-        type="submit"
-        disabled={!file || !authorName || !authorAge || uploading || processing}
-        className="w-full"
-        size="lg"
-      >
-        {uploading ? 'Uploading...' : processing ? 'Processing...' : 'Upload Texture'}
-      </Button>
-
-      {/* Preview button after successful upload */}
-      {result?.type === 'success' && processedPreview && (
+      {/* Upload button - hidden when preview is showing or after successful upload */}
+      {!showPreviewFor3D && !queueNumber && (
         <Button
-          type="button"
-          variant="outline"
-          onClick={() => setShowPreview(true)}
-          className="w-full"
+          type="submit"
+          disabled={!file || uploading || processing || !processedPreview}
+          className="w-full text-2xl py-8"
           size="lg"
         >
-          <Eye className="h-5 w-5 mr-2" />
-          View 3D Preview & Save Screenshot
+          {uploading ? '⏳' : 'Aiziet'}
         </Button>
       )}
 
-      {/* 3D Preview Dialog */}
+      {/* Queue Status after successful upload */}
+      {queueNumber && result?.type === 'success' && (
+        <div className="bg-gradient-to-br from-purple-50 to-pink-50 border-4 border-purple-300 rounded-2xl p-8 text-center shadow-xl">
+          <div className="text-7xl mb-4">Rinda</div>
+          <div className="text-6xl font-bold text-purple-900 mb-2">#{queueNumber}</div>
+          <QueueStatus queueNumber={queueNumber} viewerId={viewerId} />
+        </div>
+      )}
+
+      {/* 3D Preview Dialog - shown immediately after processing */}
       {processedPreview && (
         <TexturePreview3D
-          open={showPreview}
+          open={showPreviewFor3D}
           onOpenChange={(open) => {
-            setShowPreview(open);
-            // Reset form when closing preview
-            if (!open) {
-              setFile(null);
-              setPreview(null);
-              setProcessedPreview(null);
-              setAuthorName('');
-              setAuthorAge('');
-              setResult(null);
-            }
+            setShowPreviewFor3D(open);
           }}
           modelUrl={modelUrl}
           textureUrl={processedPreview}
           modelName={modelName}
-          authorName={authorName}
-          authorAge={authorAge}
+          onUpload={handleSubmit}
         />
       )}
     </form>

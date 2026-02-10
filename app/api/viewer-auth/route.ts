@@ -9,6 +9,8 @@ import {
 } from '@/lib/viewers';
 import { generateSessionToken } from '@/lib/types/viewer';
 
+const VIEWER_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -73,7 +75,13 @@ export async function POST(request: NextRequest) {
     await resetViewerAttempts(viewerId, ip);
     
     const sessionToken = generateSessionToken();
-    await createViewerSession(sessionToken, viewerId, config.userId, ip, 3600); // 1 hour
+    await createViewerSession(
+      sessionToken,
+      viewerId,
+      config.userId,
+      ip,
+      VIEWER_SESSION_TTL_SECONDS
+    );
 
     // Return success with token
     const response = NextResponse.json(
@@ -90,7 +98,7 @@ export async function POST(request: NextRequest) {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 3600, // 1 hour
+      maxAge: VIEWER_SESSION_TTL_SECONDS,
       path: '/',
     });
 

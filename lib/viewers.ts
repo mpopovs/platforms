@@ -198,7 +198,7 @@ export async function createViewerSession(
   viewerId: string,
   userId: string,
   ip: string,
-  expiresInSeconds: number = 3600 // 1 hour default
+  expiresInSeconds: number = 60 * 60 * 24 * 30 // 30 days default
 ): Promise<void> {
   const session: ViewerSession = {
     viewerId,
@@ -443,7 +443,8 @@ export async function getViewerModelsWithTextures(viewerId: string): Promise<Vie
         uploaded_at: row.latest_texture_uploaded_at,
         processed_at: row.latest_texture_processed_at,
         author_name: row.latest_texture_author_name,
-        author_age: row.latest_texture_author_age
+        author_age: row.latest_texture_author_age,
+        queue_number: row.latest_texture_queue_number
       };
     }
     
@@ -512,7 +513,8 @@ export async function getViewerModelsWithAllTextures(viewerId: string): Promise<
         uploaded_at: row.texture_uploaded_at,
         processed_at: row.texture_processed_at,
         author_name: row.texture_author_name,
-        author_age: row.texture_author_age
+        author_age: row.texture_author_age,
+        queue_number: row.texture_queue_number
       });
     }
   }
@@ -696,17 +698,13 @@ export async function createModelTexture(
   textureId: string,
   modelId: string,
   originalPhotoUrl: string,
-  correctedTextureUrl: string,
-  authorName?: string,
-  authorAge?: number
+  correctedTextureUrl: string
 ): Promise<ModelTextureRow> {
   const row: Partial<ModelTextureRow> = {
     id: textureId,
     model_id: modelId,
     original_photo_url: originalPhotoUrl,
-    corrected_texture_url: correctedTextureUrl,
-    author_name: authorName,
-    author_age: authorAge
+    corrected_texture_url: correctedTextureUrl
   };
   
   const { data, error } = await supabase

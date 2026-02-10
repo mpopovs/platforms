@@ -549,8 +549,21 @@ export function ModelCarousel({
 
   return (
     <div className="w-full h-full relative" style={{ backgroundColor }}>
-      <Canvas shadows>
-        <PerspectiveCamera makeDefault position={[0, 0, 8]} />
+      <Canvas 
+        shadows 
+        style={{ 
+          width: '100%', 
+          height: '100%',
+          position: 'absolute',
+          top: 0,
+          left: 0
+        }}
+        gl={{
+          preserveDrawingBuffer: true,
+          powerPreference: 'high-performance'
+        }}
+      >
+        <PerspectiveCamera makeDefault position={[0, 0, 8]} fov={50} />
         
         {/* Simple ambient light */}
         <ambientLight />
@@ -646,33 +659,48 @@ export function ModelCarousel({
       {/* Fullscreen button */}
       <button
         onClick={toggleFullscreen}
-        className={`absolute top-4 right-4 bg-black/50 hover:bg-black/70 text-white p-2 rounded-full backdrop-blur-sm transition-all duration-300 ${
-          isFullscreen && !showControls ? 'opacity-0 pointer-events-none' : 'opacity-100'
-        }`}
+        className="absolute top-4 right-4 text-white p-3 rounded-lg transition-all duration-300 z-50"
+        style={{
+          backgroundColor: isFullscreen && !showControls ? 'transparent' : 'rgba(0, 0, 0, 0.7)',
+          border: '2px solid rgba(255, 255, 255, 0.3)',
+          opacity: isFullscreen && !showControls ? 0 : 1,
+          pointerEvents: isFullscreen && !showControls ? 'none' : 'auto',
+          visibility: isFullscreen && !showControls ? 'hidden' : 'visible'
+        }}
         aria-label="Toggle fullscreen"
       >
-        <Maximize className="h-5 w-5" />
+        <Maximize className="h-6 w-6" />
       </button>
 
       {/* Play animation button - only show when model has animations and not currently playing */}
       {modelHasAnimations && !modelIsPlaying && (
         <button
           onClick={handlePlayAnimation}
-          className={`absolute top-4 right-16 bg-black/50 hover:bg-black/70 text-white p-2 rounded-full backdrop-blur-sm transition-all duration-300 ${
-            isFullscreen && !showControls ? 'opacity-0 pointer-events-none' : 'opacity-100'
-          }`}
+          className="absolute top-4 right-20 text-white p-3 rounded-lg transition-all duration-300 z-50"
+          style={{
+            backgroundColor: isFullscreen && !showControls ? 'transparent' : 'rgba(0, 0, 0, 0.7)',
+            border: '2px solid rgba(255, 255, 255, 0.3)',
+            opacity: isFullscreen && !showControls ? 0 : 1,
+            pointerEvents: isFullscreen && !showControls ? 'none' : 'auto',
+            visibility: isFullscreen && !showControls ? 'hidden' : 'visible'
+          }}
           aria-label="Play animation"
           title="Play animation"
         >
-          <Play className="h-5 w-5" />
+          <Play className="h-6 w-6" />
         </button>
       )}
 
       {/* Author info overlay - Bottom Left */}
-    {useTextureCycling && currentPair?.texture && (currentPair.texture.author_name || currentPair.texture.author_age) && (
-  <div className="absolute bottom-4 left-4 text-gray-700">
+    {useTextureCycling && currentPair?.texture && (currentPair.texture.author_name || currentPair.texture.author_age || currentPair.texture.queue_number) && (
+  <div className="absolute bottom-4 left-4 text-gray-700 z-30">
     <div> 
       <p className="font-bold uppercase tracking-wide text-[3cm] leading-none drop-shadow-md">
+        {currentPair.texture.queue_number && (
+          <span className="text-[3cm] font-bold mr-4">
+            #{currentPair.texture.queue_number}
+          </span>
+        )}
         {currentPair.texture.author_name}
         {currentPair.texture.author_age && (
           <span className="text-[3cm] font-semibold ml-4">
@@ -684,12 +712,19 @@ export function ModelCarousel({
   </div>
 )}
       
-      {!useTextureCycling && currentLegacyModel?.latest_texture && (currentLegacyModel.latest_texture.author_name || currentLegacyModel.latest_texture.author_age) && (
-        <div className="absolute bottom-4 left-4 text-white">
-          <div className="px-6 py-4 rounded-lg backdrop-blur-sm bg-black/70">
-            <p className="text-3xl font-bold uppercase tracking-wide">
-              {currentLegacyModel.latest_texture.author_name}
-            </p>
+      {!useTextureCycling && currentLegacyModel?.latest_texture && (currentLegacyModel.latest_texture.author_name || currentLegacyModel.latest_texture.author_age || currentLegacyModel.latest_texture.queue_number) && (
+        <div className="absolute bottom-4 left-4 text-white z-30">
+          <div className="px-6 py-4 rounded-lg" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)' }}>
+            {currentLegacyModel.latest_texture.queue_number && (
+              <p className="text-3xl font-bold uppercase tracking-wide mb-2">
+                #{currentLegacyModel.latest_texture.queue_number}
+              </p>
+            )}
+            {currentLegacyModel.latest_texture.author_name && (
+              <p className="text-3xl font-bold uppercase tracking-wide">
+                {currentLegacyModel.latest_texture.author_name}
+              </p>
+            )}
             {currentLegacyModel.latest_texture.author_age && (
               <p className="text-2xl font-semibold uppercase mt-1">
                 AGE {currentLegacyModel.latest_texture.author_age}
@@ -701,7 +736,7 @@ export function ModelCarousel({
 
       {/* Logo overlay - bottom right corner */}
       {logoUrl && (
-        <div className="absolute bottom-4 right-4">
+        <div className="absolute bottom-4 right-4 z-30">
           <img 
             src={logoUrl} 
             alt="Logo" 

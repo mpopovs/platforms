@@ -8,7 +8,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Eye, Lock, Loader2 } from 'lucide-react';
 import { ModelCarousel } from '@/components/model-carousel';
 import { ServiceWorkerRegistration } from '@/components/service-worker-registration';
+import { createClient } from '@/lib/supabase/client';
 import type { ViewerModelWithTexture, ViewerSettings } from '@/lib/types/viewer';
+import { cleanOldCache } from '@/lib/texture-cache';
 
 type ViewerConfig = {
   id: string;
@@ -124,9 +126,63 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
   const [models, setModels] = useState<ViewerModelWithTexture[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [currentQueueNumber, setCurrentQueueNumber] = useState<number | null>(null);
+  const [contextLost, setContextLost] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
+  const supabase = createClient();
+
+  // Clean old cached data on viewer startup (prevent quota issues)
+  useEffect(() => {
+    cleanOldCache(30).catch(err => 
+      console.warn('Cache cleanup failed:', err)
+    );
+  }, []);
+
+  // Fetch current queue number
+  useEffect(() => {
+    async function fetchCurrentQueue() {
+      const { data, error } = await supabase
+        .from('texture_queue')
+        .select('*')
+        .eq('viewer_id', viewerId)
+        .eq('status', 'displaying')
+        .order('displayed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && data) {
+        setCurrentQueueNumber(data.queue_number);
+      }
+    }
+
+    fetchCurrentQueue();
+
+    // Subscribe to real-time updates
+    const channel = supabase
+      .channel('viewer-queue-updates')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'texture_queue',
+          filter: `viewer_id=eq.${viewerId}`
+        },
+        () => {
+          fetchCurrentQueue();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [viewerId]);
 
   // Fetch models with textures
   useEffect(() => {
+    let hasModels = false;
+
     async function fetchModels() {
       try {
         const response = await fetch(`/api/viewer-models/${viewerId}`);
@@ -134,12 +190,23 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
         if (response.ok) {
           const data = await response.json();
           setModels(data.models || []);
+          hasModels = (data.models || []).length > 0;
+          setError(''); // Clear any previous errors
         } else {
-          setError('Failed to load 3D models');
+          // Only set error if we don't have models loaded yet
+          if (!hasModels) {
+            setError('Failed to load 3D models');
+          } else {
+            console.warn('Failed to fetch model updates, continuing with cached data');
+          }
         }
       } catch (err) {
-        console.error('Error fetching models:', err);
-        setError('Failed to load 3D models');
+        // Network error - only set error on initial load, not during updates
+        if (!hasModels) {
+          console.error('Initial load failed:', err);
+          setError('Failed to load 3D models');
+        }
+        // No logging when we already have models - this is expected during offline polling
       } finally {
         setLoading(false);
       }
@@ -148,14 +215,23 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
     fetchModels();
 
     // Poll for updates every 30 seconds
-    const interval = setInterval(fetchModels, 30000);
+    const interval = setInterval(() => {
+      // During polling, we already have models so errors won't break display
+      hasModels = true;
+      fetchModels();
+    }, 30000);
+    
     return () => clearInterval(interval);
   }, [viewerId]);
 
-  // Handle online event - refetch data when browser reconnects
+  // Handle online/offline events - refetch data when browser reconnects
   useEffect(() => {
+    // Set initial online status
+    setIsOnline(navigator.onLine);
+
     const handleOnline = () => {
       console.log('Browser reconnected, refetching data...');
+      setIsOnline(true);
       setLoading(true);
       fetch(`/api/viewer-models/${viewerId}`)
         .then(response => {
@@ -176,17 +252,83 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
         });
     };
 
+    const handleOffline = () => {
+      console.log('Browser went offline');
+      setIsOnline(false);
+    };
+
     window.addEventListener('online', handleOnline);
-    return () => window.removeEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, [viewerId]);
 
-  if (loading) {
+  // Handle WebGL context loss and restore
+  useEffect(() => {
+    const handleContextLost = (e: Event) => {
+      e.preventDefault();
+      console.error('WebGL context lost, attempting recovery...');
+      setContextLost(true);
+      // Reload page after short delay to recover
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+    };
+
+    const handleContextRestored = () => {
+      console.log('WebGL context restored');
+      setContextLost(false);
+    };
+
+    const canvas = document.querySelector('canvas');
+    if (canvas) {
+      canvas.addEventListener('webglcontextlost', handleContextLost);
+      canvas.addEventListener('webglcontextrestored', handleContextRestored);
+    }
+
+    // Preventive reload after 12 hours to avoid memory leaks
+    const preventiveReload = setTimeout(() => {
+      console.log('Preventive reload after 12 hours of operation');
+      window.location.reload();
+    }, 12 * 60 * 60 * 1000); // 12 hours
+
+    return () => {
+      if (canvas) {
+        canvas.removeEventListener('webglcontextlost', handleContextLost);
+        canvas.removeEventListener('webglcontextrestored', handleContextRestored);
+      }
+      clearTimeout(preventiveReload);
+    };
+  }, []);
+
+  // Global error handler for unhandled errors
+  useEffect(() => {
+    const handleError = (event: ErrorEvent) => {
+      console.error('Global error caught:', event.error);
+      if (event.error?.message?.includes('WebGL') || event.error?.message?.includes('GPU')) {
+        console.error('WebGL/GPU error detected, reloading...');
+        setTimeout(() => window.location.reload(), 2000);
+      }
+    };
+
+    window.addEventListener('error', handleError);
+    return () => window.removeEventListener('error', handleError);
+  }, []);
+
+  if (loading || contextLost) {
     return (
       <div 
         className="min-h-screen flex items-center justify-center"
         style={{ background: settings.backgroundColor || '#000000' }}
       >
-        <Loader2 className="h-12 w-12 animate-spin text-white" />
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-white mx-auto mb-4" />
+          {contextLost && (
+            <p className="text-white text-sm">Recovering display...</p>
+          )}
+        </div>
       </div>
     );
   }
@@ -207,7 +349,7 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
   // If models exist, show 3D carousel
   if (models.length > 0) {
     return (
-      <div className="w-screen h-screen">
+      <div className="w-screen h-screen relative overflow-hidden" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
         <ModelCarousel
           models={models}
           rotationSpeed={settings.rotationSpeed || 0.5}
@@ -220,6 +362,25 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
           ambientLightIntensity={settings.ambientLightIntensity}
           directionalLightIntensity={settings.directionalLightIntensity}
         />
+        
+        {/* Offline Indicator - Bottom Right */}
+        {!isOnline && (
+          <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2">
+            <div className="w-4 h-4 bg-red-600 rounded-full animate-pulse shadow-lg" />
+          </div>
+        )}
+
+        {/* Queue Number Display - Bottom Center */}
+        {currentQueueNumber && (
+          <div className="fixed bottom-0 left-0 right-0 py-6 z-40" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.8), transparent)' }}>
+            <div className="flex items-center justify-center gap-4">
+              <span className="text-5xl">🎫</span>
+              <span className="text-7xl font-black text-white drop-shadow-2xl">
+                #{currentQueueNumber}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

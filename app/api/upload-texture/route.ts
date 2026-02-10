@@ -14,11 +14,9 @@ export async function POST(request: NextRequest) {
     const file = formData.get('photo') as File;
     const originalFile = formData.get('originalPhoto') as File | null;
 
-    // Get viewerId, modelId, and author info from form data (passed from upload form)
+    // Get viewerId and modelId from form data (passed from upload form)
     const viewerId = formData.get('viewerId') as string;
     const modelId = formData.get('modelId') as string;
-    const authorName = formData.get('authorName') as string;
-    const authorAge = formData.get('authorAge') as string;
 
     if (!file) {
       return NextResponse.json(
@@ -131,14 +129,26 @@ export async function POST(request: NextRequest) {
 
       // Create texture record directly (no further processing needed)
       const { createModelTexture } = await import('@/lib/viewers');
-      await createModelTexture(
+      const { createClient } = await import('@/lib/supabase/server');
+      
+      const texture = await createModelTexture(
         textureId,
         modelId,
         originalPhotoUrl,
-        processedTextureUrl,
-        authorName,
-        authorAge ? parseInt(authorAge, 10) : undefined
+        processedTextureUrl
       );
+
+      // Create queue entry
+      const supabase = await createClient();
+      const { data: queueData } = await supabase.rpc('get_next_queue_number');
+      const queueNumber = queueData || 1;
+
+      await supabase.from('texture_queue').insert({
+        queue_number: queueNumber,
+        texture_id: texture.id,
+        viewer_id: viewerId,
+        status: 'waiting'
+      });
 
       return NextResponse.json(
         {
@@ -148,6 +158,7 @@ export async function POST(request: NextRequest) {
           modelId,
           originalPhotoUrl,
           correctedTextureUrl: processedTextureUrl,
+          queueNumber,
           message: 'Texture uploaded and processed with ArUco markers successfully!'
         },
         { status: 200 }
@@ -169,9 +180,7 @@ export async function POST(request: NextRequest) {
           viewerId,
           modelId,
           originalPhotoUrl: photoUrl,
-          clientProcessed: false,
-          authorName,
-          authorAge: authorAge ? parseInt(authorAge, 10) : undefined
+          clientProcessed: false
         })
       }).catch(err => console.error('Error triggering texture processing:', err));
 

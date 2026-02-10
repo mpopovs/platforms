@@ -107,6 +107,7 @@ export interface ModelTextureRow {
   processed_at: string;
   author_name?: string;
   author_age?: number;
+  queue_number?: number;
 }
 
 // Extended model interface with latest texture

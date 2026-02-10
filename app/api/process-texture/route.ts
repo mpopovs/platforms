@@ -13,7 +13,7 @@ import { supabase } from '@/lib/supabase';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { textureId, viewerId, modelId, originalPhotoUrl, authorName, authorAge } = body;
+    const { textureId, viewerId, modelId, originalPhotoUrl } = body;
 
     if (!textureId || !viewerId || !modelId || !originalPhotoUrl) {
       return NextResponse.json(
@@ -75,9 +75,7 @@ export async function POST(request: NextRequest) {
       textureId,
       modelId,
       originalPhotoUrl,
-      correctedTextureUrl,
-      authorName,
-      authorAge
+      correctedTextureUrl
     );
 
     console.log(`✅ Texture ${textureId} processed and saved. ArUco cropped: ${correctionApplied}`);
