@@ -375,12 +375,43 @@ export function ModelCarousel({
   }, [useTextureCycling, displayQueue.length, sortedModels.length, settings.interactionSettings]);
 
   const toggleFullscreen = useCallback(() => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(err => {
-        console.error('Error entering fullscreen:', err);
-      });
+    const elem = document.documentElement;
+    
+    if (!document.fullscreenElement && !(document as any).webkitFullscreenElement && 
+        !(document as any).mozFullScreenElement && !(document as any).msFullscreenElement) {
+      // Entering fullscreen - Try multiple fullscreen methods for Samsung TV compatibility
+      console.log('Attempting to enter fullscreen...');
+      
+      if (elem.requestFullscreen) {
+        console.log('Using standard requestFullscreen');
+        elem.requestFullscreen().catch(err => {
+          console.error('Error entering fullscreen:', err);
+        });
+      } else if ((elem as any).webkitRequestFullscreen) {
+        console.log('Using webkitRequestFullscreen');
+        (elem as any).webkitRequestFullscreen();
+      } else if ((elem as any).mozRequestFullScreen) {
+        console.log('Using mozRequestFullScreen');
+        (elem as any).mozRequestFullScreen();
+      } else if ((elem as any).msRequestFullscreen) {
+        console.log('Using msRequestFullscreen');
+        (elem as any).msRequestFullscreen();
+      } else {
+        console.error('No fullscreen API available');
+      }
     } else {
-      document.exitFullscreen();
+      // Exiting fullscreen - Try multiple exit methods
+      console.log('Attempting to exit fullscreen...');
+      
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      } else if ((document as any).webkitExitFullscreen) {
+        (document as any).webkitExitFullscreen();
+      } else if ((document as any).mozCancelFullScreen) {
+        (document as any).mozCancelFullScreen();
+      } else if ((document as any).msExitFullscreen) {
+        (document as any).msExitFullscreen();
+      }
     }
   }, []);
 
@@ -400,14 +431,26 @@ export function ModelCarousel({
   // Track fullscreen state and handle mouse movement
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-      if (!document.fullscreenElement) {
+      // Check all vendor-prefixed fullscreen properties
+      const isFullscreenActive = !!(document.fullscreenElement || 
+        (document as any).webkitFullscreenElement || 
+        (document as any).mozFullScreenElement || 
+        (document as any).msFullscreenElement);
+      
+      setIsFullscreen(isFullscreenActive);
+      if (!isFullscreenActive) {
         setShowControls(true);
       }
     };
 
     const handleMouseMove = () => {
-      if (document.fullscreenElement) {
+      // Check all vendor-prefixed fullscreen properties
+      const isFullscreenActive = !!(document.fullscreenElement || 
+        (document as any).webkitFullscreenElement || 
+        (document as any).mozFullScreenElement || 
+        (document as any).msFullscreenElement);
+      
+      if (isFullscreenActive) {
         setShowControls(true);
         
         // Clear existing timeout
@@ -422,12 +465,21 @@ export function ModelCarousel({
       }
     };
 
+    // Listen to all vendor-prefixed fullscreen events
     document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
     document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('touchstart', handleMouseMove);
 
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
       document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('touchstart', handleMouseMove);
       if (mouseTimeoutRef.current) {
         clearTimeout(mouseTimeoutRef.current);
       }
@@ -461,11 +513,17 @@ export function ModelCarousel({
   if (useTextureCycling && displayQueue.length === 0) {
     return (
       <div 
-        className="w-full h-full flex items-center justify-center"
-        style={{ backgroundColor }}
+        style={{ 
+          width: '100%', 
+          height: '100%', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          backgroundColor 
+        }}
       >
-        <div className="text-white text-center">
-          <p className="text-xl">Loading textures...</p>
+        <div style={{ color: '#ffffff', textAlign: 'center' }}>
+          <p style={{ fontSize: '48px' }}>Loading textures...</p>
         </div>
       </div>
     );
@@ -474,12 +532,18 @@ export function ModelCarousel({
   if (!useTextureCycling && sortedModels.length === 0) {
     return (
       <div 
-        className="w-full h-full flex items-center justify-center"
-        style={{ backgroundColor }}
+        style={{ 
+          width: '100%', 
+          height: '100%', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          backgroundColor 
+        }}
       >
-        <div className="text-white text-center">
-          <p className="text-xl">No 3D models uploaded yet</p>
-          <p className="text-sm mt-2 opacity-70">Upload models to begin</p>
+        <div style={{ color: '#ffffff', textAlign: 'center' }}>
+          <p style={{ fontSize: '48px', marginBottom: '16px' }}>No 3D models uploaded yet</p>
+          <p style={{ fontSize: '28px', opacity: 0.7 }}>Upload models to begin</p>
         </div>
       </div>
     );
@@ -537,18 +601,24 @@ export function ModelCarousel({
   if (!currentModel) {
     return (
       <div 
-        className="w-full h-full flex items-center justify-center"
-        style={{ backgroundColor }}
+        style={{ 
+          width: '100%', 
+          height: '100%', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          backgroundColor 
+        }}
       >
-        <div className="text-white text-center">
-          <p className="text-xl">No model available</p>
+        <div style={{ color: '#ffffff', textAlign: 'center' }}>
+          <p style={{ fontSize: '48px' }}>No model available</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="w-full h-full relative" style={{ backgroundColor }}>
+    <div className="w-full h-full" style={{ position: 'relative', backgroundColor, isolation: 'isolate' }}>
       <Canvas 
         shadows 
         style={{ 
@@ -633,8 +703,29 @@ export function ModelCarousel({
 
       {/* Loading spinner overlay */}
       {isModelLoading && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="w-16 h-16 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+        <div 
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none'
+          }}
+        >
+          <div 
+            style={{
+              width: '120px',
+              height: '120px',
+              border: '8px solid rgba(255, 255, 255, 0.3)',
+              borderTopColor: '#ffffff',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite'
+            }}
+          />
         </div>
       )}
       
@@ -657,90 +748,146 @@ export function ModelCarousel({
       )}
 
       {/* Fullscreen button */}
-      <button
-        onClick={toggleFullscreen}
-        className="absolute top-4 right-4 text-white p-3 rounded-lg transition-all duration-300 z-50"
-        style={{
-          backgroundColor: isFullscreen && !showControls ? 'transparent' : 'rgba(0, 0, 0, 0.7)',
-          border: '2px solid rgba(255, 255, 255, 0.3)',
-          opacity: isFullscreen && !showControls ? 0 : 1,
-          pointerEvents: isFullscreen && !showControls ? 'none' : 'auto',
-          visibility: isFullscreen && !showControls ? 'hidden' : 'visible'
-        }}
-        aria-label="Toggle fullscreen"
-      >
-        <Maximize className="h-6 w-6" />
-      </button>
+      {(!isFullscreen || showControls) && (
+        <button
+          onClick={toggleFullscreen}
+          className="text-white p-3 rounded-lg transition-opacity duration-300"
+          style={{
+            position: 'absolute',
+            top: '16px',
+            right: '16px',
+            zIndex: 50,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            border: '2px solid rgba(255, 255, 255, 0.3)',
+            cursor: 'pointer'
+          }}
+          aria-label="Toggle fullscreen"
+        >
+          <Maximize className="h-6 w-6" style={{ width: '24px', height: '24px' }} />
+        </button>
+      )}
 
       {/* Play animation button - only show when model has animations and not currently playing */}
-      {modelHasAnimations && !modelIsPlaying && (
+      {modelHasAnimations && !modelIsPlaying && (!isFullscreen || showControls) && (
         <button
           onClick={handlePlayAnimation}
-          className="absolute top-4 right-20 text-white p-3 rounded-lg transition-all duration-300 z-50"
+          className="text-white p-3 rounded-lg transition-opacity duration-300"
           style={{
-            backgroundColor: isFullscreen && !showControls ? 'transparent' : 'rgba(0, 0, 0, 0.7)',
+            position: 'absolute',
+            top: '16px',
+            right: '80px',
+            zIndex: 50,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
             border: '2px solid rgba(255, 255, 255, 0.3)',
-            opacity: isFullscreen && !showControls ? 0 : 1,
-            pointerEvents: isFullscreen && !showControls ? 'none' : 'auto',
-            visibility: isFullscreen && !showControls ? 'hidden' : 'visible'
+            cursor: 'pointer'
           }}
           aria-label="Play animation"
           title="Play animation"
         >
-          <Play className="h-6 w-6" />
+          <Play className="h-6 w-6" style={{ width: '24px', height: '24px' }} />
         </button>
       )}
 
       {/* Author info overlay - Bottom Left */}
-    {useTextureCycling && currentPair?.texture && (currentPair.texture.author_name || currentPair.texture.author_age || currentPair.texture.queue_number) && (
-  <div className="absolute bottom-4 left-4 text-gray-700 z-30">
-    <div> 
-      <p className="font-bold uppercase tracking-wide text-[3cm] leading-none drop-shadow-md">
-        {currentPair.texture.queue_number && (
-          <span className="text-[3cm] font-bold mr-4">
-            #{currentPair.texture.queue_number}
-          </span>
-        )}
-        {currentPair.texture.author_name}
-        {currentPair.texture.author_age && (
-          <span className="text-[3cm] font-semibold ml-4">
-            - {currentPair.texture.author_age}
-          </span>
-        )}
-      </p>
-    </div>
-  </div>
-)}
-      
-      {!useTextureCycling && currentLegacyModel?.latest_texture && (currentLegacyModel.latest_texture.author_name || currentLegacyModel.latest_texture.author_age || currentLegacyModel.latest_texture.queue_number) && (
-        <div className="absolute bottom-4 left-4 text-white z-30">
-          <div className="px-6 py-4 rounded-lg" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)' }}>
-            {currentLegacyModel.latest_texture.queue_number && (
-              <p className="text-3xl font-bold uppercase tracking-wide mb-2">
-                #{currentLegacyModel.latest_texture.queue_number}
-              </p>
+      {useTextureCycling && currentPair?.texture && (currentPair.texture.author_name || currentPair.texture.author_age || currentPair.texture.queue_number) && (
+        <div 
+          style={{
+            position: 'absolute',
+            bottom: '40px',
+            left: '40px',
+            zIndex: 30,
+            maxWidth: '80%'
+          }}
+        >
+          <div style={{
+            color: '#4b5563',
+            fontWeight: 'bold',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            fontSize: '80px',
+            lineHeight: '1.2'
+          }}>
+            {currentPair.texture.queue_number && (
+              <span style={{ marginRight: '20px', fontSize: '80px' }}>
+                #{currentPair.texture.queue_number}
+              </span>
             )}
-            {currentLegacyModel.latest_texture.author_name && (
-              <p className="text-3xl font-bold uppercase tracking-wide">
-                {currentLegacyModel.latest_texture.author_name}
-              </p>
-            )}
-            {currentLegacyModel.latest_texture.author_age && (
-              <p className="text-2xl font-semibold uppercase mt-1">
-                AGE {currentLegacyModel.latest_texture.author_age}
-              </p>
+            {currentPair.texture.author_name}
+            {currentPair.texture.author_age && (
+              <span style={{ marginLeft: '20px', fontSize: '80px', fontWeight: '600' }}>
+                - {currentPair.texture.author_age}
+              </span>
             )}
           </div>
+        </div>
+      )}
+      
+      {!useTextureCycling && currentLegacyModel?.latest_texture && (currentLegacyModel.latest_texture.author_name || currentLegacyModel.latest_texture.author_age || currentLegacyModel.latest_texture.queue_number) && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '40px',
+            left: '40px',
+            zIndex: 30,
+            maxWidth: '80%'
+          }}
+        >
+          {currentLegacyModel.latest_texture.queue_number && (
+            <div style={{
+              color: '#4b5563',
+              fontSize: '80px',
+              fontWeight: 'bold',
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              marginBottom: '10px'
+            }}>
+              #{currentLegacyModel.latest_texture.queue_number}
+            </div>
+          )}
+          {currentLegacyModel.latest_texture.author_name && (
+            <div style={{
+              color: '#4b5563',
+              fontSize: '80px',
+              fontWeight: 'bold',
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em'
+            }}>
+              {currentLegacyModel.latest_texture.author_name}
+            </div>
+          )}
+          {currentLegacyModel.latest_texture.author_age && (
+            <div style={{
+              color: '#4b5563',
+              fontSize: '60px',
+              fontWeight: '600',
+              textTransform: 'uppercase',
+              marginTop: '10px'
+            }}>
+              AGE {currentLegacyModel.latest_texture.author_age}
+            </div>
+          )}
         </div>
       )}
 
       {/* Logo overlay - bottom right corner */}
       {logoUrl && (
-        <div className="absolute bottom-4 right-4 z-30">
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '16px',
+            right: '16px',
+            zIndex: 30
+          }}
+        >
           <img 
             src={logoUrl} 
             alt="Logo" 
-            className="h-16 w-auto object-contain"
+            style={{
+              height: '80px',
+              width: 'auto',
+              objectFit: 'contain',
+              maxWidth: '300px'
+            }}
           />
         </div>
       )}

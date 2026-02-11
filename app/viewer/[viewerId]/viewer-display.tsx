@@ -75,8 +75,8 @@ function PinEntryForm({ viewerId, onSuccess }: { viewerId: string; onSuccess: ()
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="pin">PIN Code</Label>
-              <Input
+              <Label htmlFor="pin" style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500' }}>PIN Code</Label>
+              <input
                 id="pin"
                 type="text"
                 inputMode="numeric"
@@ -85,9 +85,21 @@ function PinEntryForm({ viewerId, onSuccess }: { viewerId: string; onSuccess: ()
                 value={pin}
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
                 placeholder="000000"
-                className="text-center text-2xl tracking-widest"
                 required
                 autoFocus
+                style={{
+                  width: '100%',
+                  height: '48px',
+                  padding: '8px 12px',
+                  fontSize: '24px',
+                  textAlign: 'center',
+                  letterSpacing: '0.15em',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  backgroundColor: 'white',
+                  outline: 'none',
+                  boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)'
+                }}
               />
             </div>
 
@@ -320,13 +332,18 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
   if (loading || contextLost) {
     return (
       <div 
-        className="min-h-screen flex items-center justify-center"
-        style={{ background: settings.backgroundColor || '#000000' }}
+        style={{ 
+          minHeight: '100vh', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          background: settings.backgroundColor || '#000000' 
+        }}
       >
-        <div className="text-center">
-          <Loader2 className="h-12 w-12 animate-spin text-white mx-auto mb-4" />
+        <div style={{ textAlign: 'center' }}>
+          <Loader2 className="h-12 w-12 animate-spin text-white mx-auto mb-4" style={{ width: '80px', height: '80px', marginBottom: '20px' }} />
           {contextLost && (
-            <p className="text-white text-sm">Recovering display...</p>
+            <p style={{ color: '#ffffff', fontSize: '32px' }}>Recovering display...</p>
           )}
         </div>
       </div>
@@ -336,11 +353,16 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
   if (error) {
     return (
       <div 
-        className="min-h-screen flex items-center justify-center"
-        style={{ background: settings.backgroundColor || '#000000' }}
+        style={{ 
+          minHeight: '100vh', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          background: settings.backgroundColor || '#000000' 
+        }}
       >
-        <div className="text-white text-center">
-          <p className="text-xl">{error}</p>
+        <div style={{ color: '#ffffff', textAlign: 'center' }}>
+          <p style={{ fontSize: '48px' }}>{error}</p>
         </div>
       </div>
     );
@@ -365,17 +387,57 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
         
         {/* Offline Indicator - Bottom Right */}
         {!isOnline && (
-          <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2">
-            <div className="w-4 h-4 bg-red-600 rounded-full animate-pulse shadow-lg" />
+          <div 
+            style={{
+              position: 'fixed',
+              bottom: '16px',
+              right: '16px',
+              zIndex: 50,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px'
+            }}
+          >
+            <div 
+              style={{
+                width: '24px',
+                height: '24px',
+                backgroundColor: '#dc2626',
+                borderRadius: '50%',
+                animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)'
+              }}
+            />
           </div>
         )}
 
         {/* Queue Number Display - Bottom Center */}
         {currentQueueNumber && (
-          <div className="fixed bottom-0 left-0 right-0 py-6 z-40" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.8), transparent)' }}>
-            <div className="flex items-center justify-center gap-4">
-              <span className="text-5xl">🎫</span>
-              <span className="text-7xl font-black text-white drop-shadow-2xl">
+          <div 
+            style={{
+              position: 'fixed',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              padding: '30px 0',
+              zIndex: 40,
+              background: 'linear-gradient(to top, rgba(0,0,0,0.8), transparent)'
+            }}
+          >
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '20px'
+            }}>
+              <span style={{ fontSize: '80px', lineHeight: '1' }}>🎫</span>
+              <span style={{
+                fontSize: '120px',
+                fontWeight: '900',
+                color: '#ffffff',
+                textShadow: '0 8px 16px rgba(0, 0, 0, 0.9)',
+                lineHeight: '1'
+              }}>
                 #{currentQueueNumber}
               </span>
             </div>
@@ -388,33 +450,59 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
   // Fallback to text display if no models
   return (
     <div 
-      className="min-h-screen flex flex-col items-center justify-center p-8"
       style={{ 
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '32px',
         background: settings.backgroundColor || '#ffffff',
         color: settings.textColor || '#000000'
       }}
     >
-      <div className="max-w-4xl w-full text-center space-y-6">
-        <h1 className="text-5xl font-bold leading-tight">
+      <div style={{ maxWidth: '1200px', width: '100%', textAlign: 'center' }}>
+        <h1 style={{ 
+          fontSize: '80px', 
+          fontWeight: 'bold', 
+          lineHeight: '1.2',
+          marginBottom: '40px'
+        }}>
           {settings.displayTitle || config.name}
         </h1>
         
         {settings.displayMessage && (
-          <p className="text-2xl leading-relaxed whitespace-pre-wrap">
+          <p style={{ 
+            fontSize: '40px', 
+            lineHeight: '1.6', 
+            whiteSpace: 'pre-wrap',
+            marginBottom: '32px'
+          }}>
             {settings.displayMessage}
           </p>
         )}
         
         {settings.customContent && (
           <div 
-            className="mt-8 p-8 rounded-lg"
-            style={{ background: 'rgba(255, 255, 255, 0.05)' }}
+            style={{ 
+              marginTop: '64px', 
+              padding: '32px', 
+              borderRadius: '12px',
+              background: 'rgba(255, 255, 255, 0.05)',
+              fontSize: '32px'
+            }}
             dangerouslySetInnerHTML={{ __html: settings.customContent }}
           />
         )}
       </div>
       
-      <div className="fixed bottom-4 right-4 text-sm opacity-60">
+      <div style={{
+        position: 'fixed',
+        bottom: '16px',
+        right: '16px',
+        fontSize: '20px',
+        opacity: 0.6
+      }}>
         Last updated: {new Date(config.updatedAt).toLocaleString()}
       </div>
     </div>

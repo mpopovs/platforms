@@ -197,3 +197,50 @@
 .emoji-picker-container .epr-category-nav button:hover {
   opacity: 0.8;
 }
+
+/* Samsung TV and Frame TV fullscreen button fixes */
+button[aria-label="Toggle fullscreen"],
+button[aria-label="Play animation"] {
+  touch-action: manipulation !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+/* Ensure proper z-index and positioning for overlay buttons */
+.w-full.h-full.relative > button {
+  pointer-events: auto !important;
+}
+
+/* Pin input field - Samsung TV compatibility */
+input[type="text"][inputmode="numeric"] {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+}
+
+/* Samsung Frame TV text rendering optimization */
+@media screen and (min-width: 1920px) {
+  /* Optimize text rendering for large TV displays */
+  body, div, span, p, h1, h2, h3 {
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  /* Ensure text shadows render properly */
+  [style*="textShadow"],
+  [style*="text-shadow"] {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+}
+
+/* Spinner animation for loading states */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
