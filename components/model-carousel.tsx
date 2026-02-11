@@ -536,8 +536,6 @@ export function ModelCarousel({
     }
   }, []);
   
-  const currentModel = useTextureCycling && currentPair ? currentPair.model : currentLegacyModel;
-  
   // Debug: Log texture data to check author info
   useEffect(() => {
     if (currentPair?.texture) {
