@@ -1,5 +1,6 @@
 import { redis } from './redis';
 import { supabase } from './supabase';
+import { normalizeStorageUrl } from './storage';
 import { 
   ViewerConfig, 
   ViewerSession, 
@@ -421,13 +422,13 @@ export async function getViewerModelsWithTextures(viewerId: string): Promise<Vie
       id: row.id,
       viewer_id: row.viewer_id,
       name: row.name,
-      model_file_url: row.model_file_url,
-      texture_template_url: row.texture_template_url,
+      model_file_url: normalizeStorageUrl(row.model_file_url),
+      texture_template_url: normalizeStorageUrl(row.texture_template_url),
       qr_code_data: row.qr_code_data,
-      qr_code_image_url: row.qr_code_image_url,
+      qr_code_image_url: normalizeStorageUrl(row.qr_code_image_url),
       order_index: row.order_index,
       short_code: row.short_code,
-      uv_map_url: row.uv_map_url,
+      uv_map_url: normalizeStorageUrl(row.uv_map_url),
       marker_id_base: row.marker_id_base,
       created_at: row.created_at,
       updated_at: row.updated_at
@@ -438,8 +439,8 @@ export async function getViewerModelsWithTextures(viewerId: string): Promise<Vie
       model.latest_texture = {
         id: row.latest_texture_id,
         model_id: row.id,
-        original_photo_url: row.latest_texture_original_photo_url,
-        corrected_texture_url: row.latest_texture_corrected_texture_url,
+        original_photo_url: normalizeStorageUrl(row.latest_texture_original_photo_url),
+        corrected_texture_url: normalizeStorageUrl(row.latest_texture_corrected_texture_url),
         uploaded_at: row.latest_texture_uploaded_at,
         processed_at: row.latest_texture_processed_at,
         author_name: row.latest_texture_author_name,
@@ -489,13 +490,13 @@ export async function getViewerModelsWithAllTextures(viewerId: string): Promise<
         id: row.model_id,
         viewer_id: viewerId,
         name: row.model_name,
-        model_file_url: row.model_file_url,
-        texture_template_url: row.texture_template_url,
+        model_file_url: normalizeStorageUrl(row.model_file_url),
+        texture_template_url: normalizeStorageUrl(row.texture_template_url),
         qr_code_data: row.qr_code_data,
-        qr_code_image_url: row.qr_code_image_url,
+        qr_code_image_url: normalizeStorageUrl(row.qr_code_image_url),
         order_index: row.order_index,
         short_code: row.short_code,
-        uv_map_url: row.uv_map_url,
+        uv_map_url: normalizeStorageUrl(row.uv_map_url),
         created_at: row.model_created_at,
         updated_at: row.model_updated_at,
         textures: []
@@ -508,8 +509,8 @@ export async function getViewerModelsWithAllTextures(viewerId: string): Promise<
       model.textures.push({
         id: row.texture_id,
         model_id: row.model_id,
-        original_photo_url: row.texture_original_photo_url,
-        corrected_texture_url: row.texture_corrected_texture_url,
+        original_photo_url: normalizeStorageUrl(row.texture_original_photo_url),
+        corrected_texture_url: normalizeStorageUrl(row.texture_corrected_texture_url),
         uploaded_at: row.texture_uploaded_at,
         processed_at: row.texture_processed_at,
         author_name: row.texture_author_name,

@@ -9,6 +9,23 @@ export const STORAGE_BUCKETS = {
 } as const;
 
 /**
+ * Normalize storage URLs to use HTTPS and remove port numbers
+ * Fixes mixed content issues when self-hosted Supabase returns HTTP URLs
+ */
+export function normalizeStorageUrl(url: string): string {
+  if (!url) return url;
+  
+  // Replace http://claypixels.eu:8000 with https://claypixels.eu
+  // Replace http://localhost:8000 with https://claypixels.eu (for internal URLs)
+  const publicUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://claypixels.eu';
+  
+  return url
+    .replace(/^http:\/\/claypixels\.eu:8000/, publicUrl)
+    .replace(/^http:\/\/localhost:8000/, publicUrl)
+    .replace(/^http:\/\/claypixels\.eu(?!:)/, publicUrl); // Also fix http without port
+}
+
+/**
  * Upload a 3D model file to storage
  */
 export async function upload3DModel(
@@ -44,8 +61,9 @@ export async function upload3DModel(
     .from(STORAGE_BUCKETS.MODELS_3D)
     .getPublicUrl(data.path);
   
-  console.log('Upload successful, URL:', urlData.publicUrl);
-  return urlData.publicUrl;
+  const normalizedUrl = normalizeStorageUrl(urlData.publicUrl);
+  console.log('Upload successful, URL:', normalizedUrl);
+  return normalizedUrl;
 }
 
 /**
@@ -77,7 +95,7 @@ export async function uploadTextureTemplate(
     .from(STORAGE_BUCKETS.TEXTURE_TEMPLATES)
     .getPublicUrl(data.path);
   
-  return urlData.publicUrl;
+  return normalizeStorageUrl(urlData.publicUrl);
 }
 
 /**
@@ -110,7 +128,7 @@ export async function uploadQRCodeImage(
     .from(STORAGE_BUCKETS.TEXTURE_TEMPLATES)
     .getPublicUrl(data.path);
   
-  return urlData.publicUrl;
+  return normalizeStorageUrl(urlData.publicUrl);
 }
 
 /**
@@ -140,7 +158,7 @@ export async function uploadUserTexturePhoto(
     .from(STORAGE_BUCKETS.USER_TEXTURE_PHOTOS)
     .getPublicUrl(data.path);
   
-  return urlData.publicUrl;
+  return normalizeStorageUrl(urlData.publicUrl);
 }
 
 /**
@@ -173,7 +191,7 @@ export async function uploadProcessedTexture(
     .from(STORAGE_BUCKETS.PROCESSED_TEXTURES)
     .getPublicUrl(data.path);
   
-  return urlData.publicUrl;
+  return normalizeStorageUrl(urlData.publicUrl);
 }
 
 /**
@@ -211,7 +229,7 @@ export async function uploadProcessedTextureFile(
     .from(STORAGE_BUCKETS.PROCESSED_TEXTURES)
     .getPublicUrl(data.path);
   
-  return urlData.publicUrl;
+  return normalizeStorageUrl(urlData.publicUrl);
 }
 
 /**
@@ -297,7 +315,7 @@ export async function deleteModelTextures(
       for (const file of files) {
         const filePath = `${viewerId}/${modelId}/${file.name}`;
         const { data: urlData } = client.storage.from(bucket).getPublicUrl(filePath);
-        await moveToDeletedImages(urlData.publicUrl, bucket, file.name, client);
+        await moveToDeletedImages(normalizeStorageUrl(urlData.publicUrl), bucket, file.name, client);
       }
       
       // Delete files from source bucket
