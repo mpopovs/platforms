@@ -529,9 +529,10 @@ export function ModelCarousel({
       console.error('[ModelCarousel] WebGL not supported on this device');
     } else {
       console.log('[ModelCarousel] WebGL is supported');
-      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+      const webglContext = gl as WebGLRenderingContext;
+      const debugInfo = webglContext.getExtension('WEBGL_debug_renderer_info');
       if (debugInfo) {
-        console.log('[ModelCarousel] GPU:', gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL));
+        console.log('[ModelCarousel] GPU:', webglContext.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL));
       }
     }
   }, []);
