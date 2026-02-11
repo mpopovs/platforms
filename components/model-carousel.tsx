@@ -56,10 +56,27 @@ export function ModelCarousel({
   const queueInitializedRef = useRef(false);
   const mouseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const model3DRef = useRef<Model3DHandle>(null);
+  const [modelLoadError, setModelLoadError] = useState(false);
   
   // Animation state
   const [modelHasAnimations, setModelHasAnimations] = useState(false);;
   const [modelIsPlaying, setModelIsPlaying] = useState(false);
+
+  // Handle loading changes with timeout detection
+  const handleLoadingChange = useCallback((loading: boolean) => {
+    setIsModelLoading(loading);
+    setModelLoadError(false);
+    
+    // If still loading after 15 seconds, might be an error
+    if (loading) {
+      setTimeout(() => {
+        if (loading) {
+          console.error('[ModelCarousel] Model load timeout - check network/CORS/URL');
+          setModelLoadError(true);
+        }
+      }, 15000);
+    }
+  }, []);
 
   // Default settings (museum-optimized) - memoized to prevent infinite loops
   const settings = useMemo(() => ({
@@ -490,6 +507,36 @@ export function ModelCarousel({
   const currentPair = useTextureCycling ? displayQueue[currentIndex] : null;
   const currentLegacyModel = !useTextureCycling ? sortedModels[currentIndex] : null;
   const currentModel = useTextureCycling && currentPair ? currentPair.model : currentLegacyModel;
+
+  // Debug logging for Samsung TV troubleshooting
+  useEffect(() => {
+    if (currentModel) {
+      console.log('[ModelCarousel] Current model:', {
+        id: currentModel.id,
+        name: currentModel.name,
+        modelUrl: currentModel.model_file_url,
+        hasUrl: !!currentModel.model_file_url,
+        urlLength: currentModel.model_file_url?.length
+      });
+    }
+  }, [currentModel]);
+
+  // WebGL check
+  useEffect(() => {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (!gl) {
+      console.error('[ModelCarousel] WebGL not supported on this device');
+    } else {
+      console.log('[ModelCarousel] WebGL is supported');
+      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+      if (debugInfo) {
+        console.log('[ModelCarousel] GPU:', gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL));
+      }
+    }
+  }, []);
+  
+  const currentModel = useTextureCycling && currentPair ? currentPair.model : currentLegacyModel;
   
   // Debug: Log texture data to check author info
   useEffect(() => {
@@ -620,64 +667,64 @@ export function ModelCarousel({
   return (
     <div className="w-full h-full" style={{ position: 'relative', backgroundColor, isolation: 'isolate' }}>
       <Canvas 
-        shadows 
+        shadows={false}
         style={{ 
           width: '100%', 
           height: '100%',
           position: 'absolute',
           top: 0,
-          left: 0
+          left: 0,
+          zIndex: 1,
+          display: 'block'
         }}
         gl={{
-          preserveDrawingBuffer: true,
-          powerPreference: 'high-performance'
+          antialias: true,
+          alpha: false,
+          premultipliedAlpha: false,
+          preserveDrawingBuffer: false,
+          powerPreference: 'default',
+          failIfMajorPerformanceCaveat: false,
+          stencil: false
+        }}
+        dpr={[1, 2]}
+        onCreated={({ gl, scene }) => {
+          console.log('[ModelCarousel] Canvas created successfully');
+          console.log('[ModelCarousel] WebGL Version:', gl.getParameter(gl.VERSION));
+          console.log('[ModelCarousel] WebGL Vendor:', gl.getParameter(gl.VENDOR));
+          scene.background = null;
         }}
       >
         <PerspectiveCamera makeDefault position={[0, 0, 8]} fov={50} />
         
-        {/* Simple ambient light */}
-        <ambientLight />
+        {/* Stronger ambient light for TV visibility */}
+        <ambientLight intensity={ambientLightIntensity * 2} />
         
-        {/* Hemisphere light - sky/ground illumination */}
-        <hemisphereLight 
-          args={[0xffffff, 0x444444, ambientLightIntensity * 3]} 
-        />
-        
-        {/* Key light - soft spotlight with penumbra for diffused edges */}
-        <spotLight 
-          position={[20, 30, 20]} 
-          intensity={directionalLightIntensity * 3}
-          angle={0.6}
-          penumbra={1}
-          decay={0}
-        />
-        
-        {/* Fill light - soft from front-left */}
-        <spotLight 
-          position={[-20, 20, 20]} 
+        {/* Main directional light from front */}
+        <directionalLight 
+          position={[5, 5, 5]} 
           intensity={directionalLightIntensity * 2}
-          angle={0.6}
-          penumbra={1}
-          decay={0}
+          castShadow={false}
         />
         
-        {/* Back light - soft illumination from back */}
-        <spotLight 
-          position={[0, 10, -30]} 
-          intensity={directionalLightIntensity * 2}
-          angle={0.6}
-          penumbra={1}
-          decay={0}
-        />
-        
-        {/* Bottom fill light - soft from below */}
-        <spotLight 
-          position={[0, -20, 10]} 
+        {/* Fill light from opposite side */}
+        <directionalLight 
+          position={[-5, 3, 3]} 
           intensity={directionalLightIntensity * 1.5}
-          angle={0.8}
-          penumbra={1}
-          decay={0}
+          castShadow={false}
         />
+        
+        {/* Back light for depth */}
+        <directionalLight 
+          position={[0, 3, -5]} 
+          intensity={directionalLightIntensity}
+          castShadow={false}
+        />
+        
+        {/* Test cube - visible if WebGL works (comment out in production) */}
+        {/* <mesh position={[0, 0, 0]}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial color="hotpink" />
+        </mesh> */}
         
         {/* 3D Model */}
         <Model3D 
@@ -688,7 +735,7 @@ export function ModelCarousel({
           modelId={currentModel.id}
           textureId={textureId}
           onAnimationStateChange={handleAnimationStateChange}
-          onLoadingChange={setIsModelLoading}
+          onLoadingChange={handleLoadingChange}
         />
         
         {/* Camera controls (optional - can disable for pure auto-rotation) */}
@@ -702,7 +749,7 @@ export function ModelCarousel({
       </Canvas>
 
       {/* Loading spinner overlay */}
-      {isModelLoading && (
+      {isModelLoading && !modelLoadError && (
         <div 
           style={{
             position: 'absolute',
@@ -713,7 +760,8 @@ export function ModelCarousel({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            pointerEvents: 'none'
+            pointerEvents: 'none',
+            flexDirection: 'column'
           }}
         >
           <div 
@@ -723,9 +771,37 @@ export function ModelCarousel({
               border: '8px solid rgba(255, 255, 255, 0.3)',
               borderTopColor: '#ffffff',
               borderRadius: '50%',
-              animation: 'spin 1s linear infinite'
+              animation: 'spin 1s linear infinite',
+              marginBottom: '20px'
             }}
           />
+          <div style={{ color: '#ffffff', fontSize: '32px', textAlign: 'center' }}>
+            Loading 3D model...
+          </div>
+        </div>
+      )}
+
+      {/* Error message if model fails to load */}
+      {modelLoadError && (
+        <div 
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+            flexDirection: 'column',
+            padding: '40px'
+          }}
+        >
+          <div style={{ color: '#ef4444', fontSize: '48px', marginBottom: '20px' }}>⚠️</div>
+          <div style={{ color: '#ffffff', fontSize: '32px', textAlign: 'center', maxWidth: '800px' }}>
+            Model loading error. Check console for details.
+          </div>
         </div>
       )}
       
