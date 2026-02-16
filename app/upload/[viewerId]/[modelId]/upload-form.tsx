@@ -1,10 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-import { Upload, CheckCircle, XCircle, Eye } from 'lucide-react';
+import { Upload, CheckCircle, XCircle, Eye, Camera, RefreshCw } from 'lucide-react';
 import { processImage } from '@/components/utils/imageProcessor';
-import { TexturePreview3D } from '@/components/texture-preview-3d';
 import { QueueStatus } from './queue-status';
 
 /**
@@ -101,24 +100,36 @@ export function UploadTextureForm({
   viewerId,
   modelId,
   modelUrl,
-  modelName
+  modelName,
+  onTextureProcessed,
+  onDetectionFailed,
+  onResetRef,
+  onRefresh,
+  detectionFailed,
+  onProcessingChange
 }: {
   viewerId: string;
   modelId: string;
   modelUrl: string;
   modelName: string;
+  onTextureProcessed?: (textureUrl: string | null) => void;
+  onDetectionFailed?: () => void;
+  onResetRef?: (resetFn: () => void) => void;
+  onRefresh?: () => void;
+  detectionFailed?: boolean;
+  onProcessingChange?: (isProcessing: boolean) => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [processedPreview, setProcessedPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [processing, setProcessing] = useState(false);
-  const [showPreviewFor3D, setShowPreviewFor3D] = useState(false);
   const [queueNumber, setQueueNumber] = useState<number | null>(null);
   const [result, setResult] = useState<{
     type: 'success' | 'error';
     message: string;
   } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     // Preload OpenCV.js on mount (only if not already loaded)
@@ -132,12 +143,17 @@ export function UploadTextureForm({
       document.head.appendChild(script);
     }
 
+    // Expose reset function to parent
+    if (onResetRef) {
+      onResetRef(handleDecline);
+    }
+
     // Don't remove the script on cleanup - let it stay loaded
     // This prevents re-downloading OpenCV on re-renders
     return () => {
       // Cleanup no longer removes the script
     };
-  }, []);
+  }, [onResetRef]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     e.preventDefault();
@@ -154,6 +170,11 @@ export function UploadTextureForm({
     setFile(selectedFile);
     setResult(null);
     setProcessedPreview(null);
+    
+    // Clear processed texture in parent component
+    if (onTextureProcessed) {
+      onTextureProcessed(null);
+    }
 
     // Create preview
     const reader = new FileReader();
@@ -164,6 +185,9 @@ export function UploadTextureForm({
 
     // Process image with ArUco markers
     setProcessing(true);
+    if (onProcessingChange) {
+      onProcessingChange(true);
+    }
     try {
       console.log('🎯 Processing image with ArUco markers...');
       const processed = await processImage(selectedFile, {
@@ -178,23 +202,36 @@ export function UploadTextureForm({
           type: 'success',
           message: '✅ ArUco markers detected! Texture cropped to 2048x2048 and ready to upload.'
         });
-        // Automatically show 3D preview
-        setShowPreviewFor3D(true);
+        // Notify parent component about processed texture
+        if (onTextureProcessed) {
+          onTextureProcessed(processed.dataUrl);
+        }
       } else {
         console.log('❌ No ArUco markers detected');
         setResult({
           type: 'error',
-          message: '❌ Could not detect ArUco markers. Please ensure all 4 markers (IDs 0-3) are clearly visible in the photo. You can still upload the original image.'
+          message: '❌ Could not detect ArUco markers. Please ensure all 4 markers (IDs 0-3) are clearly visible in the photo.'
         });
+        // Notify parent that detection failed
+        if (onDetectionFailed) {
+          onDetectionFailed();
+        }
       }
     } catch (error) {
       console.error('❌ Error processing image:', error);
       setResult({
         type: 'error',
-        message: '⚠️ Error processing image. You can still upload the original image.'
-        });
+        message: '⚠️ Error processing image.'
+      });
+      // Notify parent that detection failed
+      if (onDetectionFailed) {
+        onDetectionFailed();
+      }
     } finally {
       setProcessing(false);
+      if (onProcessingChange) {
+        onProcessingChange(false);
+      }
     }
   };
 
@@ -204,9 +241,6 @@ export function UploadTextureForm({
     }
 
     if (!file) return;
-
-    // Close preview if open
-    setShowPreviewFor3D(false);
     
     setUploading(true);
 
@@ -281,10 +315,33 @@ export function UploadTextureForm({
     }
   };
 
+  const handleDecline = () => {
+    // Reset all state
+    setFile(null);
+    setPreview(null);
+    setProcessedPreview(null);
+    setResult(null);
+    
+    // Reset the file input element
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    
+    // Clear processed texture in parent component
+    if (onTextureProcessed) {
+      onTextureProcessed(null);
+    }
+  };
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-400 transition-colors">
+    <form onSubmit={handleSubmit}>
+      {/* Photo button - fixed at bottom when visible */}
+      {!processedPreview && !processing && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 p-4 bg-white ">
+          <div className="w-full lg:max-w-2xl lg:mx-auto">
+            <div className="bg-blue-500 rounded-xl p-12 text-center hover:bg-blue-600 transition-colors shadow-lg">
         <input
+          ref={fileInputRef}
           type="file"
           id="photo"
           name="photo"
@@ -292,90 +349,58 @@ export function UploadTextureForm({
           capture="environment"
           onChange={handleFileChange}
           className="hidden"
-          disabled={processing}
+          disabled={processing || detectionFailed}
         />
-        <label
-          htmlFor="photo"
-          className={`cursor-pointer block ${processing ? 'opacity-50 pointer-events-none' : ''}`}
-        >
-          {processing ? (
-            <div className="text-6xl animate-pulse">⏳</div>
-          ) : file ? (
-            <div className="text-6xl">✅</div>
-          ) : (
-            // <Upload className="h-16 w-16 text-blue-400 mx-auto" />
-            "Foto"
-          )}
-        </label>
-      </div>
-
-      {processing && (
-        <div className="rounded-lg p-4 bg-blue-50 border border-blue-200 text-center">
-          <div className="text-4xl animate-spin inline-block">Process</div>
-        </div>
-      )}
-
-      {preview && !processedPreview && (
-        <div className="rounded-lg overflow-hidden border-2 border-gray-300">
-          <img
-            src={preview}
-            alt="Preview"
-            className="w-full h-auto"
-          />
-        </div>
-      )}
-
-      {processedPreview && (
-        <div className="space-y-3">
-          <div className="rounded-lg overflow-hidden border-4 border-green-400 shadow-lg">
-            <div className="text-center py-2 bg-green-50">
-              <span className="text-3xl">Griež</span>
-            </div>
-            <img
-              src={processedPreview}
-              alt="Preview"
-              className="w-full h-auto"
-            />
-          </div>
-          <details>
-            <summary className="cursor-pointer text-center text-2xl hover:scale-110 transition-transform inline-block w-full">Foto</summary>
-            {preview && (
-              <div className="mt-2 rounded-lg overflow-hidden border-2 border-gray-300">
-                <img
-                  src={preview}
-                  alt="Preview"
-                  className="w-full h-auto"
-                />
-              </div>
+        {detectionFailed ? (
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="cursor-pointer block w-full"
+          >
+            <RefreshCw className="h-24 w-24 text-white mx-auto" />
+          </button>
+        ) : (
+          <label
+            htmlFor="photo"
+            className={`cursor-pointer block ${processing ? 'opacity-50 pointer-events-none' : ''}`}
+          >
+            {file ? (
+              <div className="text-6xl">✅</div>
+            ) : (
+              <Camera className="h-24 w-24 text-white mx-auto" />
             )}
-          </details>
-        </div>
-      )}
-
-      {result && !queueNumber && (
-        <div
-          className={`rounded-lg p-6 text-center ${
-            result.type === 'success'
-              ? 'bg-green-50 border-2 border-green-300'
-              : 'bg-amber-50 border-2 border-amber-300'
-          }`}
-        >
-          <div className="text-5xl">
-            {result.type === 'success' ? '✅' : '⚠️'}
+          </label>
+        )}
+      </div>
           </div>
         </div>
       )}
 
-      {/* Upload button - hidden when preview is showing or after successful upload */}
-      {!showPreviewFor3D && !queueNumber && (
-        <Button
-          type="submit"
-          disabled={!file || uploading || processing || !processedPreview}
-          className="w-full text-2xl py-8"
-          size="lg"
-        >
-          {uploading ? '⏳' : 'Aiziet'}
-        </Button>
+      {/* Approve/Decline buttons - floating circular buttons at bottom when texture is processed */}
+      {processedPreview && !queueNumber && (
+        <div className="fixed bottom-8 left-0 right-0 z-50 px-4">
+          <div className="w-full lg:max-w-2xl lg:mx-auto">
+            <div className="flex justify-center gap-16">
+              <Button
+                type="button"
+                onClick={handleDecline}
+                disabled={uploading}
+                className="w-20 h-20 rounded-full bg-red-500 hover:bg-red-600 shadow-2xl p-0 flex items-center justify-center"
+                size="lg"
+              >
+                <XCircle className="!h-12 !w-12" />
+              </Button>
+              <Button
+                type="submit"
+                disabled={uploading}
+                className="w-20 h-20 rounded-full bg-green-500 hover:bg-green-600 shadow-2xl p-0 flex items-center justify-center"
+                size="lg"
+              >
+                {uploading ? '⏳' : <CheckCircle className="!h-12 !w-12" />}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Queue Status after successful upload */}
@@ -385,20 +410,6 @@ export function UploadTextureForm({
           <div className="text-6xl font-bold text-purple-900 mb-2">#{queueNumber}</div>
           <QueueStatus queueNumber={queueNumber} viewerId={viewerId} />
         </div>
-      )}
-
-      {/* 3D Preview Dialog - shown immediately after processing */}
-      {processedPreview && (
-        <TexturePreview3D
-          open={showPreviewFor3D}
-          onOpenChange={(open) => {
-            setShowPreviewFor3D(open);
-          }}
-          modelUrl={modelUrl}
-          textureUrl={processedPreview}
-          modelName={modelName}
-          onUpload={handleSubmit}
-        />
       )}
     </form>
   );
