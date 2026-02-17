@@ -15,14 +15,16 @@ export const STORAGE_BUCKETS = {
 export function normalizeStorageUrl(url: string): string {
   if (!url) return url;
   
-  // Replace http://claypixels.eu:8000 with https://claypixels.eu
-  // Replace http://localhost:8000 with https://claypixels.eu (for internal URLs)
-  const publicUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://claypixels.eu';
+  // Replace http://db.claypixels.eu:8000 with https://db.claypixels.eu
+  // Replace http://localhost:8000 with https://db.claypixels.eu (for internal URLs)
+  // Also fix old claypixels.eu URLs to use db.claypixels.eu
+  const publicUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://db.claypixels.eu';
   
   return url
-    .replace(/^http:\/\/claypixels\.eu:8000/, publicUrl)
+    .replace(/^https?:\/\/claypixels\.eu(:\d+)?/, publicUrl) // Fix old claypixels.eu URLs
+    .replace(/^http:\/\/db\.claypixels\.eu:8000/, publicUrl)
     .replace(/^http:\/\/localhost:8000/, publicUrl)
-    .replace(/^http:\/\/claypixels\.eu(?!:)/, publicUrl); // Also fix http without port
+    .replace(/^http:\/\/db\.claypixels\.eu(?!:)/, publicUrl); // Also fix http without port
 }
 
 /**
