@@ -380,7 +380,7 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
           displayModes={settings.displayModes}
           textureCycling={settings.textureCycling}
           viewerId={viewerId}
-          logoUrl={config.logo_url}
+          logoUrl={settings.showLogoInViewer !== false ? config.logo_url : null}
           ambientLightIntensity={settings.ambientLightIntensity}
           directionalLightIntensity={settings.directionalLightIntensity}
         />

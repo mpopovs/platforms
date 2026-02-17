@@ -26,6 +26,8 @@ export interface ViewerSettings {
   // Lighting settings
   ambientLightIntensity?: number; // Ambient light intensity (default: 0.6)
   directionalLightIntensity?: number; // Directional light intensity (default: 0.8)
+  // Logo settings
+  showLogoInViewer?: boolean; // Show logo in viewer display (default: true). Logo always shown on certificates.
   // Widget settings
   widgetEnabled?: boolean; // Enable widget embedding (default: false)
   storageMode?: 'server' | 'local' | 'hybrid'; // Where to store processed textures (default: 'hybrid')

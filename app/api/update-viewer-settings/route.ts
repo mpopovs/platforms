@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { viewerId, textureCycling, rotationSpeed, backgroundColor, showModelName, ambientLightIntensity, directionalLightIntensity, widgetEnabled, storageMode, enableArucoDetection, defaultModelId, surveyEnabled, certificateBottomImageUrl } = body as {
+    const { viewerId, textureCycling, rotationSpeed, backgroundColor, showModelName, ambientLightIntensity, directionalLightIntensity, widgetEnabled, storageMode, enableArucoDetection, defaultModelId, surveyEnabled, certificateBottomImageUrl, showLogoInViewer } = body as {
       viewerId: string;
       textureCycling: TextureCyclingSettings;
       rotationSpeed?: number;
@@ -35,6 +35,7 @@ export async function POST(request: NextRequest) {
       defaultModelId?: string;
       surveyEnabled?: boolean;
       certificateBottomImageUrl?: string;
+      showLogoInViewer?: boolean;
     };
 
     if (!viewerId) {
@@ -72,6 +73,7 @@ export async function POST(request: NextRequest) {
       rotationSpeed: rotationSpeed ?? viewer.settings?.rotationSpeed ?? 0.5,
       backgroundColor: backgroundColor ?? viewer.settings?.backgroundColor ?? '#000000',
       showModelName: showModelName ?? viewer.settings?.showModelName ?? true,
+      showLogoInViewer: showLogoInViewer ?? viewer.settings?.showLogoInViewer ?? true,
       ambientLightIntensity: ambientLightIntensity ?? viewer.settings?.ambientLightIntensity ?? 0.6,
       directionalLightIntensity: directionalLightIntensity ?? viewer.settings?.directionalLightIntensity ?? 0.8,
       widgetEnabled: widgetEnabled ?? viewer.settings?.widgetEnabled ?? false,

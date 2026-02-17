@@ -424,11 +424,11 @@ export function UploadTextureForm({
   };
 
   const hasArUcoError = result?.type === 'error' && !queueNumber;
-  const showQueueStatus = Boolean(queueNumber && result?.type === 'success');
+  const uploadedSuccessfully = Boolean(queueNumber && result?.type === 'success');
 
   useEffect(() => {
     if (onQueueStatusChange) {
-      onQueueStatusChange(showQueueStatus);
+      onQueueStatusChange(uploadedSuccessfully);
     }
 
     return () => {
@@ -436,7 +436,7 @@ export function UploadTextureForm({
         onQueueStatusChange(false);
       }
     };
-  }, [showQueueStatus, onQueueStatusChange]);
+  }, [uploadedSuccessfully, onQueueStatusChange]);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6 pb-32">
@@ -505,12 +505,7 @@ export function UploadTextureForm({
         </>
       )}
 
-      {/* Queue Status after successful upload */}
-      {showQueueStatus && (
-        <div className="fixed top-16 left-0 right-0 z-40 flex justify-center px-4">
-          <QueueStatus queueNumber={queueNumber!} viewerId={viewerId} />
-        </div>
-      )}
+      {/* Queue Status disabled */}
 
       {/* Survey - shown after successful upload */}
       {showSurvey && textureId && (

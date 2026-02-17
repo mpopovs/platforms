@@ -38,14 +38,14 @@ export async function generateCertificate(
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, size, size);
 
-  // Draw 3D model capture with padding
-  const padding = 100;
-  const imageSize = size - (padding * 2);
-  const scale = Math.min(imageSize / previewImage.width, imageSize / previewImage.height);
+  // Draw 3D model capture with 20px padding
+  const padding = 20;
+  const availableSize = size - (padding * 2);
+  const scale = Math.max(availableSize / previewImage.width, availableSize / previewImage.height);
   const drawWidth = previewImage.width * scale;
   const drawHeight = previewImage.height * scale;
-  const drawX = padding + (imageSize - drawWidth) / 2;
-  const drawY = padding + (imageSize - drawHeight) / 2;
+  const drawX = padding + (availableSize - drawWidth) / 2;
+  const drawY = padding + (availableSize - drawHeight) / 2;
   ctx.drawImage(previewImage, drawX, drawY, drawWidth, drawHeight);
 
   // Top left corner: Order number only (dark grey)

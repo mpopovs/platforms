@@ -656,6 +656,110 @@ export async function delete3DModelAction(
 }
 
 /**
+ * Update 3D model name
+ */
+export async function updateModelNameAction(
+  prevState: any,
+  formData: FormData
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  if (!user) {
+    return { success: false, error: 'You must be logged in' };
+  }
+
+  const modelId = formData.get('modelId') as string;
+  const modelName = formData.get('modelName') as string;
+
+  if (!modelId || !modelName) {
+    return { success: false, error: 'Model ID and name are required' };
+  }
+
+  try {
+    // Get model and verify ownership
+    const model = await getViewerModel(modelId, supabase);
+    
+    if (!model) {
+      return { success: false, error: 'Model not found' };
+    }
+
+    const viewerConfig = await getViewerConfig(model.viewer_id, supabase);
+    
+    if (!viewerConfig || viewerConfig.userId !== user.id) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    // Update model name
+    await updateViewerModel(modelId, { name: modelName }, supabase);
+
+    revalidatePath('/admin/viewers');
+    return { success: true, message: 'Model name updated successfully' };
+  } catch (error: any) {
+    console.error('Error updating model name:', error);
+    return { success: false, error: error.message || 'Failed to update model name' };
+  }
+}
+
+/**
+ * Replace/update 3D model file
+ */
+export async function updateModelFileAction(
+  prevState: any,
+  formData: FormData
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  if (!user) {
+    return { success: false, error: 'You must be logged in' };
+  }
+
+  const modelId = formData.get('modelId') as string;
+  const modelFile = formData.get('modelFile') as File;
+
+  if (!modelId || !modelFile) {
+    return { success: false, error: 'Model ID and file are required' };
+  }
+
+  try {
+    // Get model and verify ownership
+    const model = await getViewerModel(modelId, supabase);
+    
+    if (!model) {
+      return { success: false, error: 'Model not found' };
+    }
+
+    const viewerConfig = await getViewerConfig(model.viewer_id, supabase);
+    
+    if (!viewerConfig || viewerConfig.userId !== user.id) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    // Validate file
+    if (!isValid3DModelFile(modelFile)) {
+      return { success: false, error: 'Invalid 3D model file. Supported formats: .glb, .gltf, .obj, .fbx' };
+    }
+
+    if (!isValidFileSize(modelFile, 50)) { // 50MB max
+      return { success: false, error: 'File too large. Maximum size: 50MB' };
+    }
+
+    // Upload new model file
+    const modelFileUrl = await upload3DModel(user.id, model.viewer_id, modelId, modelFile, supabase);
+
+    // Update model file URL
+    await updateViewerModel(modelId, { model_file_url: modelFileUrl }, supabase);
+
+    revalidatePath('/admin/viewers');
+    return { success: true, message: '3D model file updated successfully' };
+  } catch (error: any) {
+    console.error('Error updating model file:', error);
+    return { success: false, error: error.message || 'Failed to update model file' };
+  }
+}
+
+/**
  * Reorder models in a viewer
  */
 export async function reorderModelsAction(

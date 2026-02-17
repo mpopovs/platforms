@@ -4,17 +4,19 @@ import { useState, useEffect, use, useCallback } from 'react';
 import { useActionState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Eye, Copy, ArrowLeft, Settings, Trash2, LinkIcon, QrCode, Download, Map as MapIcon, FileImage, Palette, Upload, Plus, FileText, BarChart3 } from 'lucide-react';
+import { Eye, Copy, ArrowLeft, Settings, Trash2, LinkIcon, QrCode, Download, Map as MapIcon, FileImage, Palette, Upload, Plus, FileText, BarChart3, Edit } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { 
+import {
   deleteViewerAction,
   updateViewerAction,
   generateNewPinAction,
   generateEmbedTokenAction,
   getViewerModelsWithTexturesAction,
   upload3DModelAction,
-  delete3DModelAction
+  delete3DModelAction,
+  updateModelNameAction,
+  updateModelFileAction
 } from '@/app/actions';
 import type { ViewerModelWithTexture } from '@/lib/types/viewer';
 import { ViewerSettingsDialog } from '@/components/viewer-settings-dialog';
@@ -38,6 +40,7 @@ type Viewer = {
     backgroundColor?: string;
     rotationSpeed?: number;
     showModelName?: boolean;
+    showLogoInViewer?: boolean;
     ambientLightIntensity?: number;
     directionalLightIntensity?: number;
     widgetEnabled?: boolean;
@@ -211,6 +214,7 @@ function ModelCard({
   const [showTexturesDialog, setShowTexturesDialog] = useState(false);
   const [showUVMapDialog, setShowUVMapDialog] = useState(false);
   const [showSVGTemplateDialog, setShowSVGTemplateDialog] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
   const [uploadingUVMap, setUploadingUVMap] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [uvSvgContent, setUvSvgContent] = useState('');
@@ -407,15 +411,25 @@ function ModelCard({
                 </div>
               )}
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-red-500 hover:text-red-700 hover:bg-red-50"
-              onClick={handleDeleteModel}
-              disabled={isDeleting}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
+            <div className="flex gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                onClick={() => setShowEditDialog(true)}
+              >
+                <Edit className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                onClick={handleDeleteModel}
+                disabled={isDeleting}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
 
           {shortLink && (
@@ -637,7 +651,138 @@ function ModelCard({
           </div>
         </DialogContent>
       </Dialog>
+
+      <EditModelDialog
+        model={model}
+        onSuccess={onDelete}
+        open={showEditDialog}
+        onOpenChange={setShowEditDialog}
+      />
     </>
+  );
+}
+
+function EditModelDialog({
+  model,
+  onSuccess,
+  open,
+  onOpenChange
+}: {
+  model: ViewerModelWithTexture;
+  onSuccess: () => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [nameState, nameAction, isNamePending] = useActionState<any, FormData>(
+    updateModelNameAction,
+    {}
+  );
+  const [fileState, fileAction, isFilePending] = useActionState<any, FormData>(
+    updateModelFileAction,
+    {}
+  );
+
+  useEffect(() => {
+    if (nameState.success) {
+      onSuccess();
+    }
+  }, [nameState.success, onSuccess]);
+
+  useEffect(() => {
+    if (fileState.success) {
+      onSuccess();
+    }
+  }, [fileState.success, onSuccess]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit 3D Model</DialogTitle>
+          <DialogDescription>
+            Update the model name or replace the 3D model file.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-6">
+          {/* Update Name Form */}
+          <form action={nameAction} className="space-y-4">
+            <input type="hidden" name="modelId" value={model.id} />
+            
+            <div className="space-y-2">
+              <Label htmlFor="modelName">Model Name</Label>
+              <Input
+                id="modelName"
+                name="modelName"
+                type="text"
+                defaultValue={model.name}
+                placeholder="My 3D Model"
+                required
+              />
+            </div>
+
+            {nameState.error && (
+              <div className="p-3 text-sm text-red-600 bg-red-50 rounded-md">
+                {nameState.error}
+              </div>
+            )}
+            {nameState.success && (
+              <div className="p-3 text-sm text-green-600 bg-green-50 rounded-md">
+                {nameState.message}
+              </div>
+            )}
+
+            <Button type="submit" className="w-full" disabled={isNamePending}>
+              {isNamePending ? 'Updating...' : 'Update Name'}
+            </Button>
+          </form>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-white px-2 text-muted-foreground">Or</span>
+            </div>
+          </div>
+
+          {/* Replace File Form */}
+          <form action={fileAction} className="space-y-4">
+            <input type="hidden" name="modelId" value={model.id} />
+            
+            <div className="space-y-2">
+              <Label htmlFor="modelFile">Replace 3D Model File</Label>
+              <Input
+                id="modelFile"
+                name="modelFile"
+                type="file"
+                accept=".glb,.gltf,.obj"
+                required
+              />
+              <p className="text-xs text-gray-500">
+                Current: {model.model_file_url.split('/').pop()}
+              </p>
+              <p className="text-xs text-gray-500">Supported: GLB, GLTF, OBJ (max 50MB)</p>
+            </div>
+
+            {fileState.error && (
+              <div className="p-3 text-sm text-red-600 bg-red-50 rounded-md">
+                {fileState.error}
+              </div>
+            )}
+            {fileState.success && (
+              <div className="p-3 text-sm text-green-600 bg-green-50 rounded-md">
+                {fileState.message}
+              </div>
+            )}
+
+            <Button type="submit" className="w-full" disabled={isFilePending}>
+              {isFilePending ? 'Uploading...' : 'Replace File'}
+            </Button>
+          </form>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -868,6 +1013,7 @@ export default function ViewerDetailPage({ params }: { params: Promise<{ viewerI
                 rotationSpeed={viewer.settings.rotationSpeed}
                 backgroundColor={viewer.settings.backgroundColor}
                 showModelName={viewer.settings.showModelName}
+                showLogoInViewer={viewer.settings.showLogoInViewer}
                 ambientLightIntensity={viewer.settings.ambientLightIntensity}
                 directionalLightIntensity={viewer.settings.directionalLightIntensity}
                 widgetEnabled={viewer.settings.widgetEnabled}

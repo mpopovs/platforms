@@ -29,6 +29,7 @@ interface ViewerSettingsDialogProps {
   embedCode?: string;
   surveyEnabled?: boolean;
   certificateBottomImageUrl?: string;
+  showLogoInViewer?: boolean;
 }
 
 export function ViewerSettingsDialog({
@@ -51,7 +52,8 @@ export function ViewerSettingsDialog({
   onGenerateEmbed,
   embedCode,
   surveyEnabled: initialSurveyEnabled,
-  certificateBottomImageUrl: initialCertificateBottomImageUrl
+  certificateBottomImageUrl: initialCertificateBottomImageUrl,
+  showLogoInViewer: initialShowLogoInViewer
 }: ViewerSettingsDialogProps) {
   const [open, setOpen] = useState(false);
   
@@ -71,6 +73,7 @@ export function ViewerSettingsDialog({
   const [rotationSpeed, setRotationSpeed] = useState(initialRotationSpeed ?? 0.5);
   const [backgroundColor, setBackgroundColor] = useState(initialBackgroundColor ?? '#000000');
   const [showModelName, setShowModelName] = useState(initialShowModelName ?? true);
+  const [showLogoInViewer, setShowLogoInViewer] = useState(initialShowLogoInViewer ?? true);
   const [ambientLightIntensity, setAmbientLightIntensity] = useState(initialAmbientLightIntensity ?? 0.6);
   const [directionalLightIntensity, setDirectionalLightIntensity] = useState(initialDirectionalLightIntensity ?? 0.8);
   
@@ -123,7 +126,8 @@ export function ViewerSettingsDialog({
           enableArucoDetection,
           defaultModelId,
           surveyEnabled,
-          certificateBottomImageUrl
+          certificateBottomImageUrl,
+          showLogoInViewer
         })
       });
 
@@ -356,6 +360,22 @@ export function ViewerSettingsDialog({
             </div>
             <p className="text-xs text-gray-500 -mt-2">
               Display the model name overlay in the viewer
+            </p>
+
+            <div className="flex items-center space-x-2 pt-2">
+              <input
+                type="checkbox"
+                id="showLogoInViewer"
+                checked={showLogoInViewer}
+                onChange={(e) => setShowLogoInViewer(e.target.checked)}
+                className="rounded"
+              />
+              <Label htmlFor="showLogoInViewer" className="font-normal cursor-pointer text-sm">
+                Show logo in viewer
+              </Label>
+            </div>
+            <p className="text-xs text-gray-500 -mt-2">
+              Display the logo in the viewer. Logo always appears on certificates.
             </p>
 
             {/* Lighting Settings */}
