@@ -248,6 +248,7 @@ export function Inline3DPreview({
             rotationSpeed={0.3}
             modelId="inline-preview"
             textureId="inline-preview-texture"
+            disableCache={true}
           />
           
           {/* Camera controls */}

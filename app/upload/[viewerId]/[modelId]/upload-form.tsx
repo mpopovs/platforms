@@ -353,29 +353,36 @@ export function UploadTextureForm({
         const processedFile = new File([optimizedBlob], `cropped_${uploadFile.name.replace(/\.[^.]+$/, ext)}`, { type: optimizedBlob.type });
         console.log(`✅ Processed texture converted to ${optimizedBlob.type}: ${processedFile.size} bytes`);
 
+        // Compress original photo for storage (reduced size but usable for later)
+        const compressedOriginal = await compressImage(uploadFile, 1536, 0.75);
+        console.log(`✅ Original photo compressed: ${uploadFile.size} → ${compressedOriginal.size} bytes (${Math.round((1 - compressedOriginal.size / uploadFile.size) * 100)}% reduction)`);
+
         // Upload:
         // 1. Processed/cropped texture as main 'photo' (WebP format)
-        // 2. Original uncropped photo as 'originalPhoto' (preserved for later use)
+        // 2. Original uncropped photo as 'originalPhoto' (compressed but usable for later use)
         formData.append('photo', processedFile);
-        formData.append('originalPhoto', uploadFile); // Upload original file unmodified
+        formData.append('originalPhoto', compressedOriginal);
         formData.append('clientProcessed', 'true');
         
-        console.log(`✅ Uploading processed texture (${processedFile.size} bytes) + original photo (${uploadFile.size} bytes)`);
+        console.log(`✅ Uploading processed texture (${processedFile.size} bytes) + compressed original (${compressedOriginal.size} bytes)`);
       } catch (error) {
         console.error('❌ Error processing images:', error);
-        console.log('⚠️ Falling back to original image');
-        formData.append('photo', uploadFile);
+        setResult({
+          type: 'error',
+          message: '❌ Failed to process texture. ArUco markers are required.'
+        });
+        setUploading(false);
+        return;
       }
     } else {
-      console.log('📤 Compressing original image (no ArUco processing)');
-      try {
-        const compressedFile = await compressImage(uploadFile, 2048, 0.85);
-        console.log(`✅ Original compressed: ${uploadFile.size} → ${compressedFile.size} bytes (${Math.round((1 - compressedFile.size / uploadFile.size) * 100)}% reduction)`);
-        formData.append('photo', compressedFile);
-      } catch (error) {
-        console.error('❌ Error compressing image:', error);
-        formData.append('photo', uploadFile);
-      }
+      // No ArUco markers detected - should not reach here as file is cleared on detection failure
+      console.error('❌ No processed preview available - ArUco markers required');
+      setResult({
+        type: 'error',
+        message: '❌ ArUco markers are required for upload. Please retake the photo with all 4 markers visible.'
+      });
+      setUploading(false);
+      return;
     }
 
     try {

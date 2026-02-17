@@ -23,6 +23,7 @@ interface Model3DProps {
   textureId?: string;
   onAnimationStateChange?: (hasAnimations: boolean, isPlaying: boolean) => void;
   onLoadingChange?: (isLoading: boolean) => void;
+  disableCache?: boolean; // Skip IndexedDB caching (e.g., for upload previews)
 }
 
 /**
@@ -37,7 +38,8 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
   modelId = '',
   textureId = '',
   onAnimationStateChange,
-  onLoadingChange
+  onLoadingChange,
+  disableCache = false
 }, ref) => {
   const meshRef = useRef<THREE.Group>(null);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
@@ -114,8 +116,11 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
 
     const loadModelWithCache = async () => {
       try {
+        // Skip cache if disabled or using blob URLs (temporary)
+        const shouldUseCache = !disableCache && !modelUrl.startsWith('blob:');
+        
         // Check IndexedDB cache first
-        const cachedBlob = await getModel(modelUrl);
+        const cachedBlob = shouldUseCache ? await getModel(modelUrl) : null;
         
         if (cachedBlob) {
           // Load from cached blob
@@ -163,13 +168,15 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
           const response = await fetch(modelUrl);
           
           if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            console.error(`[Model3D] Failed to fetch model: HTTP ${response.status}`);
+            setIsLoading(false);
+            return;
           }
           
           const blob = await response.blob();
           
-          // Store in IndexedDB for next time
-          if (modelId) {
+          // Store in IndexedDB for next time (skip if caching disabled)
+          if (shouldUseCache && modelId) {
             await storeModel(modelUrl, blob, modelId).catch((err: unknown) => 
               console.warn('[Cache] Failed to store model:', err)
             );
@@ -217,6 +224,7 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
         }
       } catch (error) {
         console.error('[Model3D] Error loading model from URL:', modelUrl, error);
+        setIsLoading(false);
       }
     };
 
@@ -273,25 +281,26 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
           return;
         }
 
-        console.log('[Texture] Loading texture:', textureUrl.substring(0, 50) + '...');
+        // Skip cache if disabled or using blob/data URLs (temporary)
+        const shouldUseCache = !disableCache && !textureUrl.startsWith('blob:') && !textureUrl.startsWith('data:');
 
-        // If it's a data URL, load directly without caching
-        if (textureUrl.startsWith('data:')) {
-            console.log('[Texture] Data URL detected, skipping cache');
+        // If it's a data URL or blob URL, load directly without caching
+        if (textureUrl.startsWith('data:') || textureUrl.startsWith('blob:')) {
+            console.log('[Texture] Data/Blob URL detected, skipping cache');
             const textureLoader = new THREE.TextureLoader();
             textureLoader.load(textureUrl, (loadedTexture) => {
               loadedTexture.colorSpace = THREE.SRGBColorSpace;
               loadedTexture.flipY = false;
               setTexture(loadedTexture);
-              console.log('[Texture] Loaded from data URL successfully');
+              console.log('[Texture] Loaded from temporary URL successfully');
             }, undefined, (err) => {
-              console.error('[Texture] Failed to load from data URL:', err);
+              console.error('[Texture] Failed to load from temporary URL:', err);
             });
             return;
         }
 
-        // Check IndexedDB cache first
-        const cachedBlob = await getTexture(textureUrl);
+        // Check IndexedDB cache first (skip if caching disabled)
+        const cachedBlob = shouldUseCache ? await getTexture(textureUrl) : null;
         
         if (cachedBlob) {
           console.log('[Texture] Found in cache');
@@ -314,14 +323,15 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
           const response = await fetch(textureUrl);
           
           if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            console.error(`[Texture] Failed to fetch: HTTP ${response.status}`);
+            return;
           }
           
           const blob = await response.blob();
           console.log('[Texture] Fetched successfully, size:', blob.size);
           
-          // Store in IndexedDB for next time
-          if (modelId && textureId) {
+          // Store in IndexedDB for next time (skip if caching disabled)
+          if (shouldUseCache && modelId && textureId) {
             await storeTexture(textureUrl, blob, modelId, textureId).catch((err: unknown) =>
               console.warn('[Cache] Failed to store texture:', err)
             );
