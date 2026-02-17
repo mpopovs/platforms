@@ -102,11 +102,11 @@ async function ensureOpenCVLoaded(): Promise<void> {
             // ignore transient errors while module initializes
           }
 
-          if (Date.now() - start > 30000) {
+          if (Date.now() - start > 60000) {
             clearInterval(checkReady);
-            console.error('❌ OpenCV.js failed to initialize after 30 seconds');
+            console.error('❌ OpenCV.js failed to initialize after 60 seconds');
             cvLoadingPromise = null;
-            reject(new Error('OpenCV.js failed to initialize after 30 seconds'));
+            reject(new Error('OpenCV.js failed to initialize after 60 seconds'));
           }
         }, 100);
       };
@@ -1289,7 +1289,8 @@ export async function processImage(file: File, options: TextureProcessingOptions
         const processedCanvas = await correctPerspective(canvas, markers, targetSize);
 
         if (processedCanvas) {
-          const dataUrl = processedCanvas.toDataURL('image/webp', 0.92);
+          // Use JPEG as fallback since WebP toDataURL is not supported on all mobile browsers
+          const dataUrl = canvasToDataUrl(processedCanvas, 0.92);
           return {
             dataUrl,
             width: processedCanvas.width,
@@ -1315,7 +1316,7 @@ export async function processImage(file: File, options: TextureProcessingOptions
       const processedCanvas = await correctPerspective(canvas, markers, targetSize);
 
       if (processedCanvas) {
-        const dataUrl = processedCanvas.toDataURL('image/webp', 0.92);
+        const dataUrl = canvasToDataUrl(processedCanvas, 0.92);
         return {
           dataUrl,
           width: processedCanvas.width,
@@ -1373,7 +1374,63 @@ export async function processImageByBoundary(file: File, targetSize: number = 20
   }
 }
 
+/**
+ * Convert canvas to data URL with WebP support detection.
+ * Falls back to JPEG on browsers that don't support WebP canvas encoding (older iOS Safari).
+ */
+function canvasToDataUrl(canvas: HTMLCanvasElement, quality: number = 0.92): string {
+  // Try WebP first
+  const webpUrl = canvas.toDataURL('image/webp', quality);
+  // If browser doesn't support WebP, toDataURL returns 'data:image/png;...' instead
+  if (webpUrl.startsWith('data:image/webp')) {
+    return webpUrl;
+  }
+  // Fall back to JPEG which is universally supported and smaller than PNG
+  console.log('[Mobile] WebP canvas encoding not supported, falling back to JPEG');
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
+// Maximum canvas dimension safe for mobile browsers
+// iOS Safari has a hard limit (~16MP total pixels, ~4096x4096 safe max)
+const MAX_CANVAS_DIMENSION = 4096;
+
 async function createCanvasFromFile(file: File): Promise<HTMLCanvasElement> {
+  // Prefer createImageBitmap for better memory handling and EXIF orientation support
+  if (typeof createImageBitmap !== 'undefined') {
+    try {
+      // createImageBitmap automatically handles EXIF orientation in modern browsers
+      const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' as ImageOrientation });
+      
+      let width = bitmap.width;
+      let height = bitmap.height;
+
+      // Scale down if exceeding mobile canvas limits
+      if (width > MAX_CANVAS_DIMENSION || height > MAX_CANVAS_DIMENSION) {
+        const scale = Math.min(MAX_CANVAS_DIMENSION / width, MAX_CANVAS_DIMENSION / height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+        console.log(`[Mobile] Scaling image from ${bitmap.width}x${bitmap.height} to ${width}x${height}`);
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        bitmap.close();
+        throw new Error('Could not get canvas context');
+      }
+
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      bitmap.close();
+      return canvas;
+    } catch (e) {
+      console.warn('[Mobile] createImageBitmap failed, falling back to Image:', e);
+      // Fall through to Image-based approach
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
@@ -1381,9 +1438,20 @@ async function createCanvasFromFile(file: File): Promise<HTMLCanvasElement> {
     img.onload = () => {
       URL.revokeObjectURL(url);
       
+      let width = img.naturalWidth || img.width;
+      let height = img.naturalHeight || img.height;
+
+      // Scale down if exceeding mobile canvas limits
+      if (width > MAX_CANVAS_DIMENSION || height > MAX_CANVAS_DIMENSION) {
+        const scale = Math.min(MAX_CANVAS_DIMENSION / width, MAX_CANVAS_DIMENSION / height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+        console.log(`[Mobile] Scaling image from ${img.width}x${img.height} to ${width}x${height}`);
+      }
+
       const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
+      canvas.width = width;
+      canvas.height = height;
       
       const ctx = canvas.getContext('2d');
       if (!ctx) {
@@ -1391,7 +1459,7 @@ async function createCanvasFromFile(file: File): Promise<HTMLCanvasElement> {
         return;
       }
       
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img, 0, 0, width, height);
       resolve(canvas);
     };
     

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import { Model3D } from '@/components/model-3d';
@@ -84,6 +84,33 @@ export function Inline3DPreview({
   const hasContentFnRef = useRef<(() => boolean) | null>(null);
   const latestCaptureRef = useRef<string | null>(null);
   const capturedOnceRef = useRef(false);
+  const [webglFailed, setWebglFailed] = useState(false);
+  const [textureObjUrl, setTextureObjUrl] = useState<string | null>(null);
+
+  // Convert data URL to object URL to reduce memory pressure on mobile
+  useEffect(() => {
+    if (textureUrl.startsWith('data:')) {
+      try {
+        const parts = textureUrl.split(',');
+        const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+        const byteStr = atob(parts[1]);
+        const ab = new ArrayBuffer(byteStr.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteStr.length; i++) {
+          ia[i] = byteStr.charCodeAt(i);
+        }
+        const blob = new Blob([ab], { type: mime });
+        const objUrl = URL.createObjectURL(blob);
+        setTextureObjUrl(objUrl);
+        return () => URL.revokeObjectURL(objUrl);
+      } catch (e) {
+        console.warn('[Mobile] Failed to convert data URL to blob URL:', e);
+        setTextureObjUrl(textureUrl);
+      }
+    } else {
+      setTextureObjUrl(textureUrl);
+    }
+  }, [textureUrl]);
 
   useEffect(() => {
     const checkInterval = setInterval(() => {
@@ -135,7 +162,39 @@ export function Inline3DPreview({
 
       {/* 3D Canvas - fills entire screen */}
       <div className="absolute inset-0 w-full h-full bg-white">
-        <Canvas shadows gl={{ preserveDrawingBuffer: true }}>
+        {webglFailed ? (
+          /* Fallback when WebGL is not available (low memory on mobile) */
+          <div className="flex flex-col items-center justify-center h-full px-4">
+            {textureObjUrl && (
+              <img
+                src={textureObjUrl}
+                alt="Texture preview"
+                className="max-w-[80%] max-h-[60vh] object-contain rounded-lg shadow-md"
+              />
+            )}
+            <p className="mt-4 text-gray-500 text-sm text-center">
+              3D preview unavailable on this device
+            </p>
+          </div>
+        ) : textureObjUrl ? (
+        <Canvas
+          shadows
+          gl={{ preserveDrawingBuffer: true, powerPreference: 'default', failIfMajorPerformanceCaveat: false }}
+          onCreated={({ gl }) => {
+            // Check WebGL context validity
+            const ctx = gl.getContext();
+            if (!ctx || ctx.isContextLost()) {
+              console.error('[Mobile] WebGL context lost or invalid');
+              setWebglFailed(true);
+            }
+          }}
+          fallback={
+            <div className="flex flex-col items-center justify-center h-full">
+              <div className="w-12 h-12 border-4 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+              <p className="mt-4 text-gray-500 text-sm">Loading 3D preview...</p>
+            </div>
+          }
+        >
           <ScreenshotCapture onCaptureReady={(captureFn, hasContentFn) => {
             captureFnRef.current = captureFn;
             hasContentFnRef.current = hasContentFn;
@@ -185,7 +244,7 @@ export function Inline3DPreview({
           {/* 3D Model with texture */}
           <Model3D 
             modelUrl={modelUrl}
-            textureUrl={textureUrl}
+            textureUrl={textureObjUrl}
             rotationSpeed={0.3}
             modelId="inline-preview"
             textureId="inline-preview-texture"
@@ -201,6 +260,11 @@ export function Inline3DPreview({
             maxDistance={20}
           />
         </Canvas>
+        ) : (
+          <div className="flex items-center justify-center h-full">
+            <div className="w-12 h-12 border-4 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+          </div>
+        )}
       </div>
 
       {/* Action buttons - overlay on top of 3D scene */}

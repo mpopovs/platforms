@@ -12,16 +12,63 @@ import { CertificateDisplay } from './certificate-display';
 /**
  * Compress image before upload
  * Reduces file size while maintaining quality
+ * Uses createImageBitmap when available for proper EXIF orientation handling on mobile
  */
 async function compressImage(file: File, maxWidth: number = 2048, quality: number = 0.85): Promise<File> {
+  // Try createImageBitmap first for better mobile support (EXIF orientation)
+  if (typeof createImageBitmap !== 'undefined') {
+    try {
+      const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' as ImageOrientation });
+      let width = bitmap.width;
+      let height = bitmap.height;
+
+      if (width > maxWidth) {
+        height = (height * maxWidth) / width;
+        width = maxWidth;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        bitmap.close();
+        throw new Error('Could not get canvas context');
+      }
+
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      bitmap.close();
+
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              reject(new Error('Could not compress image'));
+              return;
+            }
+            resolve(new File([blob], file.name, {
+              type: 'image/jpeg',
+              lastModified: Date.now()
+            }));
+          },
+          'image/jpeg',
+          quality
+        );
+      });
+    } catch (e) {
+      console.warn('[Mobile] createImageBitmap failed, falling back to Image:', e);
+      // Fall through to Image-based approach
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
+        let width = img.naturalWidth || img.width;
+        let height = img.naturalHeight || img.height;
 
         // Scale down if larger than maxWidth
         if (width > maxWidth) {
@@ -64,10 +111,24 @@ async function compressImage(file: File, maxWidth: number = 2048, quality: numbe
 }
 
 /**
- * Convert image to WebP format
+ * Check if the browser supports WebP encoding via canvas
+ */
+function supportsWebP(): boolean {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    return canvas.toDataURL('image/webp').startsWith('data:image/webp');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Convert image to WebP format (with JPEG fallback for older mobile browsers)
  * Used for processed textures to save space
  */
-async function convertToWebP(dataUrl: string, quality: number = 0.9): Promise<Blob> {
+async function convertToOptimalFormat(dataUrl: string, quality: number = 0.9): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -82,15 +143,19 @@ async function convertToWebP(dataUrl: string, quality: number = 0.9): Promise<Bl
 
       ctx.drawImage(img, 0, 0);
       
+      const useWebP = supportsWebP();
+      const mimeType = useWebP ? 'image/webp' : 'image/jpeg';
+      
       canvas.toBlob(
         (blob) => {
           if (!blob) {
-            reject(new Error('Could not convert to WebP'));
+            reject(new Error(`Could not convert to ${useWebP ? 'WebP' : 'JPEG'}`));
             return;
           }
+          console.log(`[Upload] Converted to ${mimeType}: ${blob.size} bytes`);
           resolve(blob);
         },
-        'image/webp',
+        mimeType,
         quality
       );
     };
@@ -282,10 +347,11 @@ export function UploadTextureForm({
       try {
         console.log('📤 Preparing files for upload...');
         
-        // Convert processed texture to WebP format for main texture
-        const webpBlob = await convertToWebP(croppedPreview, 0.9);
-        const processedFile = new File([webpBlob], `cropped_${uploadFile.name.replace(/\.[^.]+$/, '.webp')}`, { type: 'image/webp' });
-        console.log(`✅ Processed texture converted to WebP: ${processedFile.size} bytes`);
+        // Convert processed texture to optimal format (WebP or JPEG fallback)
+        const optimizedBlob = await convertToOptimalFormat(croppedPreview, 0.9);
+        const ext = optimizedBlob.type === 'image/webp' ? '.webp' : '.jpg';
+        const processedFile = new File([optimizedBlob], `cropped_${uploadFile.name.replace(/\.[^.]+$/, ext)}`, { type: optimizedBlob.type });
+        console.log(`✅ Processed texture converted to ${optimizedBlob.type}: ${processedFile.size} bytes`);
 
         // Upload:
         // 1. Processed/cropped texture as main 'photo' (WebP format)
@@ -376,7 +442,6 @@ export function UploadTextureForm({
               id="photo"
               name="photo"
               accept="image/*"
-              capture="environment"
               onChange={handleFileChange}
               className="hidden"
               disabled={processing}
