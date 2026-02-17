@@ -273,7 +273,22 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
           return;
         }
 
-        console.log('[Texture] Loading texture:', textureUrl);
+        console.log('[Texture] Loading texture:', textureUrl.substring(0, 50) + '...');
+
+        // If it's a data URL, load directly without caching
+        if (textureUrl.startsWith('data:')) {
+            console.log('[Texture] Data URL detected, skipping cache');
+            const textureLoader = new THREE.TextureLoader();
+            textureLoader.load(textureUrl, (loadedTexture) => {
+              loadedTexture.colorSpace = THREE.SRGBColorSpace;
+              loadedTexture.flipY = false;
+              setTexture(loadedTexture);
+              console.log('[Texture] Loaded from data URL successfully');
+            }, undefined, (err) => {
+              console.error('[Texture] Failed to load from data URL:', err);
+            });
+            return;
+        }
 
         // Check IndexedDB cache first
         const cachedBlob = await getTexture(textureUrl);
