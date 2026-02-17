@@ -31,6 +31,8 @@ export interface ViewerSettings {
   storageMode?: 'server' | 'local' | 'hybrid'; // Where to store processed textures (default: 'hybrid')
   enableArucoDetection?: boolean; // Enable smart ArUco mode: auto-detect model from markers, hide model selector (default: false, uses standard mode with manual selection)
   defaultModelId?: string; // Default model to show when no textures are uploaded (default: first model)
+  surveyEnabled?: boolean; // Enable survey after texture upload
+  certificateBottomImageUrl?: string; // Custom image URL to display below certificate (default: /pm-story.svg)
 }
 
 export interface TextureCyclingSettings {

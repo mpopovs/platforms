@@ -27,6 +27,8 @@ interface ViewerSettingsDialogProps {
   embedToken?: string;
   onGenerateEmbed?: () => Promise<void>;
   embedCode?: string;
+  surveyEnabled?: boolean;
+  certificateBottomImageUrl?: string;
 }
 
 export function ViewerSettingsDialog({
@@ -47,7 +49,9 @@ export function ViewerSettingsDialog({
   onGeneratePin,
   embedToken,
   onGenerateEmbed,
-  embedCode
+  embedCode,
+  surveyEnabled: initialSurveyEnabled,
+  certificateBottomImageUrl: initialCertificateBottomImageUrl
 }: ViewerSettingsDialogProps) {
   const [open, setOpen] = useState(false);
   
@@ -56,6 +60,12 @@ export function ViewerSettingsDialog({
   const [priorityTimeWindow, setPriorityTimeWindow] = useState(currentSettings?.priorityTimeWindow ?? 2);
   const [priorityRepeatCount, setPriorityRepeatCount] = useState(currentSettings?.priorityRepeatCount ?? 6);
   const [standardDisplayDuration, setStandardDisplayDuration] = useState(currentSettings?.standardDisplayDuration ?? 5);
+  
+  // Survey Settings
+  const [surveyEnabled, setSurveyEnabled] = useState(initialSurveyEnabled ?? true);
+  
+  // Certificate Settings
+  const [certificateBottomImageUrl, setCertificateBottomImageUrl] = useState(initialCertificateBottomImageUrl || '');
   
   // Display Settings
   const [rotationSpeed, setRotationSpeed] = useState(initialRotationSpeed ?? 0.5);
@@ -111,7 +121,9 @@ export function ViewerSettingsDialog({
           widgetEnabled,
           storageMode,
           enableArucoDetection,
-          defaultModelId
+          defaultModelId,
+          surveyEnabled,
+          certificateBottomImageUrl
         })
       });
 
@@ -233,6 +245,53 @@ export function ViewerSettingsDialog({
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Survey Settings Section */}
+          <div className="space-y-4 p-4 border rounded-lg">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-sm">Survey Settings</h3>
+                <p className="text-xs text-gray-500">Collect feedback from users after upload</p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="surveyEnabled"
+                  checked={surveyEnabled}
+                  onChange={(e) => setSurveyEnabled(e.target.checked)}
+                  className="rounded"
+                />
+                <Label htmlFor="surveyEnabled" className="font-normal cursor-pointer text-sm">
+                  Enable Survey
+                </Label>
+              </div>
+            </div>
+          </div>
+
+          {/* Certificate Settings Section */}
+          <div className="space-y-4 p-4 border rounded-lg">
+            <div>
+              <h3 className="font-semibold text-sm">Certificate Settings</h3>
+              <p className="text-xs text-gray-500">Customize the certificate appearance</p>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="certificateBottomImageUrl" className="text-xs">
+                Certificate Bottom Image URL
+              </Label>
+              <Input
+                id="certificateBottomImageUrl"
+                type="text"
+                placeholder="/pm-story.svg (default)"
+                value={certificateBottomImageUrl}
+                onChange={(e) => setCertificateBottomImageUrl(e.target.value)}
+                className="h-9"
+              />
+              <p className="text-xs text-gray-500">
+                Image displayed below the certificate. Use absolute URL or path from /public folder (e.g., /pm-story.svg)
+              </p>
+            </div>
           </div>
 
           {/* Display Settings Section */}

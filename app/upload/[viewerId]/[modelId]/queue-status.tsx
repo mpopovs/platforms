@@ -2,16 +2,48 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { Users, Clock } from 'lucide-react';
 
 interface QueueStatusProps {
   queueNumber: number;
   viewerId: string;
 }
 
+interface QueueTimingSettings {
+  displayDuration: number;
+  textureCyclingEnabled: boolean;
+  priorityTimeWindowHours: number;
+  priorityRepeatCount: number;
+}
+
+interface QueueEntry {
+  queue_number: number;
+  status: 'waiting' | 'displaying';
+  created_at?: string;
+}
+
+function isUploadedToday(timestamp?: string): boolean {
+  if (!timestamp) return false;
+
+  const uploadDate = new Date(timestamp);
+  const now = new Date();
+
+  return (
+    uploadDate.getFullYear() === now.getFullYear() &&
+    uploadDate.getMonth() === now.getMonth() &&
+    uploadDate.getDate() === now.getDate()
+  );
+}
+
 export function QueueStatus({ queueNumber, viewerId }: QueueStatusProps) {
   const [position, setPosition] = useState<number | null>(null);
   const [estimatedWait, setEstimatedWait] = useState<number | null>(null);
-  const [displayDuration, setDisplayDuration] = useState<number>(5); // Default 5 seconds
+  const [timingSettings, setTimingSettings] = useState<QueueTimingSettings>({
+    displayDuration: 5,
+    textureCyclingEnabled: true,
+    priorityTimeWindowHours: 2,
+    priorityRepeatCount: 6
+  });
   const supabase = createClient();
 
   // Fetch viewer settings to get actual display duration
@@ -25,11 +57,18 @@ export function QueueStatus({ queueNumber, viewerId }: QueueStatusProps) {
 
       if (!error && data?.settings) {
         const settings = data.settings as any;
-        // Use textureCycling.standardDisplayDuration if available, fallback to 5 seconds
-        const duration = settings.textureCycling?.standardDisplayDuration || 
-                        settings.displayModes?.standardMode?.duration || 
-                        5;
-        setDisplayDuration(duration);
+        const textureCycling = settings.textureCycling || {};
+
+        const displayDuration = textureCycling.standardDisplayDuration ??
+          settings.displayModes?.standardMode?.duration ??
+          5;
+
+        setTimingSettings({
+          displayDuration,
+          textureCyclingEnabled: textureCycling.enabled ?? true,
+          priorityTimeWindowHours: textureCycling.priorityTimeWindow ?? 2,
+          priorityRepeatCount: textureCycling.priorityRepeatCount ?? 6
+        });
       }
     }
 
@@ -64,7 +103,7 @@ export function QueueStatus({ queueNumber, viewerId }: QueueStatusProps) {
       supabase.removeChannel(channel);
       clearInterval(interval);
     };
-  }, [queueNumber, viewerId, displayDuration]);
+  }, [queueNumber, viewerId, timingSettings]);
 
   async function fetchQueuePosition() {
     const { data, error } = await supabase
@@ -76,7 +115,11 @@ export function QueueStatus({ queueNumber, viewerId }: QueueStatusProps) {
 
     if (error || !data) return;
 
-    const myIndex = data.findIndex(item => item.queue_number === queueNumber);
+    const queueEntries = data as QueueEntry[];
+
+    // Ensure type-safe comparison (convert both to numbers)
+    const myQueueNumber = Number(queueNumber);
+    const myIndex = queueEntries.findIndex(item => Number(item.queue_number) === myQueueNumber);
     if (myIndex === -1) {
       // Not found or already completed
       setPosition(0);
@@ -88,42 +131,55 @@ export function QueueStatus({ queueNumber, viewerId }: QueueStatusProps) {
     const pos = myIndex + 1;
     setPosition(pos);
 
-    // Estimated wait: actual display duration per texture ahead
-    // Note: this is a simplified calculation that doesn't account for priority texture repeats
-    const wait = pos > 1 ? (pos - 1) * displayDuration : 0;
+    // Estimated wait using viewer texture cycling settings
+    const entriesAhead = queueEntries.slice(0, myIndex);
+
+    const weightedSlotsAhead = entriesAhead.reduce((total, entry) => {
+      if (!timingSettings.textureCyclingEnabled) {
+        return total + 1;
+      }
+
+      // Priority is applied to works uploaded today
+      const isPriority = isUploadedToday(entry.created_at);
+      const repeatCount = Math.max(1, timingSettings.priorityRepeatCount);
+
+      // Use a conservative multiplier to avoid overestimating queue time
+      // while still reflecting priority repeat behavior.
+      const estimatedPrioritySlots = 1 + (repeatCount - 1) * 0.3;
+
+      return total + (isPriority ? estimatedPrioritySlots : 1);
+    }, 0);
+
+    const wait = Math.ceil(weightedSlotsAhead * timingSettings.displayDuration);
     setEstimatedWait(wait);
   }
 
   if (position === null) {
     return (
-      <div className="text-3xl animate-pulse">⏳</div>
+      <div className="text-3xl animate-pulse text-center">⏳</div>
     );
   }
 
   if (position === 0) {
-    return (
-      <div>
-        <div className="text-5xl mb-2">🎉</div>
-        <div className="text-xl text-purple-700">Displayed!</div>
-      </div>
-    );
+    return null;
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-center gap-3">
-        <div className="text-4xl">Rindā</div>
-        <div className="text-3xl font-bold text-purple-800">
-          #{position}
+    <div className="flex items-center justify-center gap-6 text-center">
+      <div className="flex items-center gap-3">
+        <Users className="size-10 text-gray-800" />
+        <div className="text-3xl font-bold text-gray-800">
+          {position}
         </div>
       </div>
       {estimatedWait !== null && estimatedWait > 0 && (
-        <div className="flex items-center justify-center gap-2">
-          <div className="text-3xl">Gaidīšanas laiks</div>
-          <div className="text-2xl font-semibold text-purple-700">
-            {estimatedWait >= 60 
-              ? `${Math.ceil(estimatedWait / 60)}m` 
-              : `${estimatedWait}s`}
+        <div className="flex items-center gap-2">
+          <Clock className="size-8 text-gray-800" />
+          <div className="text-2xl font-semibold text-gray-800">
+            {/* {estimatedWait >= 60 
+              ? `${Math.ceil(estimatedWait / 60)}min.` 
+              : `${estimatedWait}s`} */}
+              ~30 sec.
           </div>
         </div>
       )}

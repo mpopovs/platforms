@@ -1,10 +1,13 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Upload, CheckCircle, XCircle, Eye, Camera, RefreshCw } from 'lucide-react';
 import { processImage } from '@/components/utils/imageProcessor';
 import { QueueStatus } from './queue-status';
+import { Survey } from '@/components/survey/survey';
+import { CertificateDownloadButton } from './certificate-download-button';
+import { CertificateDisplay } from './certificate-display';
 
 /**
  * Compress image before upload
@@ -101,23 +104,25 @@ export function UploadTextureForm({
   modelId,
   modelUrl,
   modelName,
-  onTextureProcessed,
-  onDetectionFailed,
-  onResetRef,
-  onRefresh,
-  detectionFailed,
-  onProcessingChange
+  viewerLogoUrl,
+  certificateBottomImageUrl,
+  surveyEnabled = true,
+  onPreviewReady,
+  show3DPreview = false,
+  onUploadStart,
+  onQueueStatusChange
 }: {
   viewerId: string;
   modelId: string;
   modelUrl: string;
   modelName: string;
-  onTextureProcessed?: (textureUrl: string | null) => void;
-  onDetectionFailed?: () => void;
-  onResetRef?: (resetFn: () => void) => void;
-  onRefresh?: () => void;
-  detectionFailed?: boolean;
-  onProcessingChange?: (isProcessing: boolean) => void;
+  viewerLogoUrl?: string | null;
+  certificateBottomImageUrl?: string;
+  surveyEnabled?: boolean;
+  onPreviewReady?: (textureUrl: string, onApprove: (previewCaptureDataUrl?: string) => void, onCancel: () => void) => void;
+  show3DPreview?: boolean;
+  onUploadStart?: () => void;
+  onQueueStatusChange?: (visible: boolean) => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -125,11 +130,26 @@ export function UploadTextureForm({
   const [uploading, setUploading] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [queueNumber, setQueueNumber] = useState<number | null>(null);
+  const [textureId, setTextureId] = useState<string | null>(null);
+  const [showSurvey, setShowSurvey] = useState(false);
+  const [uploadComplete, setUploadComplete] = useState(false);
+  const [certificatePreviewCapture, setCertificatePreviewCapture] = useState<string | null>(null);
   const [result, setResult] = useState<{
     type: 'success' | 'error';
     message: string;
   } | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleRestart = () => {
+    setFile(null);
+    setPreview(null);
+    setProcessedPreview(null);
+    setResult(null);
+    setQueueNumber(null);
+    setTextureId(null);
+    setShowSurvey(false);
+    setUploadComplete(false);
+    setCertificatePreviewCapture(null);
+  };
 
   useEffect(() => {
     // Preload OpenCV.js on mount (only if not already loaded)
@@ -143,17 +163,12 @@ export function UploadTextureForm({
       document.head.appendChild(script);
     }
 
-    // Expose reset function to parent
-    if (onResetRef) {
-      onResetRef(handleDecline);
-    }
-
     // Don't remove the script on cleanup - let it stay loaded
     // This prevents re-downloading OpenCV on re-renders
     return () => {
       // Cleanup no longer removes the script
     };
-  }, [onResetRef]);
+  }, []);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     e.preventDefault();
@@ -170,11 +185,6 @@ export function UploadTextureForm({
     setFile(selectedFile);
     setResult(null);
     setProcessedPreview(null);
-    
-    // Clear processed texture in parent component
-    if (onTextureProcessed) {
-      onTextureProcessed(null);
-    }
 
     // Create preview
     const reader = new FileReader();
@@ -185,9 +195,6 @@ export function UploadTextureForm({
 
     // Process image with ArUco markers
     setProcessing(true);
-    if (onProcessingChange) {
-      onProcessingChange(true);
-    }
     try {
       console.log('🎯 Processing image with ArUco markers...');
       const processed = await processImage(selectedFile, {
@@ -197,14 +204,31 @@ export function UploadTextureForm({
 
       if (processed) {
         console.log('✅ ArUco markers detected! Texture cropped:', processed.width, 'x', processed.height);
+        console.log('File still exists:', !!selectedFile);
         setProcessedPreview(processed.dataUrl);
         setResult({
           type: 'success',
           message: '✅ ArUco markers detected! Texture cropped to 2048x2048 and ready to upload.'
         });
-        // Notify parent component about processed texture
-        if (onTextureProcessed) {
-          onTextureProcessed(processed.dataUrl);
+        // Show inline 3D preview via callback
+        if (onPreviewReady) {
+          // Capture the file and processed data in the closure
+          const capturedFile = selectedFile;
+          const capturedProcessed = processed.dataUrl;
+          onPreviewReady(processed.dataUrl, (previewCaptureDataUrl) => {
+            console.log('Approve clicked, file:', capturedFile?.name, 'has cropped:', !!capturedProcessed);
+            if (previewCaptureDataUrl) {
+              setCertificatePreviewCapture(previewCaptureDataUrl);
+            }
+            // Call handleSubmit with both the captured file and processed data
+            handleSubmit(undefined, capturedFile, capturedProcessed);
+          }, () => {
+            // Reset form state when cancel is clicked
+            setFile(null);
+            setPreview(null);
+            setProcessedPreview(null);
+            setResult(null);
+          });
         }
       } else {
         console.log('❌ No ArUco markers detected');
@@ -212,36 +236,39 @@ export function UploadTextureForm({
           type: 'error',
           message: '❌ Could not detect ArUco markers. Please ensure all 4 markers (IDs 0-3) are clearly visible in the photo.'
         });
-        // Notify parent that detection failed
-        if (onDetectionFailed) {
-          onDetectionFailed();
-        }
+        // Do not allow upload without ArUco detection
+        setFile(null);
+        setPreview(null);
       }
     } catch (error) {
       console.error('❌ Error processing image:', error);
       setResult({
         type: 'error',
-        message: '⚠️ Error processing image.'
+        message: '⚠️ Error processing image. Please try again.'
       });
-      // Notify parent that detection failed
-      if (onDetectionFailed) {
-        onDetectionFailed();
-      }
+      // Do not allow upload on error
+      setFile(null);
+      setPreview(null);
     } finally {
       setProcessing(false);
-      if (onProcessingChange) {
-        onProcessingChange(false);
-      }
     }
   };
 
-  const handleSubmit = async (e?: React.FormEvent) => {
+  const handleSubmit = async (e?: React.FormEvent, fileToUpload?: File, processedDataUrl?: string) => {
     if (e) {
       e.preventDefault();
     }
 
-    if (!file) return;
-    
+    const uploadFile = fileToUpload || file;
+    const croppedPreview = processedDataUrl || processedPreview;
+
+    if (!uploadFile) {
+      console.error('No file to upload');
+      return;
+    }
+
+    console.log('Starting upload with file:', uploadFile.name, 'has cropped:', !!croppedPreview);
+
     setUploading(true);
 
     const formData = new FormData();
@@ -251,37 +278,37 @@ export function UploadTextureForm({
     formData.append('modelId', modelId);
 
     // If we have a processed image (ArUco cropped), upload both original and cropped
-    if (processedPreview) {
+    if (croppedPreview) {
       try {
-        console.log('📤 Compressing and converting images...');
+        console.log('📤 Preparing files for upload...');
         
-        // Compress original photo before upload (JPEG format, max 2048px)
-        const compressedOriginal = await compressImage(file, 2048, 0.85);
-        console.log(`✅ Original compressed: ${file.size} → ${compressedOriginal.size} bytes (${Math.round((1 - compressedOriginal.size / file.size) * 100)}% reduction)`);
-        
-        // Convert processed texture to WebP format
-        const webpBlob = await convertToWebP(processedPreview, 0.9);
-        const processedFile = new File([webpBlob], `cropped_${file.name.replace(/\.[^.]+$/, '.webp')}`, { type: 'image/webp' });
+        // Convert processed texture to WebP format for main texture
+        const webpBlob = await convertToWebP(croppedPreview, 0.9);
+        const processedFile = new File([webpBlob], `cropped_${uploadFile.name.replace(/\.[^.]+$/, '.webp')}`, { type: 'image/webp' });
         console.log(`✅ Processed texture converted to WebP: ${processedFile.size} bytes`);
 
-        // Upload both compressed original and WebP processed
+        // Upload:
+        // 1. Processed/cropped texture as main 'photo' (WebP format)
+        // 2. Original uncropped photo as 'originalPhoto' (preserved for later use)
         formData.append('photo', processedFile);
-        formData.append('originalPhoto', compressedOriginal);
+        formData.append('originalPhoto', uploadFile); // Upload original file unmodified
         formData.append('clientProcessed', 'true');
+        
+        console.log(`✅ Uploading processed texture (${processedFile.size} bytes) + original photo (${uploadFile.size} bytes)`);
       } catch (error) {
-        console.error('❌ Error compressing/converting images:', error);
+        console.error('❌ Error processing images:', error);
         console.log('⚠️ Falling back to original image');
-        formData.append('photo', file);
+        formData.append('photo', uploadFile);
       }
     } else {
       console.log('📤 Compressing original image (no ArUco processing)');
       try {
-        const compressedFile = await compressImage(file, 2048, 0.85);
-        console.log(`✅ Original compressed: ${file.size} → ${compressedFile.size} bytes (${Math.round((1 - compressedFile.size / file.size) * 100)}% reduction)`);
+        const compressedFile = await compressImage(uploadFile, 2048, 0.85);
+        console.log(`✅ Original compressed: ${uploadFile.size} → ${compressedFile.size} bytes (${Math.round((1 - compressedFile.size / uploadFile.size) * 100)}% reduction)`);
         formData.append('photo', compressedFile);
       } catch (error) {
         console.error('❌ Error compressing image:', error);
-        formData.append('photo', file);
+        formData.append('photo', uploadFile);
       }
     }
 
@@ -295,10 +322,18 @@ export function UploadTextureForm({
 
       if (response.ok) {
         setQueueNumber(data.queueNumber);
+        setTextureId(data.textureId);
         setResult({
           type: 'success',
           message: data.message || 'Texture uploaded successfully!'
         });
+        // Show survey after successful upload if enabled
+        if (surveyEnabled) {
+          setShowSurvey(true);
+        } else {
+          // If survey not enabled, mark upload as complete
+          setUploadComplete(true);
+        }
       } else {
         setResult({
           type: 'error',
@@ -315,101 +350,156 @@ export function UploadTextureForm({
     }
   };
 
-  const handleDecline = () => {
-    // Reset all state
-    setFile(null);
-    setPreview(null);
-    setProcessedPreview(null);
-    setResult(null);
-    
-    // Reset the file input element
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+  const hasArUcoError = result?.type === 'error' && !queueNumber;
+  const showQueueStatus = Boolean(queueNumber && result?.type === 'success');
+
+  useEffect(() => {
+    if (onQueueStatusChange) {
+      onQueueStatusChange(showQueueStatus);
     }
-    
-    // Clear processed texture in parent component
-    if (onTextureProcessed) {
-      onTextureProcessed(null);
-    }
-  };
+
+    return () => {
+      if (onQueueStatusChange) {
+        onQueueStatusChange(false);
+      }
+    };
+  }, [showQueueStatus, onQueueStatusChange]);
 
   return (
-    <form onSubmit={handleSubmit}>
+    <form onSubmit={handleSubmit} className="space-y-6 pb-32">
       {/* Photo button - fixed at bottom when visible */}
-      {!processedPreview && !processing && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 p-4 bg-white ">
-          <div className="w-full lg:max-w-2xl lg:mx-auto">
-            <div className="bg-blue-500 rounded-xl p-12 text-center hover:bg-blue-600 transition-colors shadow-lg">
-        <input
-          ref={fileInputRef}
-          type="file"
-          id="photo"
-          name="photo"
-          accept="image/*"
-          capture="environment"
-          onChange={handleFileChange}
-          className="hidden"
-          disabled={processing || detectionFailed}
-        />
-        {detectionFailed ? (
-          <button
-            type="button"
-            onClick={onRefresh}
-            className="cursor-pointer block w-full"
-          >
-            <RefreshCw className="h-24 w-24 text-white mx-auto" />
-          </button>
-        ) : (
-          <label
-            htmlFor="photo"
-            className={`cursor-pointer block ${processing ? 'opacity-50 pointer-events-none' : ''}`}
-          >
-            {file ? (
-              <div className="text-6xl">✅</div>
-            ) : (
-              <Camera className="h-24 w-24 text-white mx-auto" />
-            )}
-          </label>
-        )}
-      </div>
+      {!processedPreview && !processing && !show3DPreview && !hasArUcoError && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 p-4 bg-white border-t border-gray-200 shadow-lg">
+          <div className="w-full max-w-3xl mx-auto">
+            <input
+              type="file"
+              id="photo"
+              name="photo"
+              accept="image/*"
+              capture="environment"
+              onChange={handleFileChange}
+              className="hidden"
+              disabled={processing}
+            />
+            <label
+              htmlFor="photo"
+              className={`w-full bg-blue-500 hover:bg-blue-600 active:bg-blue-700 rounded-xl py-12 flex items-center justify-center cursor-pointer transition-colors shadow-md ${
+                processing ? 'opacity-50 pointer-events-none' : ''
+              }`}
+            >
+              {processing ? (
+                <div className="text-6xl animate-pulse">⏳</div>
+              ) : (
+                <Camera className="size-32 text-white" strokeWidth={2} />
+              )}
+            </label>
           </div>
         </div>
       )}
 
-      {/* Approve/Decline buttons - floating circular buttons at bottom when texture is processed */}
-      {processedPreview && !queueNumber && (
-        <div className="fixed bottom-8 left-0 right-0 z-50 px-4">
-          <div className="w-full lg:max-w-2xl lg:mx-auto">
-            <div className="flex justify-center gap-16">
+      {processing && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-white">
+          <div className="w-16 h-16 border-4 border-gray-300 border-t-gray-900 rounded-full animate-spin"></div>
+        </div>
+      )}
+
+      {/* Show uploading spinner */}
+      {uploading && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-white">
+          <div className="w-16 h-16 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
+        </div>
+      )}
+
+      {/* Show error messages only */}
+      {result && result.type === 'error' && !queueNumber && (
+        <>
+          <div className="fixed inset-0 z-30 flex items-center justify-center bg-white px-4 pb-28">
+            <div className="text-center">
+              <div className="text-9xl mb-8 font-light text-gray-800">:(</div>
+            </div>
+          </div>
+          <div className="fixed bottom-0 left-0 right-0 z-40 p-4 bg-white">
+            <div className="max-w-2xl mx-auto">
               <Button
                 type="button"
-                onClick={handleDecline}
-                disabled={uploading}
-                className="w-20 h-20 rounded-full bg-red-500 hover:bg-red-600 shadow-2xl p-0 flex items-center justify-center"
+                onClick={handleRestart}
+                className="w-full bg-blue-500 hover:bg-blue-600 rounded-xl py-12 h-auto"
                 size="lg"
               >
-                <XCircle className="!h-12 !w-12" />
-              </Button>
-              <Button
-                type="submit"
-                disabled={uploading}
-                className="w-20 h-20 rounded-full bg-green-500 hover:bg-green-600 shadow-2xl p-0 flex items-center justify-center"
-                size="lg"
-              >
-                {uploading ? '⏳' : <CheckCircle className="!h-12 !w-12" />}
+                <RefreshCw className="size-32" strokeWidth={2} />
               </Button>
             </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* Queue Status after successful upload */}
-      {queueNumber && result?.type === 'success' && (
-        <div className="bg-gradient-to-br from-purple-50 to-pink-50 border-4 border-purple-300 rounded-2xl p-8 text-center shadow-xl">
-          <div className="text-7xl mb-4">Rinda</div>
-          <div className="text-6xl font-bold text-purple-900 mb-2">#{queueNumber}</div>
-          <QueueStatus queueNumber={queueNumber} viewerId={viewerId} />
+      {showQueueStatus && (
+        <div className="fixed top-16 left-0 right-0 z-40 flex justify-center px-4">
+          <QueueStatus queueNumber={queueNumber!} viewerId={viewerId} />
         </div>
+      )}
+
+      {/* Survey - shown after successful upload */}
+      {showSurvey && textureId && (
+        <Survey
+          viewerId={viewerId}
+          textureId={textureId}
+          onComplete={() => {
+            setShowSurvey(false);
+            setUploadComplete(true);
+          }}
+        />
+      )}
+
+      {/* Restart button after upload completion (survey done or not enabled) */}
+      {uploadComplete && queueNumber && !showSurvey && (
+        <>
+          {/* Certificate Display */}
+          <div className="px-4 pt-6 pb-4">
+            <CertificateDisplay
+              queueNumber={queueNumber}
+              modelName={modelName}
+              previewCapture={certificatePreviewCapture}
+              processedPreview={processedPreview}
+              preview={preview}
+              viewerLogoUrl={viewerLogoUrl}
+            />
+          </div>
+
+          {/* PM Story Image */}
+          <div className="px-4 pb-4">
+            <img 
+              src={certificateBottomImageUrl || "/pm-story.svg"} 
+              alt="Certificate Bottom Image" 
+              className="w-full h-auto"
+            />
+          </div>
+
+          {/* Buttons */}
+          <div className="fixed bottom-0 left-0 right-0 z-50 p-4 bg-white border-t border-gray-200">
+            <div className="max-w-2xl mx-auto">
+              <div className="grid grid-cols-2 gap-4">
+                <CertificateDownloadButton
+                  queueNumber={queueNumber}
+                  modelName={modelName}
+                  previewCapture={certificatePreviewCapture}
+                  processedPreview={processedPreview}
+                  preview={preview}
+                  viewerLogoUrl={viewerLogoUrl}
+                />
+                <Button
+                  type="button"
+                  onClick={handleRestart}
+                  className="w-full bg-blue-500 hover:bg-blue-600 rounded-xl py-6 h-auto"
+                  size="lg"
+                >
+                  <RefreshCw className="size-16" strokeWidth={2} />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </form>
   );

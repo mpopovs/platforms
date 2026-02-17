@@ -31,6 +31,9 @@ export default async function UploadTexturePage({
         modelUrl={model.model_file_url}
         modelName={model.name}
         viewerName={viewer.name}
+        viewerLogoUrl={viewer.logo_url}
+        certificateBottomImageUrl={viewer.settings?.certificateBottomImageUrl}
+        surveyEnabled={viewer.settings?.surveyEnabled ?? true}
       />
     </div>
   );

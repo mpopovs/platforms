@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { viewerId, textureCycling, rotationSpeed, backgroundColor, showModelName, ambientLightIntensity, directionalLightIntensity, widgetEnabled, storageMode, enableArucoDetection, defaultModelId } = body as {
+    const { viewerId, textureCycling, rotationSpeed, backgroundColor, showModelName, ambientLightIntensity, directionalLightIntensity, widgetEnabled, storageMode, enableArucoDetection, defaultModelId, surveyEnabled, certificateBottomImageUrl } = body as {
       viewerId: string;
       textureCycling: TextureCyclingSettings;
       rotationSpeed?: number;
@@ -33,6 +33,8 @@ export async function POST(request: NextRequest) {
       storageMode?: 'server' | 'local' | 'hybrid';
       enableArucoDetection?: boolean;
       defaultModelId?: string;
+      surveyEnabled?: boolean;
+      certificateBottomImageUrl?: string;
     };
 
     if (!viewerId) {
@@ -75,7 +77,9 @@ export async function POST(request: NextRequest) {
       widgetEnabled: widgetEnabled ?? viewer.settings?.widgetEnabled ?? false,
       storageMode: storageMode ?? viewer.settings?.storageMode ?? 'hybrid',
       enableArucoDetection: enableArucoDetection ?? viewer.settings?.enableArucoDetection ?? false,
-      defaultModelId: defaultModelId ?? viewer.settings?.defaultModelId ?? null
+      defaultModelId: defaultModelId ?? viewer.settings?.defaultModelId ?? null,
+      surveyEnabled: surveyEnabled ?? viewer.settings?.surveyEnabled ?? true,
+      certificateBottomImageUrl: certificateBottomImageUrl ?? viewer.settings?.certificateBottomImageUrl ?? ''
     };
 
     const { error: updateError } = await supabase

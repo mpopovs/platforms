@@ -4,7 +4,7 @@ import { useState, useEffect, use, useCallback } from 'react';
 import { useActionState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Eye, Copy, ArrowLeft, Settings, Trash2, LinkIcon, QrCode, Download, Map as MapIcon, FileImage, Palette, Upload, Plus } from 'lucide-react';
+import { Eye, Copy, ArrowLeft, Settings, Trash2, LinkIcon, QrCode, Download, Map as MapIcon, FileImage, Palette, Upload, Plus, FileText, BarChart3 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { 
@@ -44,6 +44,8 @@ type Viewer = {
     storageMode?: 'server' | 'local' | 'hybrid';
     enableArucoDetection?: boolean;
     defaultModelId?: string;
+    surveyEnabled?: boolean;
+    certificateBottomImageUrl?: string;
   };
 };
 
@@ -751,6 +753,20 @@ export default function ViewerDetailPage({ params }: { params: Promise<{ viewerI
           </div>
         </div>
         <div className="flex gap-2">
+          {/* Survey Buttons */}
+          <Button asChild variant="outline">
+            <Link href={`/admin/surveys/questions?viewerId=${viewer.id}`}>
+              <FileText className="h-4 w-4 mr-2" />
+              Configure Survey
+            </Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href={`/admin/surveys/results?viewerId=${viewer.id}`}>
+              <BarChart3 className="h-4 w-4 mr-2" />
+              View Results
+            </Link>
+          </Button>
+
           <Button variant="outline" onClick={() => setShowEditDialog(true)}>
             <Settings className="h-4 w-4 mr-2" />
             Edit Name
@@ -858,6 +874,8 @@ export default function ViewerDetailPage({ params }: { params: Promise<{ viewerI
                 storageMode={viewer.settings.storageMode}
                 enableArucoDetection={viewer.settings.enableArucoDetection}
                 defaultModelId={viewer.settings.defaultModelId}
+                surveyEnabled={viewer.settings.surveyEnabled}
+                certificateBottomImageUrl={viewer.settings.certificateBottomImageUrl}
                 models={models}
                 currentPin={currentPin}
                 onGeneratePin={async () => {

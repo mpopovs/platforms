@@ -140,15 +140,22 @@ export async function POST(request: NextRequest) {
 
       // Create queue entry
       const supabase = await createClient();
-      const { data: queueData } = await supabase.rpc('get_next_queue_number');
+      const { data: queueData, error: queueRpcError } = await supabase.rpc('get_next_queue_number');
+      if (queueRpcError) {
+        throw new Error(`Failed to generate queue number: ${queueRpcError.message}`);
+      }
       const queueNumber = queueData || 1;
 
-      await supabase.from('texture_queue').insert({
+      const { error: queueInsertError } = await supabase.from('texture_queue').insert({
         queue_number: queueNumber,
         texture_id: texture.id,
         viewer_id: viewerId,
         status: 'waiting'
       });
+
+      if (queueInsertError) {
+        throw new Error(`Failed to create queue entry: ${queueInsertError.message}`);
+      }
 
       return NextResponse.json(
         {
@@ -171,6 +178,27 @@ export async function POST(request: NextRequest) {
         textureId,
         file
       );
+      
+      // Create queue entry even for non-processed textures
+      const { createClient } = await import('@/lib/supabase/server');
+      const supabase = await createClient();
+      const { data: queueData, error: queueRpcError } = await supabase.rpc('get_next_queue_number');
+      if (queueRpcError) {
+        throw new Error(`Failed to generate queue number: ${queueRpcError.message}`);
+      }
+      const queueNumber = queueData || 1;
+
+      const { error: queueInsertError } = await supabase.from('texture_queue').insert({
+        queue_number: queueNumber,
+        texture_id: textureId,
+        viewer_id: viewerId,
+        status: 'waiting'
+      });
+
+      if (queueInsertError) {
+        throw new Error(`Failed to create queue entry: ${queueInsertError.message}`);
+      }
+      
       // No client-side processing - trigger server-side processing
       fetch(`${request.nextUrl.origin}/api/process-texture`, {
         method: 'POST',
@@ -191,6 +219,7 @@ export async function POST(request: NextRequest) {
           viewerId,
           modelId,
           originalPhotoUrl: photoUrl,
+          queueNumber,
           message: 'Texture uploaded successfully. Processing in progress...'
         },
         { status: 200 }

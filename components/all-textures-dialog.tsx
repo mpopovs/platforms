@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Trash2, Loader2 } from 'lucide-react';
+import { Trash2, Loader2, RefreshCw } from 'lucide-react';
 
 interface Texture {
   id: string;
@@ -36,17 +36,27 @@ export function AllTexturesDialog({
 }: AllTexturesDialogProps) {
   const [textures, setTextures] = useState<Texture[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Fetch textures when dialog opens
   useEffect(() => {
     if (open) {
       fetchTextures();
+      
+      // Auto-refresh every 5 seconds while dialog is open
+      const interval = setInterval(() => {
+        fetchTextures(true); // Silent refresh
+      }, 5000);
+      
+      return () => clearInterval(interval);
     }
   }, [open, modelId]);
 
-  const fetchTextures = async () => {
-    setLoading(true);
+  const fetchTextures = async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const response = await fetch(`/api/model-textures/${modelId}`);
       if (!response.ok) {
@@ -57,8 +67,16 @@ export function AllTexturesDialog({
     } catch (error) {
       console.error('Error fetching textures:', error);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchTextures();
+    setRefreshing(false);
   };
 
   const handleDelete = async (textureId: string) => {
@@ -96,10 +114,23 @@ export function AllTexturesDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>All Textures for {modelName}</DialogTitle>
-          <DialogDescription>
-            View and manage all textures uploaded for this model
-          </DialogDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <DialogTitle>All Textures for {modelName}</DialogTitle>
+              <DialogDescription>
+                View and manage all textures uploaded for this model
+              </DialogDescription>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={refreshing || loading}
+              className="ml-4"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
         </DialogHeader>
 
         {loading ? (

@@ -208,6 +208,8 @@ export async function uploadProcessedTextureFile(
   const extension = file.type === 'image/webp' ? 'webp' : 'png';
   const fileName = `${viewerId}/${modelId}/${textureId}.${extension}`;
   
+  console.log(`Uploading processed texture: ${fileName}, type: ${file.type}, size: ${file.size}`);
+  
   const { data, error } = await supabase.storage
     .from(STORAGE_BUCKETS.PROCESSED_TEXTURES)
     .upload(fileName, file, {
@@ -217,19 +219,37 @@ export async function uploadProcessedTextureFile(
     });
   
   if (error) {
+    console.error('Storage upload error:', error);
+    console.error('Error details:', JSON.stringify(error, null, 2));
+    
     // If WebP is not allowed, provide helpful error message
     if (error.message.includes('mime type') && file.type === 'image/webp') {
       throw new Error(`Failed to upload processed texture: ${error.message}. Run migration: pnpm supabase db push`);
     }
+    
+    // Check if this is a bucket configuration issue
+    if (error.message.includes('not found') || error.message.includes('does not exist')) {
+      throw new Error(`Storage bucket '${STORAGE_BUCKETS.PROCESSED_TEXTURES}' not found. Please ensure Supabase storage is properly configured.`);
+    }
+    
     throw new Error(`Failed to upload processed texture: ${error.message}`);
   }
+  
+  if (!data) {
+    throw new Error('Upload succeeded but no data returned from Supabase storage');
+  }
+  
+  console.log('Upload successful, path:', data.path);
   
   // Get public URL
   const { data: urlData } = supabase.storage
     .from(STORAGE_BUCKETS.PROCESSED_TEXTURES)
     .getPublicUrl(data.path);
   
-  return normalizeStorageUrl(urlData.publicUrl);
+  const publicUrl = normalizeStorageUrl(urlData.publicUrl);
+  console.log('Public URL:', publicUrl);
+  
+  return publicUrl;
 }
 
 /**
