@@ -26,40 +26,33 @@ function ScreenshotCapture({ onCaptureReady }: { onCaptureReady: (captureFn: () 
         // Store original settings
         const originalSize = gl.getSize(new THREE.Vector2());
         const originalPixelRatio = gl.getPixelRatio();
-        const originalPosition = camera.position.clone();
         const targetSize = 1700;
         
-        // Check if camera is a PerspectiveCamera to store aspect ratio
-        const isPerspectiveCamera = 'aspect' in camera;
-        const originalAspect = isPerspectiveCamera ? (camera as any).aspect : 1;
+        // Create a fresh temporary camera for the screenshot (not affected by user rotation)
+        const screenshotCamera = new THREE.PerspectiveCamera(
+          50, // FOV - narrower field of view for less distortion (more telephoto look)
+          1,  // aspect ratio (square)
+          0.1, // near
+          1000 // far
+        );
+        screenshotCamera.position.set(0, 0, 4.5); // Centered, adjusted distance
+        screenshotCamera.lookAt(0, 0, 0); // Look at center of scene
+        screenshotCamera.updateProjectionMatrix();
         
         // Set pixel ratio to 1 to get exact pixel dimensions (avoid Retina 2x scaling)
         gl.setPixelRatio(1);
         // Resize renderer to high resolution square
         gl.setSize(targetSize, targetSize, false);
         
-        // Update camera aspect ratio for square capture
-        if (isPerspectiveCamera) {
-          (camera as any).aspect = 1; // Square aspect ratio
-        }
-        
-        // Zoom in camera to make object fill ~80% of capture (move from z=8 to z=5)
-        camera.position.set(0, 0, 5);
-        camera.updateProjectionMatrix();
-        
-        gl.render(scene, camera);
+        // Render with the temporary centered camera
+        gl.render(scene, screenshotCamera);
         const dataUrl = gl.domElement.toDataURL('image/png');
         
-        // Restore original settings
-        camera.position.copy(originalPosition);
-        if (isPerspectiveCamera) {
-          (camera as any).aspect = originalAspect;
-        }
-        camera.updateProjectionMatrix();
+        // Restore original settings (no need to restore camera since we used a temporary one)
         gl.setPixelRatio(originalPixelRatio);
         gl.setSize(originalSize.x, originalSize.y, false);
         
-        console.log(`[Screenshot] Captured at ${gl.domElement.width}x${gl.domElement.height} with camera zoom and aspect 1:1`);
+        console.log(`[Screenshot] Captured at ${gl.domElement.width}x${gl.domElement.height} with centered temporary camera`);
         
         return dataUrl;
       } catch (error) {

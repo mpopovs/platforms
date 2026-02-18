@@ -449,6 +449,7 @@ export function UploadTextureForm({
               id="photo"
               name="photo"
               accept="image/*"
+              capture="environment"
               onChange={handleFileChange}
               className="hidden"
               disabled={processing}

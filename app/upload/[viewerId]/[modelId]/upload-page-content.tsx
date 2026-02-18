@@ -65,12 +65,12 @@ export function UploadPageContent({
 
           {/* Main Content Area - GIF hidden while queue status is shown */}
           {!showQueueStatus && (
-            <div className="flex-1 flex items-center justify-center px-4 pb-28">
+            <div className="flex-1 flex items-center justify-center px-4 pb-32 relative z-10">
               <div className="w-full flex items-center justify-center">
                 <img 
                   src="/info.gif" 
                   alt="Instrukcija" 
-                  className="max-w-full max-h-[60vh] w-auto h-auto object-contain"
+                  className="max-w-full max-h-[calc(100vh-300px)] w-auto h-auto object-contain"
                 />
               </div>
             </div>
