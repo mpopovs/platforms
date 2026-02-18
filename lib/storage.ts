@@ -207,7 +207,13 @@ export async function uploadProcessedTextureFile(
   file: File
 ): Promise<string> {
   // Determine file extension based on file type
-  const extension = file.type === 'image/webp' ? 'webp' : 'png';
+  let extension = 'png';
+  if (file.type === 'image/webp') {
+    extension = 'webp';
+  } else if (file.type === 'image/jpeg' || file.type === 'image/jpg') {
+    extension = 'jpg';
+  }
+  
   const fileName = `${viewerId}/${modelId}/${textureId}.${extension}`;
   
   console.log(`Uploading processed texture: ${fileName}, type: ${file.type}, size: ${file.size}`);
@@ -223,10 +229,16 @@ export async function uploadProcessedTextureFile(
   if (error) {
     console.error('Storage upload error:', error);
     console.error('Error details:', JSON.stringify(error, null, 2));
+    console.error('File info:', { type: file.type, size: file.size, name: fileName });
+    
+    // Check if this is an HTML error response (storage service not available)
+    if (error.message && error.message.includes('not valid JSON')) {
+      throw new Error(`Storage service unavailable or misconfigured. The server returned HTML instead of JSON. Please check Supabase storage configuration at ${process.env.NEXT_PUBLIC_SUPABASE_URL}`);
+    }
     
     // If WebP is not allowed, provide helpful error message
-    if (error.message.includes('mime type') && file.type === 'image/webp') {
-      throw new Error(`Failed to upload processed texture: ${error.message}. Run migration: pnpm supabase db push`);
+    if (error.message.includes('mime type')) {
+      throw new Error(`Failed to upload processed texture: ${error.message}. File type ${file.type} may not be allowed. Run migration: pnpm supabase db push`);
     }
     
     // Check if this is a bucket configuration issue

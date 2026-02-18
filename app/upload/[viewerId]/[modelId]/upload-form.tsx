@@ -408,6 +408,7 @@ export function UploadTextureForm({
           setUploadComplete(true);
         }
       } else {
+        console.error('❌ Upload failed:', data);
         setResult({
           type: 'error',
           message: data.error + (data.hint ? '. ' + data.hint : '')
@@ -418,6 +419,7 @@ export function UploadTextureForm({
         type: 'error',
         message: 'Network error. Please try again.'
       });
+      console.error('❌ Network error during upload:', error);
     } finally {
       setUploading(false);
     }
@@ -489,6 +491,11 @@ export function UploadTextureForm({
           <div className="fixed inset-0 z-30 flex items-center justify-center bg-white px-4 pb-28">
             <div className="text-center">
               <div className="text-9xl mb-8 font-light text-gray-800">:(</div>
+              {result.message && (
+                <div className="text-lg text-gray-600 max-w-md mx-auto">
+                  {result.message}
+                </div>
+              )}
             </div>
           </div>
           <div className="fixed bottom-0 left-0 right-0 z-40 p-4 bg-white">

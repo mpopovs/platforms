@@ -85,6 +85,8 @@ export async function POST(request: NextRequest) {
 
     // Generate texture ID
     const textureId = generateTextureId();
+    
+    console.log(`[iOS Debug] Processing upload - clientProcessed: ${clientProcessed}, file type: ${file.type}, file size: ${file.size}`);
 
     if (clientProcessed) {
       // Image already cropped by ArUco markers client-side
