@@ -6,6 +6,7 @@ import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import { Model3D } from '@/components/model-3d';
 import { Check, X } from 'lucide-react';
 import { useThree } from '@react-three/fiber';
+import * as THREE from 'three';
 
 interface Inline3DPreviewProps {
   modelUrl: string;
@@ -22,8 +23,45 @@ function ScreenshotCapture({ onCaptureReady }: { onCaptureReady: (captureFn: () 
   onCaptureReady(
     () => {
       try {
+        // Store original settings
+        const originalSize = gl.getSize(new THREE.Vector2());
+        const originalPixelRatio = gl.getPixelRatio();
+        const originalPosition = camera.position.clone();
+        const targetSize = 1700;
+        
+        // Check if camera is a PerspectiveCamera to store aspect ratio
+        const isPerspectiveCamera = 'aspect' in camera;
+        const originalAspect = isPerspectiveCamera ? (camera as any).aspect : 1;
+        
+        // Set pixel ratio to 1 to get exact pixel dimensions (avoid Retina 2x scaling)
+        gl.setPixelRatio(1);
+        // Resize renderer to high resolution square
+        gl.setSize(targetSize, targetSize, false);
+        
+        // Update camera aspect ratio for square capture
+        if (isPerspectiveCamera) {
+          (camera as any).aspect = 1; // Square aspect ratio
+        }
+        
+        // Zoom in camera to make object fill ~80% of capture (move from z=8 to z=5)
+        camera.position.set(0, 0, 5);
+        camera.updateProjectionMatrix();
+        
         gl.render(scene, camera);
-        return gl.domElement.toDataURL('image/png');
+        const dataUrl = gl.domElement.toDataURL('image/png');
+        
+        // Restore original settings
+        camera.position.copy(originalPosition);
+        if (isPerspectiveCamera) {
+          (camera as any).aspect = originalAspect;
+        }
+        camera.updateProjectionMatrix();
+        gl.setPixelRatio(originalPixelRatio);
+        gl.setSize(originalSize.x, originalSize.y, false);
+        
+        console.log(`[Screenshot] Captured at ${gl.domElement.width}x${gl.domElement.height} with camera zoom and aspect 1:1`);
+        
+        return dataUrl;
       } catch (error) {
         console.error('Failed to capture 3D preview screenshot:', error);
         return null;

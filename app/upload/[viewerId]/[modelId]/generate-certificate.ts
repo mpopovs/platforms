@@ -38,14 +38,18 @@ export async function generateCertificate(
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, size, size);
 
-  // Draw 3D model capture with 20px padding
-  const padding = 20;
-  const availableSize = size - (padding * 2);
-  const scale = Math.max(availableSize / previewImage.width, availableSize / previewImage.height);
+  // Draw 3D model capture - should already be at target size (1700px max)
+  // Scale to fill max 1700px while maintaining aspect ratio
+  const maxDimension = 1700;
+  const scale = Math.min(maxDimension / previewImage.width, maxDimension / previewImage.height);
   const drawWidth = previewImage.width * scale;
   const drawHeight = previewImage.height * scale;
-  const drawX = padding + (availableSize - drawWidth) / 2;
-  const drawY = padding + (availableSize - drawHeight) / 2;
+  // Center on the 2000px canvas
+  const drawX = (size - drawWidth) / 2;
+  const drawY = (size - drawHeight) / 2;
+  
+  console.log(`[Certificate] Source image: ${previewImage.width}x${previewImage.height}, drawing at ${drawWidth}x${drawHeight}`);
+  
   ctx.drawImage(previewImage, drawX, drawY, drawWidth, drawHeight);
 
   // Top left corner: Order number only (dark grey)
