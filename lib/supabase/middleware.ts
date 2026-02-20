@@ -41,8 +41,7 @@ export async function updateSession(request: NextRequest) {
 
   // Protected routes — require a logged-in Supabase user
   const isProtected =
-    pathname.startsWith('/admin') ||
-    pathname.startsWith('/upload');
+    pathname.startsWith('/admin');
 
   if (isProtected && !user) {
     const loginUrl = request.nextUrl.clone();
