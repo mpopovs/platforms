@@ -6,12 +6,13 @@ export default async function AdminSurveyQuestionsPage() {
   
   // Auth enforced by middleware — user is guaranteed to be present
   const { data: { user } } = await supabase.auth.getUser();
+  const userId = user!.id;
 
   // Fetch user's viewers
   const { data: viewers } = await supabase
     .from('viewers')
     .select('id, name')
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .order('name');
 
   return (
@@ -23,7 +24,7 @@ export default async function AdminSurveyQuestionsPage() {
         </p>
       </div>
 
-      <SurveyQuestionsManager viewers={viewers || []} userId={user.id} />
+      <SurveyQuestionsManager viewers={viewers || []} userId={userId} />
     </div>
   );
 }
