@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,7 +12,6 @@ export function LoginForm() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirectTo') || '/admin';
 
@@ -31,8 +30,8 @@ export function LoginForm() {
 
       if (error) throw error;
 
-      router.push(redirectTo);
-      router.refresh();
+      // Use full page navigation so auth cookies are sent with the first request
+      window.location.href = redirectTo;
     } catch (error: any) {
       setError(error.message || 'An error occurred');
     } finally {

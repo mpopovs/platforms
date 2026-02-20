@@ -1,15 +1,11 @@
-import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { SurveyQuestionsManager } from './survey-questions-manager';
 
 export default async function AdminSurveyQuestionsPage() {
   const supabase = await createClient();
   
+  // Auth enforced by middleware — user is guaranteed to be present
   const { data: { user } } = await supabase.auth.getUser();
-  
-  if (!user) {
-    redirect('/login');
-  }
 
   // Fetch user's viewers
   const { data: viewers } = await supabase

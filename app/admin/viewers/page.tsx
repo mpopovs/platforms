@@ -2,8 +2,6 @@ import { getAllViewersAction, getViewerModelsWithTexturesAction } from '@/app/ac
 import { ViewersManagement } from './viewers-management';
 import type { Metadata } from 'next';
 import { rootDomain } from '@/lib/utils';
-import { createClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
 
 export const metadata: Metadata = {
   title: `Viewer Management | ${rootDomain}`,
@@ -11,13 +9,7 @@ export const metadata: Metadata = {
 };
 
 export default async function ViewersPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect('/login');
-  }
-
+  // Auth enforced by middleware
   const viewers = await getAllViewersAction();
   
   // Fetch models for each viewer

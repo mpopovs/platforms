@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import { rootDomain } from '@/lib/utils';
-import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 
 export const metadata: Metadata = {
@@ -9,13 +8,6 @@ export const metadata: Metadata = {
 };
 
 export default async function AdminPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect('/login');
-  }
-
-  // Redirect to viewers management
+  // Auth is enforced by middleware — no need to re-check here
   redirect('/admin/viewers');
 }

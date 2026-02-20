@@ -40,6 +40,7 @@ export async function updateSession(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Protected routes — require a logged-in Supabase user
+  // NOTE: /upload is intentionally public — it's accessed via short upload links (/u/xxx)
   const isProtected =
     pathname.startsWith('/admin');
 
