@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,8 +12,9 @@ export function LoginForm() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get('redirectTo') || '/admin';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,22 +24,6 @@ export function LoginForm() {
     try {
       const supabase = createClient();
 
-      if (mode === 'signup') {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
-          },
-        });
-
-        if (error) throw error;
-
-        setError('Check your email for the confirmation link!');
-        setLoading(false);
-        return;
-      }
-
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -46,7 +31,7 @@ export function LoginForm() {
 
       if (error) throw error;
 
-      router.push('/admin');
+      router.push(redirectTo);
       router.refresh();
     } catch (error: any) {
       setError(error.message || 'An error occurred');
@@ -92,21 +77,8 @@ export function LoginForm() {
       )}
 
       <Button type="submit" className="w-full" disabled={loading}>
-        {loading ? 'Loading...' : mode === 'login' ? 'Login' : 'Sign Up'}
+        {loading ? 'Loading...' : 'Login'}
       </Button>
-
-      <div className="text-center">
-        <button
-          type="button"
-          onClick={() => {
-            setMode(mode === 'login' ? 'signup' : 'login');
-            setError('');
-          }}
-          className="text-sm text-blue-600 hover:underline"
-        >
-          {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Login'}
-        </button>
-      </div>
     </form>
   );
 }

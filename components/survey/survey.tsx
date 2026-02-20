@@ -6,6 +6,7 @@ import { EmojiScale } from './emoji-scale';
 import { StarRating } from './star-rating';
 import { LikertScale } from './likert-scale';
 import { Loader2 } from 'lucide-react';
+import { getTranslations, SupportedLanguage } from './locales';
 
 interface SurveyQuestion {
   id: string;
@@ -19,6 +20,7 @@ interface SurveyProps {
   textureId?: string; // Optional for test/preview mode
   onComplete: () => void;
   isTestMode?: boolean;
+  language?: SupportedLanguage;
 }
 
 const ageGroups = [
@@ -29,7 +31,8 @@ const ageGroups = [
 
 type SurveyStep = 'age-selection' | 'intro' | 'questions' | 'submitting' | 'complete';
 
-export function Survey({ viewerId, textureId, onComplete, isTestMode = false }: SurveyProps) {
+export function Survey({ viewerId, textureId, onComplete, isTestMode = false, language }: SurveyProps) {
+  const t = getTranslations(language);
   const [step, setStep] = useState<SurveyStep>('age-selection');
   const [selectedAgeGroup, setSelectedAgeGroup] = useState<number | null>(null);
   const [questions, setQuestions] = useState<SurveyQuestion[]>([]);
@@ -49,7 +52,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false }: 
     try {
       setLoading(true);
       const response = await fetch(
-        `/api/survey/questions?viewerId=${viewerId}&ageGroup=${selectedAgeGroup}`
+        `/api/survey/questions?viewerId=${viewerId}&ageGroup=${selectedAgeGroup}&language=${language || 'en'}`
       );
       if (!response.ok) throw new Error('Failed to fetch questions');
       const data = await response.json();
@@ -166,31 +169,30 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false }: 
 
   // Age Selection Step
   if (step === 'age-selection') {
+    const ageLabels = [t.ageGroup1, t.ageGroup2, t.ageGroup3];
     return (
       <div className={containerClass}>
         <div className="max-w-2xl w-full text-center">
-          <h2 className="text-4xl font-bold mb-6 text-gray-900">Select Your Age Group</h2>
+          <h2 className="text-4xl font-bold mb-6 text-gray-900">{t.selectAgeGroup}</h2>
           <p className="text-xl text-gray-600 mb-8">
-            This helps us understand different perspectives
+            {t.ageGroupDescription}
           </p>
           <div className="flex flex-col gap-4">
-            {ageGroups.map((group) => (
+            {ageGroups.map((group, i) => (
               <Button
                 key={group.value}
                 onClick={() => handleAgeSelection(group.value)}
                 className="w-full py-8 text-2xl bg-blue-500 hover:bg-blue-600"
                 size="lg"
               >
-                {group.label}
+                {ageLabels[i]}
               </Button>
             ))}
           </div>
 
           <div className="mt-12 space-y-4">
             <p className="text-sm text-gray-500 max-w-lg mx-auto leading-relaxed">
-              We collect this data anonymously for research purposes to improve our services 
-              in compliance with EU data protection regulations (GDPR). 
-              Your personal information is not stored.
+              {t.gdprNotice}
             </p>
             
             <Button 
@@ -198,7 +200,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false }: 
               onClick={onComplete}
               className="text-gray-400 hover:text-gray-600"
             >
-              Skip Survey
+              {t.skipSurvey}
             </Button>
           </div>
         </div>
@@ -241,7 +243,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false }: 
           {/* Progress */}
           <div className="mb-8">
             <div className="flex justify-between text-sm text-gray-600 mb-2">
-              <span>Question {currentQuestionIndex + 1} of {questions.length}</span>
+              <span>{t.questionOf(currentQuestionIndex + 1, questions.length)}</span>
               <span>{Math.round(((currentQuestionIndex + 1) / questions.length) * 100)}%</span>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-3">
@@ -270,7 +272,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false }: 
               <StarRating value={currentResponse} onChange={handleResponseChange} />
             )}
             {currentQuestion?.question_type === 'likert' && (
-              <LikertScale value={currentResponse} onChange={handleResponseChange} />
+              <LikertScale value={currentResponse} onChange={handleResponseChange} translations={t} />
             )}
           </div>
 
@@ -282,14 +284,14 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false }: 
               className="px-8 py-6 text-xl"
               variant="outline"
             >
-              Previous
+              {t.previous}
             </Button>
             <Button
               onClick={handleNext}
               disabled={!canProceed}
               className="px-8 py-6 text-xl bg-blue-500 hover:bg-blue-600"
             >
-              {currentQuestionIndex === questions.length - 1 ? 'Submit' : 'Next'}
+              {currentQuestionIndex === questions.length - 1 ? t.submit : t.next}
             </Button>
           </div>
 
@@ -307,7 +309,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false }: 
       <div className={containerClass}>
         <div className="text-center">
           <Loader2 className="h-20 w-20 mx-auto text-blue-500 animate-spin mb-4" />
-          <p className="text-2xl text-gray-600">Submitting your responses...</p>
+          <p className="text-2xl text-gray-600">{t.submitting}</p>
         </div>
       </div>
     );
@@ -319,9 +321,9 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false }: 
       <div className={containerClass}>
         <div className="text-center">
           <div className="text-8xl mb-6">✅</div>
-          <h2 className="text-4xl font-bold text-gray-900 mb-4">Thank You!</h2>
+          <h2 className="text-4xl font-bold text-gray-900 mb-4">{t.thankYou}</h2>
           <p className="text-xl text-gray-600">
-            Your responses have been recorded.
+            {t.responsesRecorded}
           </p>
         </div>
       </div>

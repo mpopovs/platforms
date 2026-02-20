@@ -110,6 +110,7 @@ export async function POST(request: NextRequest) {
         viewer_id: viewerId,
         age_group: ageGroup,
         question_text: q.question_text,
+        question_translations: q.question_translations || {},
         question_type: q.question_type,
         order_index: index,
         is_active: q.is_active ?? true,

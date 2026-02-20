@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -129,9 +130,15 @@ export function NavBarSupabase() {
     }
   };
 
+  const router = useRouter();
+  const pathname = usePathname();
+
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     setShowProfileMenu(false);
+    if (pathname.startsWith('/admin')) {
+      router.push('/');
+    }
   };
 
   const handlePasswordChange = async (e: React.FormEvent) => {

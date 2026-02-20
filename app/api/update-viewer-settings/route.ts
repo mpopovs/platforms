@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { viewerId, textureCycling, rotationSpeed, backgroundColor, showModelName, ambientLightIntensity, directionalLightIntensity, widgetEnabled, storageMode, enableArucoDetection, defaultModelId, surveyEnabled, certificateBottomImageUrl, showLogoInViewer } = body as {
+    const { viewerId, textureCycling, rotationSpeed, backgroundColor, showModelName, ambientLightIntensity, directionalLightIntensity, widgetEnabled, storageMode, enableArucoDetection, defaultModelId, surveyEnabled, surveyLanguage, certificateBottomImageUrl, showLogoInViewer } = body as {
       viewerId: string;
       textureCycling: TextureCyclingSettings;
       rotationSpeed?: number;
@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
       enableArucoDetection?: boolean;
       defaultModelId?: string;
       surveyEnabled?: boolean;
+      surveyLanguage?: string;
       certificateBottomImageUrl?: string;
       showLogoInViewer?: boolean;
     };
@@ -81,6 +82,7 @@ export async function POST(request: NextRequest) {
       enableArucoDetection: enableArucoDetection ?? viewer.settings?.enableArucoDetection ?? false,
       defaultModelId: defaultModelId ?? viewer.settings?.defaultModelId ?? null,
       surveyEnabled: surveyEnabled ?? viewer.settings?.surveyEnabled ?? true,
+      surveyLanguage: surveyLanguage ?? viewer.settings?.surveyLanguage ?? 'en',
       certificateBottomImageUrl: certificateBottomImageUrl ?? viewer.settings?.certificateBottomImageUrl ?? ''
     };
 

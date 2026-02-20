@@ -28,6 +28,7 @@ interface ViewerSettingsDialogProps {
   onGenerateEmbed?: () => Promise<void>;
   embedCode?: string;
   surveyEnabled?: boolean;
+  surveyLanguage?: string;
   certificateBottomImageUrl?: string;
   showLogoInViewer?: boolean;
 }
@@ -52,6 +53,7 @@ export function ViewerSettingsDialog({
   onGenerateEmbed,
   embedCode,
   surveyEnabled: initialSurveyEnabled,
+  surveyLanguage: initialSurveyLanguage,
   certificateBottomImageUrl: initialCertificateBottomImageUrl,
   showLogoInViewer: initialShowLogoInViewer
 }: ViewerSettingsDialogProps) {
@@ -65,6 +67,7 @@ export function ViewerSettingsDialog({
   
   // Survey Settings
   const [surveyEnabled, setSurveyEnabled] = useState(initialSurveyEnabled ?? true);
+  const [surveyLanguage, setSurveyLanguage] = useState(initialSurveyLanguage || 'en');
   
   // Certificate Settings
   const [certificateBottomImageUrl, setCertificateBottomImageUrl] = useState(initialCertificateBottomImageUrl || '');
@@ -126,6 +129,7 @@ export function ViewerSettingsDialog({
           enableArucoDetection,
           defaultModelId,
           surveyEnabled,
+          surveyLanguage,
           certificateBottomImageUrl,
           showLogoInViewer
         })
@@ -271,6 +275,25 @@ export function ViewerSettingsDialog({
                 </Label>
               </div>
             </div>
+
+            {surveyEnabled && (
+              <div className="space-y-2 pt-1">
+                <Label htmlFor="surveyLanguage" className="text-xs">Survey Language</Label>
+                <select
+                  id="surveyLanguage"
+                  value={surveyLanguage}
+                  onChange={(e) => setSurveyLanguage(e.target.value)}
+                  className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  <option value="en">🇬🇧 English</option>
+                  <option value="lv">🇱🇻 Latvian</option>
+                  <option value="de">🇩🇪 German</option>
+                  <option value="ru">🇷🇺 Russian</option>
+                  <option value="lt">🇱🇹 Lithuanian</option>
+                  <option value="et">🇪🇪 Estonian</option>
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Certificate Settings Section */}

@@ -13,6 +13,7 @@ interface UploadPageContentProps {
   viewerLogoUrl?: string | null;
   certificateBottomImageUrl?: string;
   surveyEnabled?: boolean;
+  surveyLanguage?: string;
 }
 
 export function UploadPageContent({
@@ -23,7 +24,8 @@ export function UploadPageContent({
   viewerName,
   viewerLogoUrl,
   certificateBottomImageUrl,
-  surveyEnabled = true
+  surveyEnabled = true,
+  surveyLanguage
 }: UploadPageContentProps) {
   const [show3DPreview, setShow3DPreview] = useState(false);
   const [processedTextureUrl, setProcessedTextureUrl] = useState<string | null>(null);
@@ -87,6 +89,7 @@ export function UploadPageContent({
         viewerLogoUrl={viewerLogoUrl}
         certificateBottomImageUrl={certificateBottomImageUrl}
         surveyEnabled={surveyEnabled}
+        surveyLanguage={surveyLanguage}
         onPreviewReady={(textureUrl, onApprove, onCancel) => {
           setProcessedTextureUrl(textureUrl);
           setOnApproveCallback(() => onApprove);

@@ -6,6 +6,7 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const viewerId = searchParams.get('viewerId');
     const ageGroup = searchParams.get('ageGroup');
+    const language = searchParams.get('language') || 'en';
 
     if (!viewerId || !ageGroup) {
       return NextResponse.json(
@@ -32,7 +33,17 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ questions: questions || [] });
+    // Apply language translation: use question_translations[language] if available,
+    // fallback to question_translations['en'], fallback to question_text
+    const localised = (questions || []).map((q: any) => ({
+      ...q,
+      question_text:
+        q.question_translations?.[language] ||
+        q.question_translations?.['en'] ||
+        q.question_text,
+    }));
+
+    return NextResponse.json({ questions: localised });
   } catch (error) {
     console.error('Survey questions error:', error);
     return NextResponse.json(

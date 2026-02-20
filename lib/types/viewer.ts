@@ -34,6 +34,7 @@ export interface ViewerSettings {
   enableArucoDetection?: boolean; // Enable smart ArUco mode: auto-detect model from markers, hide model selector (default: false, uses standard mode with manual selection)
   defaultModelId?: string; // Default model to show when no textures are uploaded (default: first model)
   surveyEnabled?: boolean; // Enable survey after texture upload
+  surveyLanguage?: string; // Language for survey UI (en, lv, de, ru, lt, et) (default: 'en')
   certificateBottomImageUrl?: string; // Custom image URL to display below certificate (default: /pm-story.svg)
 }
 

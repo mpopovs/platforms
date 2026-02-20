@@ -3,8 +3,7 @@
 import { useState, useEffect, use, useCallback } from 'react';
 import { useActionState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Eye, Copy, ArrowLeft, Settings, Trash2, LinkIcon, QrCode, Download, Map as MapIcon, FileImage, Palette, Upload, Plus, FileText, BarChart3, Edit } from 'lucide-react';
+import { Eye, Copy, ArrowLeft, Trash2, QrCode, Download, Map as MapIcon, FileImage, Palette, Upload, Plus, FileText, BarChart3, Edit, Check, Code } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -48,6 +47,7 @@ type Viewer = {
     enableArucoDetection?: boolean;
     defaultModelId?: string;
     surveyEnabled?: boolean;
+    surveyLanguage?: string;
     certificateBottomImageUrl?: string;
   };
 };
@@ -174,37 +174,60 @@ function ModelManagement({ viewerId, viewerShortCode, viewerName, widgetEnabled,
   }, [viewerId]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="flex justify-end">
         <UploadModelDialog viewerId={viewerId} onSuccess={refreshModels} />
       </div>
+
       {models.length === 0 ? (
-        <p className="text-sm text-muted-foreground text-center py-6">No models uploaded yet. Upload your first 3D model to get started.</p>
+        <div className="flex flex-col items-center justify-center py-12 text-center border-2 border-dashed rounded-xl text-muted-foreground">
+          <Upload className="h-8 w-8 mb-3 opacity-40" />
+          <p className="text-sm font-medium">No 3D models yet</p>
+          <p className="text-xs mt-1 opacity-70">Upload your first model to get started</p>
+        </div>
       ) : (
-        <div className="space-y-3">
-          {models.map((model) => (
-            <ModelCard
-              key={model.id}
-              model={model}
-              viewerId={viewerId}
-              viewerName={viewerName}
-              widgetEnabled={widgetEnabled}
-              onDelete={refreshModels}
-            />
-          ))}
+        <div className="rounded-xl border overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-gray-50/80 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                <th className="px-4 py-3 text-left w-8">#</th>
+                <th className="px-4 py-3 text-left">Model</th>
+                <th className="px-4 py-3 text-left">Upload Link</th>
+                <th className="px-4 py-3 text-center">Textures</th>
+                <th className="px-4 py-3 text-center">Assets</th>
+                <th className="px-4 py-3 text-center">UV Map</th>
+                <th className="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {models.map((model, idx) => (
+                <ModelRow
+                  key={model.id}
+                  index={idx + 1}
+                  model={model}
+                  viewerId={viewerId}
+                  viewerName={viewerName}
+                  widgetEnabled={widgetEnabled}
+                  onDelete={refreshModels}
+                />
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
   );
 }
 
-function ModelCard({
+function ModelRow({
+  index,
   model,
   viewerId,
   viewerName,
   widgetEnabled,
   onDelete
 }: {
+  index: number;
   model: ViewerModelWithTexture;
   viewerId: string;
   viewerName: string;
@@ -219,6 +242,7 @@ function ModelCard({
   const [isDeleting, setIsDeleting] = useState(false);
   const [uvSvgContent, setUvSvgContent] = useState('');
   const [generatedTemplate, setGeneratedTemplate] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // ArUco marker dictionary (subset for client-side generation)
   // Values from official OpenCV ARUCO_6X6_1000 / DICT_6X6_1000 dictionary
@@ -229,7 +253,6 @@ function ModelCard({
     12: [113, 5, 88, 252, 6], 13: [134, 220, 250, 208, 7], 14: [141, 114, 169, 63, 6], 15: [162, 184, 157, 205, 14],
     16: [9, 253, 30, 156, 4], 17: [21, 77, 189, 24, 15], 18: [48, 10, 49, 14, 2], 19: [72, 7, 239, 175, 13],
     20: [86, 223, 17, 219, 6], 21: [102, 136, 50, 116, 12], 22: [118, 232, 203, 120, 1], 23: [154, 83, 217, 207, 3],
-    // Markers 24+ from official OpenCV DICT_6X6_1000
     24: [169, 203, 132, 2, 4], 25: [198, 117, 73, 73, 0], 26: [193, 210, 136, 148, 1], 27: [231, 72, 8, 82, 11],
     28: [234, 47, 202, 132, 8], 29: [233, 99, 183, 123, 1], 30: [250, 54, 101, 42, 15], 31: [6, 91, 255, 123, 13],
     32: [5, 65, 215, 45, 6], 33: [12, 247, 36, 106, 2], 34: [19, 56, 163, 158, 11], 35: [21, 168, 147, 231, 4],
@@ -254,7 +277,6 @@ function ModelCard({
   const generateArucoMarker = (markerId: number, size: number): string => {
     const bytes = ARUCO_DICT[markerId];
     if (!bytes) return `<rect width="${size}" height="${size}" fill="black"/>`;
-    
     const width = 6, height = 6;
     const bits: number[] = [];
     for (const byte of bytes) {
@@ -263,7 +285,6 @@ function ModelCard({
         bits.push((byte >> i) & 1);
       }
     }
-    
     const cellSize = size / 8;
     let svg = `<rect width="${size}" height="${size}" fill="black"/>`;
     for (let i = 0; i < height; i++) {
@@ -277,60 +298,32 @@ function ModelCard({
   };
 
   const generateSVGTemplate = () => {
-    // Use unique markers per model only when widget is enabled (for ArUco detection)
-    // Otherwise use markers 0-3 for all models
-    const markerIdBase = widgetEnabled 
+    const markerIdBase = widgetEnabled
       ? (model.marker_id_base ?? (model.order_index * 4))
       : 0;
-    const templateWidth = 800;
-    const templateHeight = 600;
-    const markerSize = 50;
-    const textureAreaSize = 500;
-    const textureAreaX = (templateWidth - textureAreaSize) / 2;
-    const textureAreaY = 70;
-
-    // Extract SVG content (remove outer svg tag if present)
+    const templateWidth = 800, templateHeight = 600, markerSize = 50, textureAreaSize = 500;
+    const textureAreaX = (templateWidth - textureAreaSize) / 2, textureAreaY = 70;
     let uvContent = '';
     if (uvSvgContent.trim()) {
       const match = uvSvgContent.match(/<svg[^>]*>([\s\S]*)<\/svg>/i);
       const innerContent = match ? match[1] : uvSvgContent;
-      // Try to extract viewBox from original SVG
       const viewBoxMatch = uvSvgContent.match(/viewBox=["']([^"']+)["']/i);
       const viewBox = viewBoxMatch ? viewBoxMatch[1] : '0 0 100 100';
-      uvContent = `
-        <svg x="${textureAreaX}" y="${textureAreaY}" width="${textureAreaSize}" height="${textureAreaSize}" viewBox="${viewBox}" preserveAspectRatio="xMidYMid meet">
-          ${innerContent}
-        </svg>`;
+      uvContent = `<svg x="${textureAreaX}" y="${textureAreaY}" width="${textureAreaSize}" height="${textureAreaSize}" viewBox="${viewBox}" preserveAspectRatio="xMidYMid meet">${innerContent}</svg>`;
     }
-
     const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${templateWidth}" height="${templateHeight}" viewBox="0 0 ${templateWidth} ${templateHeight}">
-  <defs>
-    <style>
-      .title { font-family: Arial, sans-serif; font-size: 18px; font-weight: bold; }
-      .subtitle { font-family: Arial, sans-serif; font-size: 12px; fill: #666; }
-      .instruction { font-family: Arial, sans-serif; font-size: 10px; fill: #888; }
-    </style>
-  </defs>
-  
   <rect width="100%" height="100%" fill="white"/>
-  
-  <text x="${templateWidth / 2}" y="30" text-anchor="middle" class="title">${model.name}</text>
-  <text x="${templateWidth / 2}" y="50" text-anchor="middle" class="subtitle">${viewerName}</text>
-  
+  <text x="${templateWidth / 2}" y="30" text-anchor="middle" font-family="Arial" font-size="18" font-weight="bold">${model.name}</text>
+  <text x="${templateWidth / 2}" y="50" text-anchor="middle" font-family="Arial" font-size="12" fill="#666">${viewerName}</text>
   <rect x="${textureAreaX}" y="${textureAreaY}" width="${textureAreaSize}" height="${textureAreaSize}" fill="#fafafa" stroke="#ddd" stroke-width="1"/>
-  
   ${uvContent}
-  
   <g transform="translate(${textureAreaX}, ${textureAreaY})">${generateArucoMarker(markerIdBase, markerSize)}</g>
   <g transform="translate(${textureAreaX + textureAreaSize - markerSize}, ${textureAreaY})">${generateArucoMarker(markerIdBase + 1, markerSize)}</g>
   <g transform="translate(${textureAreaX + textureAreaSize - markerSize}, ${textureAreaY + textureAreaSize - markerSize})">${generateArucoMarker(markerIdBase + 2, markerSize)}</g>
   <g transform="translate(${textureAreaX}, ${textureAreaY + textureAreaSize - markerSize})">${generateArucoMarker(markerIdBase + 3, markerSize)}</g>
-  
-  <text x="${templateWidth / 2}" y="${textureAreaY + textureAreaSize + 30}" text-anchor="middle" class="instruction">Color or paint the texture area. Keep all 4 corner markers visible when photographing.</text>
-  <text x="${templateWidth / 2}" y="${textureAreaY + textureAreaSize + 45}" text-anchor="middle" class="instruction">Markers: ${markerIdBase}, ${markerIdBase + 1}, ${markerIdBase + 2}, ${markerIdBase + 3} (ARUCO_6X6_1000)</text>
+  <text x="${templateWidth / 2}" y="${textureAreaY + textureAreaSize + 30}" text-anchor="middle" font-family="Arial" font-size="10" fill="#888">Color or paint the texture area. Keep all 4 corner markers visible when photographing.</text>
 </svg>`;
-
     setGeneratedTemplate(svg);
   };
 
@@ -341,9 +334,7 @@ function ModelCard({
     const a = document.createElement('a');
     a.href = url;
     a.download = `texture-template-${model.name.replace(/[^a-zA-Z0-9-_]/g, '_')}.svg`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
@@ -351,164 +342,149 @@ function ModelCard({
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (event) => {
-      setUvSvgContent(event.target?.result as string || '');
-      setGeneratedTemplate(null);
-    };
+    reader.onload = (event) => { setUvSvgContent(event.target?.result as string || ''); setGeneratedTemplate(null); };
     reader.readAsText(file);
   };
 
   const qrCodeUrl = `/api/qr-code/${model.id}`;
   const textureTemplateUrl = `/api/texture-template/${model.id}`;
-  const shortLink = model.short_code && typeof window !== 'undefined' 
-    ? `${window.location.origin}/u/${model.short_code}` 
-    : null;
+  const shortLink = model.short_code && typeof window !== 'undefined'
+    ? `${window.location.origin}/u/${model.short_code}` : null;
 
   const handleDeleteModel = async () => {
-    if (!confirm(`Are you sure you want to delete "${model.name}"? This will also delete all associated textures.`)) {
-      return;
-    }
-
+    if (!confirm(`Are you sure you want to delete "${model.name}"? This will also delete all associated textures.`)) return;
     setIsDeleting(true);
     try {
       const formData = new FormData();
       formData.append('modelId', model.id);
       formData.append('viewerId', viewerId);
-      
       const result = await delete3DModelAction({}, formData);
-      
-      if (result.success) {
-        onDelete();
-      } else {
-        alert(result.error || 'Failed to delete model');
-      }
-    } catch (error) {
-      console.error('Failed to delete model:', error);
-      alert('Failed to delete model');
-    } finally {
-      setIsDeleting(false);
-    }
+      if (result.success) { onDelete(); } else { alert(result.error || 'Failed to delete model'); }
+    } catch { alert('Failed to delete model'); } finally { setIsDeleting(false); }
+  };
+
+  const copyLink = () => {
+    if (!shortLink) return;
+    navigator.clipboard.writeText(shortLink);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   };
 
   return (
     <>
-      <Card className="border-l-4 border-l-blue-500">
-        <CardContent className="pt-4 space-y-3">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-sm truncate" title={model.name}>
-                {model.name}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Uploaded: {new Date(model.created_at).toLocaleDateString()}
-              </p>
-              {model.latest_texture && (
-                <div className="flex items-center gap-1 mt-1">
-                  <Palette className="h-3 w-3 text-green-600" />
-                  <span className="text-xs text-green-600">
-                    Latest texture: {new Date(model.latest_texture.uploaded_at).toLocaleDateString()}
-                  </span>
-                </div>
-              )}
-            </div>
-            <div className="flex gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-blue-500 hover:text-blue-700 hover:bg-blue-50"
-                onClick={() => setShowEditDialog(true)}
-              >
-                <Edit className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                onClick={handleDeleteModel}
-                disabled={isDeleting}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
+      <tr className="hover:bg-blue-50/40 transition-colors group">
+        {/* # */}
+        <td className="px-4 py-3 text-xs text-gray-400 font-mono">{index}</td>
 
-          {shortLink && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <LinkIcon className="h-4 w-4 text-blue-600 flex-shrink-0" />
-                  <code className="text-sm text-blue-700 font-mono truncate">{shortLink}</code>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    navigator.clipboard.writeText(shortLink);
-                  }}
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-              <p className="text-xs text-blue-600 mt-1">Upload link (QR code directs here)</p>
+        {/* Model name + date */}
+        <td className="px-4 py-3">
+          <p className="font-medium text-sm text-gray-800 leading-tight">{model.name}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{new Date(model.created_at).toLocaleDateString()}</p>
+        </td>
+
+        {/* Upload link */}
+        <td className="px-4 py-3">
+          {shortLink ? (
+            <div className="flex items-center gap-1.5 max-w-[220px]">
+              <code className="text-xs text-blue-600 font-mono truncate flex-1">{shortLink}</code>
+              <button
+                onClick={copyLink}
+                className="flex-shrink-0 text-gray-400 hover:text-blue-600 transition-colors"
+                title="Copy link"
+              >
+                {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+              </button>
             </div>
+          ) : (
+            <span className="text-xs text-gray-300">—</span>
           )}
+        </td>
 
-          <div className="grid grid-cols-2 gap-2">
-            <a href={qrCodeUrl} download={`qr-${model.id}.png`}>
-              <Button variant="outline" size="sm" className="w-full">
-                <QrCode className="h-4 w-4 mr-2" />
-                QR Code
-              </Button>
+        {/* Textures */}
+        <td className="px-4 py-3 text-center">
+          <button
+            onClick={() => setShowTexturesDialog(true)}
+            className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors
+              hover:bg-green-50 hover:border-green-300 hover:text-green-700
+              border-gray-200 text-gray-500"
+          >
+            <Palette className="h-3 w-3" />
+            {model.latest_texture
+              ? new Date(model.latest_texture.uploaded_at).toLocaleDateString()
+              : 'None'}
+          </button>
+        </td>
+
+        {/* Assets: QR + Template + SVG + ArUco */}
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-1 justify-center">
+            <a href={qrCodeUrl} download={`qr-${model.id}.png`} title="Download QR Code">
+              <button className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-800 transition-colors">
+                <QrCode className="h-4 w-4" />
+              </button>
             </a>
-            <a href={textureTemplateUrl} download={`template-${model.id}.html`}>
-              <Button variant="outline" size="sm" className="w-full">
-                <Download className="h-4 w-4 mr-2" />
-                Template
-              </Button>
+            <a href={textureTemplateUrl} download={`template-${model.id}.html`} title="Download Template">
+              <button className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-800 transition-colors">
+                <Download className="h-4 w-4" />
+              </button>
             </a>
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full"
-              onClick={() => {
-                setUvSvgContent('');
-                setGeneratedTemplate(null);
-                setShowSVGTemplateDialog(true);
-              }}
+            <button
+              title="Generate SVG Template"
+              onClick={() => { setUvSvgContent(''); setGeneratedTemplate(null); setShowSVGTemplateDialog(true); }}
+              className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-800 transition-colors"
             >
-              <Download className="h-4 w-4 mr-2" />
-              SVG Template
-            </Button>
-            <a href={`/api/aruco-markers/${model.id}?format=svg`} download>
-              <Button variant="outline" size="sm" className="w-full">
-                <QrCode className="h-4 w-4 mr-2" />
-                ArUco SVG
-              </Button>
+              <FileImage className="h-4 w-4" />
+            </button>
+            <a href={`/api/aruco-markers/${model.id}?format=svg`} download title="Download ArUco SVG">
+              <button className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-800 transition-colors">
+                <Code className="h-4 w-4" />
+              </button>
             </a>
           </div>
-          
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full"
+        </td>
+
+        {/* UV Map */}
+        <td className="px-4 py-3 text-center">
+          <button
             onClick={() => setShowUVMapDialog(true)}
+            className={[
+              'inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors',
+              model.uv_map_url
+                ? 'border-purple-200 text-purple-600 hover:bg-purple-50'
+                : 'border-gray-200 text-gray-400 hover:bg-gray-50',
+            ].join(' ')}
+            title="Manage UV Map"
           >
-            <MapIcon className="h-4 w-4 mr-2" />
-            UV Map
-          </Button>
+            <MapIcon className="h-3 w-3" />
+            {model.uv_map_url ? 'View' : 'Upload'}
+          </button>
+        </td>
 
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="w-full"
-            onClick={() => setShowTexturesDialog(true)}
-          >
-            <FileImage className="h-4 w-4 mr-2" />
-            {model.latest_texture ? 'View All Textures' : 'No Textures Yet'}
-          </Button>
-        </CardContent>
-      </Card>
+        {/* Actions: Edit + Delete */}
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-1 justify-end">
+            <Button
+              variant="ghost" size="sm"
+              className="h-8 w-8 p-0 text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+              onClick={() => setShowEditDialog(true)}
+              title="Edit model"
+            >
+              <Edit className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost" size="sm"
+              className="h-8 w-8 p-0 text-red-400 hover:text-red-700 hover:bg-red-50"
+              onClick={handleDeleteModel}
+              disabled={isDeleting}
+              title="Delete model"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        </td>
+      </tr>
 
+      {/* --- Dialogs (unchanged logic) --- */}
       <AllTexturesDialog
         open={showTexturesDialog}
         onOpenChange={setShowTexturesDialog}
@@ -520,9 +496,9 @@ function ModelCard({
       <Dialog open={showUVMapDialog} onOpenChange={setShowUVMapDialog}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>UV Map Template</DialogTitle>
+            <DialogTitle>UV Map — {model.name}</DialogTitle>
             <DialogDescription>
-              Upload a UV map image (PNG, JPG, or SVG) showing how to color the texture. SVG format is recommended for best quality in templates.
+              Upload a UV map image (PNG, JPG, or SVG). SVG format is recommended.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -530,61 +506,29 @@ function ModelCard({
               <div className="space-y-2">
                 <p className="text-sm font-medium">Current UV Map</p>
                 {model.uv_map_url.toLowerCase().endsWith('.svg') ? (
-                  <object
-                    data={model.uv_map_url}
-                    type="image/svg+xml"
-                    className="w-full h-64 rounded-md border bg-gray-50"
-                  >
-                    <img
-                      src={model.uv_map_url}
-                      alt="UV Map"
-                      className="w-full rounded-md border bg-gray-50"
-                    />
+                  <object data={model.uv_map_url} type="image/svg+xml" className="w-full h-64 rounded-md border bg-gray-50">
+                    <img src={model.uv_map_url} alt="UV Map" className="w-full rounded-md border bg-gray-50" />
                   </object>
                 ) : (
-                  <img
-                    src={model.uv_map_url}
-                    alt="UV Map"
-                    className="w-full rounded-md border bg-gray-50"
-                  />
+                  <img src={model.uv_map_url} alt="UV Map" className="w-full rounded-md border bg-gray-50" />
                 )}
               </div>
             )}
-
             <div className="space-y-2">
               <Label htmlFor="uvMapFile">Upload New UV Map</Label>
-              <Input
-                id="uvMapFile"
-                type="file"
-                accept="image/*,.svg"
+              <Input id="uvMapFile" type="file" accept="image/*,.svg"
                 onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-
+                  const file = e.target.files?.[0]; if (!file) return;
                   setUploadingUVMap(true);
                   try {
                     const formData = new FormData();
                     formData.append('modelId', model.id);
                     formData.append('file', file);
-
-                    const response = await fetch('/api/upload-uv-map', {
-                      method: 'POST',
-                      body: formData
-                    });
-
+                    const response = await fetch('/api/upload-uv-map', { method: 'POST', body: formData });
                     if (!response.ok) throw new Error('Upload failed');
-
                     const result = await response.json();
-                    if (result.success) {
-                      setShowUVMapDialog(false);
-                      onDelete(); // Refresh to show new UV map
-                    }
-                  } catch (error) {
-                    console.error('Failed to upload UV map:', error);
-                    alert('Failed to upload UV map');
-                  } finally {
-                    setUploadingUVMap(false);
-                  }
+                    if (result.success) { setShowUVMapDialog(false); onDelete(); }
+                  } catch { alert('Failed to upload UV map'); } finally { setUploadingUVMap(false); }
                 }}
                 disabled={uploadingUVMap}
               />
@@ -597,7 +541,7 @@ function ModelCard({
       <Dialog open={showSVGTemplateDialog} onOpenChange={setShowSVGTemplateDialog}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Generate SVG Template</DialogTitle>
+            <DialogTitle>Generate SVG Template — {model.name}</DialogTitle>
             <DialogDescription>
               Paste your UV map SVG content or upload an SVG file to generate a template with ArUco markers.
             </DialogDescription>
@@ -605,47 +549,28 @@ function ModelCard({
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="svgFileInput">Upload SVG File</Label>
-              <Input
-                id="svgFileInput"
-                type="file"
-                accept=".svg"
-                onChange={handleSvgFileSelect}
-              />
+              <Input id="svgFileInput" type="file" accept=".svg" onChange={handleSvgFileSelect} />
             </div>
-            
             <div className="space-y-2">
               <Label htmlFor="uvSvgContent">Or Paste SVG Content</Label>
-              <textarea
-                id="uvSvgContent"
-                className="w-full h-32 p-2 border rounded-md font-mono text-xs"
-                placeholder="<svg>...</svg>"
-                value={uvSvgContent}
-                onChange={(e) => {
-                  setUvSvgContent(e.target.value);
-                  setGeneratedTemplate(null);
-                }}
+              <textarea id="uvSvgContent" className="w-full h-32 p-2 border rounded-md font-mono text-xs"
+                placeholder="<svg>...</svg>" value={uvSvgContent}
+                onChange={(e) => { setUvSvgContent(e.target.value); setGeneratedTemplate(null); }}
               />
             </div>
-
             <div className="flex gap-2">
-              <Button onClick={generateSVGTemplate}>
-                Generate Template
-              </Button>
+              <Button onClick={generateSVGTemplate}>Generate Template</Button>
               {generatedTemplate && (
                 <Button onClick={downloadTemplate} variant="outline">
-                  <Download className="h-4 w-4 mr-2" />
-                  Download SVG
+                  <Download className="h-4 w-4 mr-2" />Download SVG
                 </Button>
               )}
             </div>
-
             {generatedTemplate && (
               <div className="space-y-2">
                 <Label>Preview</Label>
-                <div 
-                  className="w-full border rounded-md bg-gray-50 overflow-auto"
-                  dangerouslySetInnerHTML={{ __html: generatedTemplate }}
-                />
+                <div className="w-full border rounded-md bg-gray-50 overflow-auto"
+                  dangerouslySetInnerHTML={{ __html: generatedTemplate }} />
               </div>
             )}
           </div>
@@ -880,175 +805,155 @@ export default function ViewerDetailPage({ params }: { params: Promise<{ viewerI
     : '';
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/admin/viewers">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Viewers
-            </Link>
-          </Button>
-          <div>
-            <h1 className="text-3xl font-bold">{viewer.name}</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Created {new Date(viewer.created_at).toLocaleDateString()}
-            </p>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          {/* Survey Buttons */}
-          <Button asChild variant="outline">
-            <Link href={`/admin/surveys/questions?viewerId=${viewer.id}`}>
-              <FileText className="h-4 w-4 mr-2" />
-              Configure Survey
-            </Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href={`/admin/surveys/results?viewerId=${viewer.id}`}>
-              <BarChart3 className="h-4 w-4 mr-2" />
-              View Results
-            </Link>
-          </Button>
+    <div className="container mx-auto p-6 space-y-4">
 
-          <Button variant="outline" onClick={() => setShowEditDialog(true)}>
-            <Settings className="h-4 w-4 mr-2" />
-            Edit Name
+      {/* ── Compact header bar ── */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
+          <Link href="/admin/viewers">
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            Viewers
+          </Link>
+        </Button>
+        <span className="text-muted-foreground">/</span>
+        <h1 className="text-xl font-bold">{viewer.name}</h1>
+        <span className="text-xs text-gray-400 font-mono bg-gray-100 px-2 py-0.5 rounded">
+          {viewer.short_code || viewer.id.slice(0, 8)}
+        </span>
+        <div className="ml-auto flex flex-wrap gap-1.5">
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/admin/surveys/questions?viewerId=${viewer.id}`}>
+              <FileText className="h-3.5 w-3.5 mr-1.5" />Configure Survey
+            </Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/admin/surveys/results?viewerId=${viewer.id}`}>
+              <BarChart3 className="h-3.5 w-3.5 mr-1.5" />Results
+            </Link>
+          </Button>
+          <Button asChild variant="default" size="sm">
+            <a href={viewerUrl} target="_blank" rel="noopener noreferrer">
+              <Eye className="h-3.5 w-3.5 mr-1.5" />Open
+            </a>
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setShowEditDialog(true)}>
+            <Edit className="h-3.5 w-3.5 mr-1.5" />Rename
           </Button>
           <form action={deleteAction}>
             <input type="hidden" name="viewerId" value={viewer.id} />
-            <Button
-              variant="destructive"
-              type="submit"
-              onClick={(e) => {
-                if (!confirm('Are you sure you want to delete this viewer?')) {
-                  e.preventDefault();
-                }
-              }}
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Delete Viewer
+            <Button variant="destructive" size="sm" type="submit"
+              onClick={(e) => { if (!confirm('Delete this viewer?')) e.preventDefault(); }}>
+              <Trash2 className="h-3.5 w-3.5" />
             </Button>
           </form>
         </div>
       </div>
 
-      {/* Info Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Viewer Information</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Viewer ID</p>
-                <p className="text-sm font-mono">{viewer.id}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Short Code</p>
-                <p className="text-sm font-mono">{viewer.short_code || 'N/A'}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Total Models</p>
-                <p className="text-sm">{models.length}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Created</p>
-                <p className="text-sm">
-                  {new Date(viewer.created_at).toLocaleDateString()}
-                </p>
+      {/* ── Info + logo + settings row ── */}
+      <div className="rounded-xl border bg-white">
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] divide-y md:divide-y-0 md:divide-x">
+
+          {/* Left: key-value grid */}
+          <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3">
+
+            {/* Viewer URL – spans full width */}
+            <div className="col-span-2 sm:col-span-3 lg:col-span-4">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Viewer URL</p>
+              <div className="flex items-center gap-2">
+                <code className="text-xs text-blue-600 font-mono bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg flex-1 truncate">
+                  {viewerUrl}
+                </code>
+                <button
+                  onClick={() => navigator.clipboard.writeText(viewerUrl)}
+                  className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
+                  title="Copy URL"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
               </div>
             </div>
 
-            <div className="border-t pt-4">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-muted-foreground mb-2">Viewer URL</p>
-                  <div className="flex items-center gap-2">
-                    <LinkIcon className="h-4 w-4 text-blue-600 flex-shrink-0" />
-                    <code className="text-sm text-blue-700 font-mono flex-1 bg-blue-50 px-3 py-2 rounded">
-                      {viewerUrl}
-                    </code>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        navigator.clipboard.writeText(viewerUrl);
-                      }}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-                <Button asChild variant="default">
-                  <a href={viewerUrl} target="_blank" rel="noopener noreferrer">
-                    <Eye className="h-4 w-4 mr-2" />
-                    Open Viewer
-                  </a>
-                </Button>
-              </div>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-0.5">ID</p>
+              <p className="text-xs font-mono text-gray-600 truncate">{viewer.id.slice(0, 12)}…</p>
             </div>
-
-            <div className="border-t pt-4">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-medium text-muted-foreground">Display Logo</p>
-                <Button variant="outline" size="sm" onClick={() => setShowLogoDialog(true)}>
-                  {viewer.logo_url ? 'Change Logo' : 'Upload Logo'}
-                </Button>
-              </div>
-              {viewer.logo_url && (
-                <div className="mb-4">
-                  <img src={viewer.logo_url} alt="Viewer Logo" className="h-16 w-auto object-contain border rounded p-2 bg-gray-50" />
-                </div>
-              )}
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-0.5">Short code</p>
+              <p className="text-xs font-mono text-gray-600">{viewer.short_code || '—'}</p>
             </div>
-
-            <div className="border-t pt-4">
-              <p className="text-sm font-medium text-muted-foreground mb-3">Settings & Configuration</p>
-              <ViewerSettingsDialog
-                viewerId={viewer.id}
-                currentSettings={viewer.settings.textureCycling}
-                rotationSpeed={viewer.settings.rotationSpeed}
-                backgroundColor={viewer.settings.backgroundColor}
-                showModelName={viewer.settings.showModelName}
-                showLogoInViewer={viewer.settings.showLogoInViewer}
-                ambientLightIntensity={viewer.settings.ambientLightIntensity}
-                directionalLightIntensity={viewer.settings.directionalLightIntensity}
-                widgetEnabled={viewer.settings.widgetEnabled}
-                storageMode={viewer.settings.storageMode}
-                enableArucoDetection={viewer.settings.enableArucoDetection}
-                defaultModelId={viewer.settings.defaultModelId}
-                surveyEnabled={viewer.settings.surveyEnabled}
-                certificateBottomImageUrl={viewer.settings.certificateBottomImageUrl}
-                models={models}
-                currentPin={currentPin}
-                onGeneratePin={async () => {
-                  const formData = new FormData();
-                  formData.append('viewerId', viewer.id);
-                  await generateNewPinAction({}, formData);
-                  window.location.reload();
-                }}
-                embedToken={embedTokenState.embedToken}
-                onGenerateEmbed={async () => {
-                  const formData = new FormData();
-                  formData.append('viewerId', viewer.id);
-                  await generateEmbedTokenAction({}, formData);
-                }}
-                embedCode={embedCode}
-              />
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-0.5">Models</p>
+              <p className="text-xs text-gray-600">{models.length}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-0.5">Created</p>
+              <p className="text-xs text-gray-600">{new Date(viewer.created_at).toLocaleDateString()}</p>
             </div>
           </div>
-        </CardContent>
-      </Card>
 
-      {/* Models Section */}
-      <Card>
-        <CardHeader>
-          <CardTitle>3D Models</CardTitle>
-        </CardHeader>
-        <CardContent>
+          {/* Right: logo + settings */}
+          <div className="p-4 flex flex-row md:flex-col items-center md:items-start gap-4 min-w-[160px]">
+            {/* Logo */}
+            <div className="flex flex-col items-center gap-2">
+              {viewer.logo_url ? (
+                <img src={viewer.logo_url} alt="Logo"
+                  className="h-12 w-auto max-w-[100px] object-contain border rounded-lg p-1.5 bg-gray-50" />
+              ) : (
+                <div className="h-12 w-[100px] flex items-center justify-center border-2 border-dashed rounded-lg text-gray-300 text-[10px]">
+                  No logo
+                </div>
+              )}
+              <button
+                onClick={() => setShowLogoDialog(true)}
+                className="text-[10px] text-blue-600 hover:underline"
+              >
+                {viewer.logo_url ? 'Change' : 'Upload logo'}
+              </button>
+            </div>
+
+            {/* Settings */}
+            <ViewerSettingsDialog
+              viewerId={viewer.id}
+              currentSettings={viewer.settings.textureCycling}
+              rotationSpeed={viewer.settings.rotationSpeed}
+              backgroundColor={viewer.settings.backgroundColor}
+              showModelName={viewer.settings.showModelName}
+              showLogoInViewer={viewer.settings.showLogoInViewer}
+              ambientLightIntensity={viewer.settings.ambientLightIntensity}
+              directionalLightIntensity={viewer.settings.directionalLightIntensity}
+              widgetEnabled={viewer.settings.widgetEnabled}
+              storageMode={viewer.settings.storageMode}
+              enableArucoDetection={viewer.settings.enableArucoDetection}
+              defaultModelId={viewer.settings.defaultModelId}
+              surveyEnabled={viewer.settings.surveyEnabled}
+              surveyLanguage={viewer.settings.surveyLanguage}
+              certificateBottomImageUrl={viewer.settings.certificateBottomImageUrl}
+              models={models}
+              currentPin={currentPin}
+              onGeneratePin={async () => {
+                const formData = new FormData();
+                formData.append('viewerId', viewer.id);
+                await generateNewPinAction({}, formData);
+                window.location.reload();
+              }}
+              embedToken={embedTokenState.embedToken}
+              onGenerateEmbed={async () => {
+                const formData = new FormData();
+                formData.append('viewerId', viewer.id);
+                await generateEmbedTokenAction({}, formData);
+              }}
+              embedCode={embedCode}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* ── 3D Models ── */}
+      <div className="rounded-xl border bg-white">
+        <div className="flex items-center justify-between px-5 py-3 border-b">
+          <h2 className="font-semibold text-sm">3D Models</h2>
+        </div>
+        <div className="p-4">
           <ModelManagement
             viewerId={viewer.id}
             viewerShortCode={viewer.short_code}
@@ -1056,8 +961,9 @@ export default function ViewerDetailPage({ params }: { params: Promise<{ viewerI
             widgetEnabled={viewer.settings?.widgetEnabled ?? false}
             initialModels={models}
           />
-        </CardContent>
-      </Card>
+        </div>
+      </div>
+
 
       {/* Edit Viewer Dialog */}
       <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>

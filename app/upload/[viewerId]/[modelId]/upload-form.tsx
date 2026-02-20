@@ -6,6 +6,7 @@ import { Upload, CheckCircle, XCircle, Eye, Camera, RefreshCw } from 'lucide-rea
 import { processImage } from '@/components/utils/imageProcessor';
 import { QueueStatus } from './queue-status';
 import { Survey } from '@/components/survey/survey';
+import type { SupportedLanguage } from '@/components/survey/locales';
 import { CertificateDownloadButton } from './certificate-download-button';
 import { CertificateDisplay } from './certificate-display';
 
@@ -172,6 +173,7 @@ export function UploadTextureForm({
   viewerLogoUrl,
   certificateBottomImageUrl,
   surveyEnabled = true,
+  surveyLanguage,
   onPreviewReady,
   show3DPreview = false,
   onUploadStart,
@@ -184,6 +186,7 @@ export function UploadTextureForm({
   viewerLogoUrl?: string | null;
   certificateBottomImageUrl?: string;
   surveyEnabled?: boolean;
+  surveyLanguage?: string;
   onPreviewReady?: (textureUrl: string, onApprove: (previewCaptureDataUrl?: string) => void, onCancel: () => void) => void;
   show3DPreview?: boolean;
   onUploadStart?: () => void;
@@ -520,6 +523,7 @@ export function UploadTextureForm({
         <Survey
           viewerId={viewerId}
           textureId={textureId}
+          language={surveyLanguage as SupportedLanguage}
           onComplete={() => {
             setShowSurvey(false);
             setUploadComplete(true);

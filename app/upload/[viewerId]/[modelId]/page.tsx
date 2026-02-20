@@ -34,6 +34,7 @@ export default async function UploadTexturePage({
         viewerLogoUrl={viewer.logo_url}
         certificateBottomImageUrl={viewer.settings?.certificateBottomImageUrl}
         surveyEnabled={viewer.settings?.surveyEnabled ?? true}
+        surveyLanguage={viewer.settings?.surveyLanguage}
       />
     </div>
   );
