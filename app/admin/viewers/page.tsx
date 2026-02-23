@@ -39,7 +39,7 @@ export default async function ViewersPage() {
         (models || []).map(async (model) => {
           const { data: textures } = await supabase
             .from('model_textures')
-            .select('id, model_id, corrected_texture_url, original_photo_url, uploaded_at, processed_at, author_name, author_age, queue_number')
+            .select('id, model_id, corrected_texture_url, original_photo_url, uploaded_at, processed_at, author_name, author_age')
             .eq('model_id', model.id)
             .order('uploaded_at', { ascending: false })
             .limit(1);
