@@ -44,21 +44,47 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false, la
   const [error, setError] = useState<string | null>(null);
   const [researchPurpose, setResearchPurpose] = useState<string>('');
   const [showResearchInfo, setShowResearchInfo] = useState(false);
+  // Cache all age groups' questions after init fetch
+  const [questionCache, setQuestionCache] = useState<Record<number, SurveyQuestion[]>>({});
+  // All translations so language switches are instant (no extra fetch)
+  const [rpTranslations, setRpTranslations] = useState<Record<string, string>>({});
 
-  // Fetch viewer-level research purpose whenever language changes (or on mount)
+  // Single init fetch on mount — prefetch all age groups + research purpose
   useEffect(() => {
-    fetch(`/api/survey/research-purpose?viewerId=${viewerId}&language=${activeLanguage}`)
+    fetch(`/api/survey/init?viewerId=${viewerId}&language=${activeLanguage}`)
       .then((r) => r.json())
-      .then((d) => setResearchPurpose(d.research_purpose || ''))
+      .then((d) => {
+        setQuestionCache(d.questionsByAgeGroup ?? {});
+        setRpTranslations(d.research_purpose_translations ?? {});
+        setResearchPurpose(d.research_purpose ?? '');
+      })
       .catch(() => {});
-  }, [viewerId, activeLanguage]);
+  }, [viewerId]); // only on mount — language switching handled below
+
+  // When language changes, resolve research purpose from local cache (no fetch)
+  useEffect(() => {
+    if (Object.keys(rpTranslations).length === 0) return;
+    setResearchPurpose(
+      rpTranslations[activeLanguage] || rpTranslations['en'] || ''
+    );
+  }, [activeLanguage, rpTranslations]);
 
   // Fetch questions when age group is selected
   useEffect(() => {
     if (selectedAgeGroup && step === 'questions') {
-      fetchQuestions();
+      const cached = questionCache[selectedAgeGroup];
+      if (cached) {
+        // Already prefetched — instant display
+        setQuestions(cached);
+        if (cached.length === 0) {
+          updateTextureAgeGroup().then(() => setStep('complete'));
+        }
+      } else {
+        // Fallback: fetch on demand (e.g. init hadn't finished yet)
+        fetchQuestions();
+      }
     }
-  }, [selectedAgeGroup, step]);
+  }, [selectedAgeGroup, step, questionCache]);
 
   const fetchQuestions = async () => {
     try {
@@ -83,7 +109,6 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false, la
       setLoading(false);
     }
   };
-
   const updateTextureAgeGroup = async () => {
     if (isTestMode) return;
     
@@ -198,6 +223,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false, la
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 bg-black/40">
             <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 sm:p-8 relative">
               <button
+                type="button"
                 onClick={() => setShowResearchInfo(false)}
                 className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
                 aria-label="Close"
@@ -209,7 +235,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false, la
                 <h3 className="text-xl font-bold text-gray-900">Research Information</h3>
               </div>
               <p className="text-gray-600 leading-relaxed">{researchPurpose}</p>
-              <Button className="mt-6 w-full" onClick={() => setShowResearchInfo(false)}>Close</Button>
+              <Button type="button" className="mt-6 w-full" onClick={() => setShowResearchInfo(false)}>Close</Button>
             </div>
           </div>
         )}
@@ -219,6 +245,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false, la
           <div className="grid grid-cols-3 gap-3 pt-6 pb-4">
             {LANG_OPTIONS.map((l) => (
               <button
+                type="button"
                 key={l.code}
                 onClick={() => setActiveLanguage(l.code)}
                 className={[
@@ -245,6 +272,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false, la
             <div className="flex flex-col gap-4">
               {ageGroups.map((group, i) => (
                 <button
+                  type="button"
                   key={group.value}
                   onClick={() => handleAgeSelection(group.value)}
                   className="w-full py-6 sm:py-8 text-2xl sm:text-3xl font-bold rounded-2xl bg-blue-500 hover:bg-blue-600 active:scale-[0.98] text-white transition-all shadow-sm"
@@ -259,6 +287,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false, la
           <div className="pb-8 pt-4 flex flex-col items-center gap-4 text-center">
             {researchPurpose && (
               <button
+                type="button"
                 onClick={() => setShowResearchInfo(true)}
                 className="flex items-center gap-2 text-sm text-gray-400 hover:text-blue-500 transition-colors"
               >
@@ -270,6 +299,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false, la
               {t.gdprNotice}
             </p>
             <button
+              type="button"
               onClick={onComplete}
               className="text-sm text-gray-400 hover:text-gray-600 underline underline-offset-2 transition-colors"
             >
@@ -297,6 +327,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false, la
             This will take about 1-2 minutes.
           </p>
           <Button
+            type="button"
             onClick={handleStartSurvey}
             className="w-full py-8 text-2xl bg-green-500 hover:bg-green-600"
             size="lg"
@@ -321,6 +352,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false, la
                 <span>{Math.round(((currentQuestionIndex + 1) / questions.length) * 100)}%</span>
                 {researchPurpose && (
                   <button
+                    type="button"
                     onClick={() => setShowResearchInfo(true)}
                     className="ml-1 text-gray-400 hover:text-blue-500 transition-colors"
                     aria-label="Research information"
@@ -343,6 +375,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false, la
             <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-black/40">
               <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8 relative">
                 <button
+                  type="button"
                   onClick={() => setShowResearchInfo(false)}
                   className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
                   aria-label="Close"
@@ -355,6 +388,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false, la
                 </div>
                 <p className="text-gray-600 leading-relaxed">{researchPurpose}</p>
                 <Button
+                  type="button"
                   className="mt-6 w-full"
                   onClick={() => setShowResearchInfo(false)}
                 >
@@ -392,6 +426,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false, la
           {/* Navigation */}
           <div className="flex gap-4 justify-between">
             <Button
+              type="button"
               onClick={handlePrevious}
               disabled={currentQuestionIndex === 0}
               className="px-8 py-6 text-xl"
@@ -400,6 +435,7 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false, la
               {t.previous}
             </Button>
             <Button
+              type="button"
               onClick={handleNext}
               disabled={!canProceed}
               className="px-8 py-6 text-xl bg-blue-500 hover:bg-blue-600"
