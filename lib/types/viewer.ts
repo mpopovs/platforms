@@ -36,6 +36,8 @@ export interface ViewerSettings {
   surveyEnabled?: boolean; // Enable survey after texture upload
   surveyLanguage?: string; // Language for survey UI (en, lv, de, ru, lt, et) (default: 'en')
   certificateBottomImageUrl?: string; // Custom image URL to display below certificate (default: /pm-story.svg)
+  research_purpose?: string; // English base text describing how survey data will be used in research
+  research_purpose_translations?: Partial<Record<string, string>>; // Multilanguage research purpose (en, lv, de, ru, lt, et)
 }
 
 export interface TextureCyclingSettings {

@@ -27,13 +27,17 @@ export interface SurveyTranslations {
   neutral: string;
   agree: string;
   stronglyAgree: string;
+
+  // Yes / No
+  yes: string;
+  no: string;
 }
 
 export const surveyLocales: Record<SupportedLanguage, SurveyTranslations> = {
   en: {
     selectAgeGroup: 'Select Your Age Group',
     ageGroupDescription: 'This helps us understand different perspectives',
-    ageGroup1: '0–12 years',
+    ageGroup1: '7–12 years',
     ageGroup2: '13–18 years',
     ageGroup3: '19+ years',
     gdprNotice:
@@ -51,11 +55,13 @@ export const surveyLocales: Record<SupportedLanguage, SurveyTranslations> = {
     neutral: 'Neutral',
     agree: 'Agree',
     stronglyAgree: 'Strongly\nAgree',
+    yes: 'Yes',
+    no: 'No',
   },
   lv: {
     selectAgeGroup: 'Izvēlieties vecuma grupu',
     ageGroupDescription: 'Tas palīdz mums izprast dažādus viedokļus',
-    ageGroup1: '0–12 gadi',
+    ageGroup1: '7–12 gadi',
     ageGroup2: '13–18 gadi',
     ageGroup3: '19+ gadi',
     gdprNotice:
@@ -73,11 +79,13 @@ export const surveyLocales: Record<SupportedLanguage, SurveyTranslations> = {
     neutral: 'Neitrāls',
     agree: 'Piekrītu',
     stronglyAgree: 'Pilnīgi\npiekrītu',
+    yes: 'Jā',
+    no: 'Nē',
   },
   de: {
     selectAgeGroup: 'Altersgruppe auswählen',
     ageGroupDescription: 'Dies hilft uns, verschiedene Perspektiven zu verstehen',
-    ageGroup1: '0–12 Jahre',
+    ageGroup1: '7–12 Jahre',
     ageGroup2: '13–18 Jahre',
     ageGroup3: '19+ Jahre',
     gdprNotice:
@@ -95,11 +103,13 @@ export const surveyLocales: Record<SupportedLanguage, SurveyTranslations> = {
     neutral: 'Neutral',
     agree: 'Stimme\nzu',
     stronglyAgree: 'Stimme\nvoll zu',
+    yes: 'Ja',
+    no: 'Nein',
   },
   ru: {
     selectAgeGroup: 'Выберите возрастную группу',
     ageGroupDescription: 'Это помогает нам понять разные точки зрения',
-    ageGroup1: '0–12 лет',
+    ageGroup1: '7–12 лет',
     ageGroup2: '13–18 лет',
     ageGroup3: '19+ лет',
     gdprNotice:
@@ -117,11 +127,13 @@ export const surveyLocales: Record<SupportedLanguage, SurveyTranslations> = {
     neutral: 'Нейтрально',
     agree: 'Согласен',
     stronglyAgree: 'Полностью\nсогласен',
+    yes: 'Да',
+    no: 'Нет',
   },
   lt: {
     selectAgeGroup: 'Pasirinkite amžiaus grupę',
     ageGroupDescription: 'Tai padeda mums suprasti skirtingas perspektyvas',
-    ageGroup1: '0–12 metų',
+    ageGroup1: '7–12 metų',
     ageGroup2: '13–18 metų',
     ageGroup3: '19+ metų',
     gdprNotice:
@@ -139,11 +151,13 @@ export const surveyLocales: Record<SupportedLanguage, SurveyTranslations> = {
     neutral: 'Neutralu',
     agree: 'Sutinku',
     stronglyAgree: 'Visiškai\nsutinku',
+    yes: 'Taip',
+    no: 'Ne',
   },
   et: {
     selectAgeGroup: 'Valige vanuserühm',
     ageGroupDescription: 'See aitab meil mõista erinevaid vaatenurki',
-    ageGroup1: '0–12 aastat',
+    ageGroup1: '7–12 aastat',
     ageGroup2: '13–18 aastat',
     ageGroup3: '19+ aastat',
     gdprNotice:
@@ -161,6 +175,8 @@ export const surveyLocales: Record<SupportedLanguage, SurveyTranslations> = {
     neutral: 'Neutraalne',
     agree: 'Nõustun',
     stronglyAgree: 'Nõustun\ntäielikult',
+    yes: 'Jah',
+    no: 'Ei',
   },
 };
 

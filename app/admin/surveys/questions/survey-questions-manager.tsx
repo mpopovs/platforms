@@ -54,12 +54,45 @@ export function SurveyQuestionsManager({ viewers, userId }: { viewers: Viewer[];
   const [showPreview, setShowPreview] = useState(false);
   const [activeLangTab, setActiveLangTab] = useState<SupportedLanguage>('en');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [researchPurposeTranslations, setResearchPurposeTranslations] = useState<Partial<Record<SupportedLanguage, string>>>({});
+  const [savingPurpose, setSavingPurpose] = useState(false);
 
   useEffect(() => {
     if (selectedViewer && selectedAgeGroup) {
       fetchQuestions();
     }
   }, [selectedViewer, selectedAgeGroup]);
+
+  // Load research purpose from the database when viewer changes
+  useEffect(() => {
+    if (!selectedViewer) { setResearchPurposeTranslations({}); return; }
+    fetch(`/api/admin/survey/research-purpose?viewerId=${selectedViewer}`)
+      .then((r) => r.json())
+      .then((data) => setResearchPurposeTranslations(data.research_purpose_translations ?? {}))
+      .catch(() => setResearchPurposeTranslations({}));
+  }, [selectedViewer]);
+
+  const saveResearchPurpose = async () => {
+    if (!selectedViewer) return;
+    setSavingPurpose(true);
+    try {
+      const res = await fetch('/api/admin/survey/research-purpose', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          viewerId: selectedViewer,
+          research_purpose: researchPurposeTranslations.en || '',
+          research_purpose_translations: researchPurposeTranslations,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      setMessage({ type: 'success', text: 'Research purpose saved.' });
+    } catch {
+      setMessage({ type: 'error', text: 'Failed to save research purpose.' });
+    } finally {
+      setSavingPurpose(false);
+    }
+  };
 
   const fetchQuestions = async () => {
     setLoading(true);
@@ -98,6 +131,13 @@ export function SurveyQuestionsManager({ viewers, userId }: { viewers: Viewer[];
       },
     ]);
   };
+
+  const QUESTION_TYPES = [
+    { value: 'emoji',   label: 'Emoji Scale (😢–😄)' },
+    { value: 'star',    label: 'Star Rating (1–5 ★)' },
+    { value: 'likert',  label: 'Likert Scale (Disagree–Agree)' },
+    { value: 'yes-no',  label: 'Yes / No' },
+  ];
 
   const updateQuestion = (index: number, field: keyof Question, value: any) => {
     const updated = [...questions];
@@ -167,7 +207,7 @@ export function SurveyQuestionsManager({ viewers, userId }: { viewers: Viewer[];
   };
 
   const questionType = ageGroups.find((g) => g.value === selectedAgeGroup)?.type || 'emoji';
-  const questionTypeLabel = { emoji: 'Emoji Scale', star: 'Star Rating', likert: 'Likert Scale' }[questionType];
+  const questionTypeLabel = { emoji: 'Emoji Scale', star: 'Star Rating', likert: 'Likert Scale', 'yes-no': 'Yes / No' }[questionType as string] ?? questionType;
 
   // Summary of translated langs for a question (those that have text)
   const translatedLangs = (q: Question) =>
@@ -221,6 +261,7 @@ export function SurveyQuestionsManager({ viewers, userId }: { viewers: Viewer[];
               {questionType === 'emoji' && 'Users will rate using 5 emoji faces (sad to happy)'}
               {questionType === 'star' && 'Users will rate using 1-5 stars'}
               {questionType === 'likert' && 'Users will rate from Strongly Disagree to Strongly Agree (1-5)'}
+              {questionType === 'yes-no' && 'Users will choose Yes or No (individual questions can override this)'}
             </p>
           </div>
         )}
@@ -232,6 +273,38 @@ export function SurveyQuestionsManager({ viewers, userId }: { viewers: Viewer[];
           </Button>
         </div>
       </Card>
+
+      {/* Research Purpose */}
+      {selectedViewer && (
+        <Card className="p-6">
+          <h2 className="text-lg font-semibold mb-1">Research Purpose</h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Describe how survey data will be used in research. Participants can read this by tapping
+            the info icon during the survey. Saved to the database.
+          </p>
+          <div className="space-y-2">
+            {LANGUAGES.map((lang) => (
+              <div key={lang.code} className="flex items-start gap-3">
+                <span className="text-base w-6 flex-shrink-0 pt-2" title={lang.label}>{lang.flag}</span>
+                <span className="text-xs font-semibold text-gray-500 w-8 flex-shrink-0 pt-2.5">{lang.code.toUpperCase()}</span>
+                <textarea
+                  value={researchPurposeTranslations[lang.code] || ''}
+                  onChange={(e) => setResearchPurposeTranslations((prev) => ({ ...prev, [lang.code]: e.target.value }))}
+                  rows={2}
+                  placeholder={`${lang.label} — research purpose text…`}
+                  className="flex-1 p-2 border rounded text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex justify-end">
+            <Button variant="outline" onClick={saveResearchPurpose} disabled={savingPurpose} size="sm">
+              <Save className="h-3.5 w-3.5 mr-1.5" />
+              {savingPurpose ? 'Saving…' : 'Save Note'}
+            </Button>
+          </div>
+        </Card>
+      )}
 
       <Dialog open={showPreview} onOpenChange={setShowPreview}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto w-full">
@@ -320,6 +393,18 @@ export function SurveyQuestionsManager({ viewers, userId }: { viewers: Viewer[];
                       </div>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
+                      {/* Inline type selector — always visible */}
+                      <select
+                        value={question.question_type}
+                        onChange={(e) => { e.stopPropagation(); updateQuestion(index, 'question_type', e.target.value); }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="p-1 border rounded text-xs bg-white text-gray-700 h-7"
+                        title="Question type"
+                      >
+                        {QUESTION_TYPES.map((qt) => (
+                          <option key={qt.value} value={qt.value}>{qt.label}</option>
+                        ))}
+                      </select>
                       <label
                         className="flex items-center gap-1 text-xs text-gray-500"
                         onClick={(e) => e.stopPropagation()}
@@ -350,7 +435,7 @@ export function SurveyQuestionsManager({ viewers, userId }: { viewers: Viewer[];
 
                   {/* Expanded: all language inputs */}
                   {question._expanded && (
-                    <div className="border-t bg-gray-50 p-4 space-y-3">
+                    <div className="border-t bg-gray-50 p-4 space-y-2">
                       {LANGUAGES.map((lang) => (
                         <div key={lang.code} className="flex items-center gap-3">
                           <span className="text-base w-6 flex-shrink-0" title={lang.label}>{lang.flag}</span>

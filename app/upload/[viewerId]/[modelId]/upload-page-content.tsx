@@ -69,9 +69,12 @@ export function UploadPageContent({
           {!showQueueStatus && (
             <div className="flex-1 flex items-center justify-center px-4 pb-32 relative z-10">
               <div className="w-full flex items-center justify-center">
-                <img 
-                  src="/info.gif" 
-                  alt="Instrukcija" 
+                <video
+                  src="/info.mp4"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
                   className="max-w-full max-h-[calc(100vh-300px)] w-auto h-auto object-contain"
                 />
               </div>

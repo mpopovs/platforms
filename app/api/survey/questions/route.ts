@@ -17,13 +17,20 @@ export async function GET(request: NextRequest) {
 
     const supabase = await createClient();
 
-    const { data: questions, error } = await supabase
-      .from('survey_questions')
-      .select('*')
-      .eq('viewer_id', viewerId)
-      .eq('age_group', parseInt(ageGroup))
-      .eq('is_active', true)
-      .order('order_index', { ascending: true });
+    const [{ data: questions, error }, { data: viewer }] = await Promise.all([
+      supabase
+        .from('survey_questions')
+        .select('*')
+        .eq('viewer_id', viewerId)
+        .eq('age_group', parseInt(ageGroup))
+        .eq('is_active', true)
+        .order('order_index', { ascending: true }),
+      supabase
+        .from('viewers')
+        .select('settings')
+        .eq('id', viewerId)
+        .single(),
+    ]);
 
     if (error) {
       console.error('Error fetching questions:', error);
@@ -32,6 +39,14 @@ export async function GET(request: NextRequest) {
         { status: 500 }
       );
     }
+
+    // Resolve viewer-level research purpose in the requested language
+    const s = (viewer?.settings as any) ?? {};
+    const research_purpose =
+      s.research_purpose_translations?.[language] ||
+      s.research_purpose_translations?.['en'] ||
+      s.research_purpose ||
+      '';
 
     // Apply language translation: use question_translations[language] if available,
     // fallback to question_translations['en'], fallback to question_text
@@ -43,7 +58,7 @@ export async function GET(request: NextRequest) {
         q.question_text,
     }));
 
-    return NextResponse.json({ questions: localised });
+    return NextResponse.json({ questions: localised, research_purpose });
   } catch (error) {
     console.error('Survey questions error:', error);
     return NextResponse.json(
