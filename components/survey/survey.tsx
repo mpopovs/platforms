@@ -19,6 +19,7 @@ interface SurveyQuestion {
 interface SurveyProps {
   viewerId: string;
   textureId?: string; // Optional for test/preview mode
+  textureIdPromise?: Promise<string>; // Resolves when background upload completes
   onComplete: () => void;
   isTestMode?: boolean;
   language?: SupportedLanguage;
@@ -32,7 +33,7 @@ const ageGroups = [
 
 type SurveyStep = 'age-selection' | 'intro' | 'questions' | 'submitting' | 'complete';
 
-export function Survey({ viewerId, textureId, onComplete, isTestMode = false, language }: SurveyProps) {
+export function Survey({ viewerId, textureId, textureIdPromise, onComplete, isTestMode = false, language }: SurveyProps) {
   const [activeLanguage, setActiveLanguage] = useState<SupportedLanguage>(language || 'en');
   const t = getTranslations(activeLanguage);
   const [step, setStep] = useState<SurveyStep>('age-selection');
@@ -113,13 +114,15 @@ export function Survey({ viewerId, textureId, onComplete, isTestMode = false, la
     if (isTestMode) return;
     
     try {
-      if (!textureId) return;
+      // Resolve textureId — either already available or arriving via background upload promise
+      const resolvedId = textureId ?? (textureIdPromise ? await textureIdPromise : null);
+      if (!resolvedId) return;
 
       await fetch('/api/survey/update-texture', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          textureId,
+          textureId: resolvedId,
           ageGroup: selectedAgeGroup,
           surveyCompleted: true,
         }),

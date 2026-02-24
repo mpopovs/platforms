@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Upload, CheckCircle, XCircle, Eye, Camera, RefreshCw } from 'lucide-react';
 import { processImage } from '@/components/utils/imageProcessor';
@@ -126,43 +126,48 @@ function supportsWebP(): boolean {
 }
 
 /**
- * Convert image to WebP format (with JPEG fallback for older mobile browsers)
- * Used for processed textures to save space
+ * Convert image to WebP/JPEG, then iteratively reduce quality until size ≤ maxBytes (default 1 MB).
  */
-async function convertToOptimalFormat(dataUrl: string, quality: number = 0.9): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        reject(new Error('Could not get canvas context'));
-        return;
-      }
+async function convertToOptimalFormat(
+  dataUrl: string,
+  quality: number = 0.9,
+  maxBytes: number = 1 * 1024 * 1024
+): Promise<Blob> {
+  const useWebP = supportsWebP();
+  const mimeType = useWebP ? 'image/webp' : 'image/jpeg';
 
-      ctx.drawImage(img, 0, 0);
-      
-      const useWebP = supportsWebP();
-      const mimeType = useWebP ? 'image/webp' : 'image/jpeg';
-      
-      canvas.toBlob(
-        (blob) => {
-          if (!blob) {
-            reject(new Error(`Could not convert to ${useWebP ? 'WebP' : 'JPEG'}`));
-            return;
-          }
-          console.log(`[Upload] Converted to ${mimeType}: ${blob.size} bytes`);
-          resolve(blob);
-        },
-        mimeType,
-        quality
-      );
-    };
-    img.onerror = () => reject(new Error('Could not load image'));
-    img.src = dataUrl;
-  });
+  const encode = (q: number): Promise<Blob> =>
+    new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject(new Error('Could not get canvas context'));
+        ctx.drawImage(img, 0, 0);
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) return reject(new Error(`Could not convert to ${mimeType}`));
+            resolve(blob);
+          },
+          mimeType,
+          q
+        );
+      };
+      img.onerror = () => reject(new Error('Could not load image'));
+      img.src = dataUrl;
+    });
+
+  let blob = await encode(quality);
+  let q = quality;
+  while (blob.size > maxBytes && q > 0.3) {
+    q = Math.max(+(q - 0.1).toFixed(1), 0.3);
+    blob = await encode(q);
+    console.log(`[Upload] Re-encoded at q=${q}: ${blob.size} bytes`);
+  }
+  console.log(`[Upload] Final ${mimeType} q=${q}: ${blob.size} bytes (${(blob.size / 1024).toFixed(0)} KB)`);
+  return blob;
 }
 
 export function UploadTextureForm({
@@ -199,6 +204,7 @@ export function UploadTextureForm({
   const [processing, setProcessing] = useState(false);
   const [queueNumber, setQueueNumber] = useState<number | null>(null);
   const [textureId, setTextureId] = useState<string | null>(null);
+  const [textureIdPromise, setTextureIdPromise] = useState<Promise<string> | null>(null);
   const [showSurvey, setShowSurvey] = useState(false);
   const [uploadComplete, setUploadComplete] = useState(false);
   const [certificatePreviewCapture, setCertificatePreviewCapture] = useState<string | null>(null);
@@ -214,9 +220,40 @@ export function UploadTextureForm({
     setResult(null);
     setQueueNumber(null);
     setTextureId(null);
+    setTextureIdPromise(null);
     setShowSurvey(false);
     setUploadComplete(false);
     setCertificatePreviewCapture(null);
+  };
+
+  // Extract compress + HTTP upload so it can be reused in background and normal paths
+  const doUpload = async (uploadFile: File, croppedPreview: string): Promise<{ textureId: string; queueNumber: number }> => {
+    const formData = new FormData();
+    formData.append('viewerId', viewerId);
+    formData.append('modelId', modelId);
+
+    const optimizedBlob = await convertToOptimalFormat(croppedPreview);
+    const ext = optimizedBlob.type === 'image/webp' ? '.webp' : '.jpg';
+    const processedFile = new File(
+      [optimizedBlob],
+      `cropped_${uploadFile.name.replace(/\.[^.]+$/, ext)}`,
+      { type: optimizedBlob.type }
+    );
+    console.log(`✅ Processed texture: ${optimizedBlob.type} ${processedFile.size} bytes`);
+
+    const compressedOriginal = await compressImage(uploadFile, 1536, 0.75);
+    console.log(`✅ Original compressed: ${uploadFile.size} → ${compressedOriginal.size} bytes`);
+
+    formData.append('photo', processedFile);
+    formData.append('originalPhoto', compressedOriginal);
+    formData.append('clientProcessed', 'true');
+
+    const response = await fetch('/api/upload-texture', { method: 'POST', body: formData });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error + (data.hint ? '. ' + data.hint : ''));
+    }
+    return { textureId: data.textureId, queueNumber: data.queueNumber };
   };
 
   useEffect(() => {
@@ -284,12 +321,29 @@ export function UploadTextureForm({
           const capturedFile = selectedFile;
           const capturedProcessed = processed.dataUrl;
           onPreviewReady(processed.dataUrl, (previewCaptureDataUrl) => {
-            console.log('Approve clicked, file:', capturedFile?.name, 'has cropped:', !!capturedProcessed);
             if (previewCaptureDataUrl) {
               setCertificatePreviewCapture(previewCaptureDataUrl);
             }
-            // Call handleSubmit with both the captured file and processed data
-            handleSubmit(undefined, capturedFile, capturedProcessed);
+            if (surveyEnabled) {
+              // Show survey immediately; compress + upload silently in background
+              let resolveId!: (id: string) => void;
+              const promise = new Promise<string>((r) => { resolveId = r; });
+              setTextureIdPromise(promise);
+              setShowSurvey(true);
+              doUpload(capturedFile, capturedProcessed)
+                .then(({ textureId: tid, queueNumber: qn }) => {
+                  setTextureId(tid);
+                  setQueueNumber(qn);
+                  setResult({ type: 'success', message: 'Texture uploaded successfully!' });
+                  resolveId(tid);
+                })
+                .catch((err: Error) => {
+                  setResult({ type: 'error', message: err.message });
+                  resolveId(''); // unblock survey even on upload error
+                });
+            } else {
+              handleSubmit(undefined, capturedFile, capturedProcessed);
+            }
           }, () => {
             // Reset form state when cancel is clicked
             setFile(null);
@@ -323,106 +377,29 @@ export function UploadTextureForm({
   };
 
   const handleSubmit = async (e?: React.FormEvent, fileToUpload?: File, processedDataUrl?: string) => {
-    if (e) {
-      e.preventDefault();
-    }
+    if (e) { e.preventDefault(); }
 
     const uploadFile = fileToUpload || file;
     const croppedPreview = processedDataUrl || processedPreview;
 
-    if (!uploadFile) {
-      console.error('No file to upload');
+    if (!uploadFile) { console.error('No file to upload'); return; }
+    if (!croppedPreview) {
+      setResult({ type: 'error', message: '❌ ArUco markers are required for upload.' });
       return;
     }
 
-    console.log('Starting upload with file:', uploadFile.name, 'has cropped:', !!croppedPreview);
-
+    console.log('Starting upload with file:', uploadFile.name);
     setUploading(true);
 
-    const formData = new FormData();
-
-    // Add viewerId and modelId to the form data
-    formData.append('viewerId', viewerId);
-    formData.append('modelId', modelId);
-
-    // If we have a processed image (ArUco cropped), upload both original and cropped
-    if (croppedPreview) {
-      try {
-        console.log('📤 Preparing files for upload...');
-        
-        // Convert processed texture to optimal format (WebP or JPEG fallback)
-        const optimizedBlob = await convertToOptimalFormat(croppedPreview, 0.9);
-        const ext = optimizedBlob.type === 'image/webp' ? '.webp' : '.jpg';
-        const processedFile = new File([optimizedBlob], `cropped_${uploadFile.name.replace(/\.[^.]+$/, ext)}`, { type: optimizedBlob.type });
-        console.log(`✅ Processed texture converted to ${optimizedBlob.type}: ${processedFile.size} bytes`);
-
-        // Compress original photo for storage (reduced size but usable for later)
-        const compressedOriginal = await compressImage(uploadFile, 1536, 0.75);
-        console.log(`✅ Original photo compressed: ${uploadFile.size} → ${compressedOriginal.size} bytes (${Math.round((1 - compressedOriginal.size / uploadFile.size) * 100)}% reduction)`);
-
-        // Upload:
-        // 1. Processed/cropped texture as main 'photo' (WebP format)
-        // 2. Original uncropped photo as 'originalPhoto' (compressed but usable for later use)
-        formData.append('photo', processedFile);
-        formData.append('originalPhoto', compressedOriginal);
-        formData.append('clientProcessed', 'true');
-        
-        console.log(`✅ Uploading processed texture (${processedFile.size} bytes) + compressed original (${compressedOriginal.size} bytes)`);
-      } catch (error) {
-        console.error('❌ Error processing images:', error);
-        setResult({
-          type: 'error',
-          message: '❌ Failed to process texture. ArUco markers are required.'
-        });
-        setUploading(false);
-        return;
-      }
-    } else {
-      // No ArUco markers detected - should not reach here as file is cleared on detection failure
-      console.error('❌ No processed preview available - ArUco markers required');
-      setResult({
-        type: 'error',
-        message: '❌ ArUco markers are required for upload. Please retake the photo with all 4 markers visible.'
-      });
-      setUploading(false);
-      return;
-    }
-
     try {
-      const response = await fetch('/api/upload-texture', {
-        method: 'POST',
-        body: formData
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        setQueueNumber(data.queueNumber);
-        setTextureId(data.textureId);
-        setResult({
-          type: 'success',
-          message: data.message || 'Texture uploaded successfully!'
-        });
-        // Show survey after successful upload if enabled
-        if (surveyEnabled) {
-          setShowSurvey(true);
-        } else {
-          // If survey not enabled, mark upload as complete
-          setUploadComplete(true);
-        }
-      } else {
-        console.error('❌ Upload failed:', data);
-        setResult({
-          type: 'error',
-          message: data.error + (data.hint ? '. ' + data.hint : '')
-        });
-      }
-    } catch (error) {
-      setResult({
-        type: 'error',
-        message: 'Network error. Please try again.'
-      });
-      console.error('❌ Network error during upload:', error);
+      const { textureId: tid, queueNumber: qn } = await doUpload(uploadFile, croppedPreview);
+      setQueueNumber(qn);
+      setTextureId(tid);
+      setResult({ type: 'success', message: 'Texture uploaded successfully!' });
+      setUploadComplete(true);
+    } catch (error: any) {
+      console.error('❌ Upload failed:', error);
+      setResult({ type: 'error', message: error.message || 'Network error. Please try again.' });
     } finally {
       setUploading(false);
     }
@@ -519,10 +496,11 @@ export function UploadTextureForm({
       {/* Queue Status disabled */}
 
       {/* Survey - shown after successful upload */}
-      {showSurvey && textureId && (
+      {showSurvey && (textureId || textureIdPromise) && (
         <Survey
           viewerId={viewerId}
-          textureId={textureId}
+          textureId={textureId ?? undefined}
+          textureIdPromise={textureIdPromise ?? undefined}
           language={surveyLanguage as SupportedLanguage}
           onComplete={() => {
             setShowSurvey(false);
