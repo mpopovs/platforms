@@ -3,7 +3,7 @@
 import { useState, useEffect, use, useCallback } from 'react';
 import { useActionState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Eye, Copy, ArrowLeft, Trash2, QrCode, Download, Map as MapIcon, FileImage, Palette, Upload, Plus, FileText, BarChart3, Edit, Check, Code } from 'lucide-react';
+import { Eye, Copy, ArrowLeft, Trash2, QrCode, Download, Map as MapIcon, FileImage, Palette, Upload, Plus, FileText, BarChart3, Edit, Check, Code, LayoutTemplate } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -49,6 +49,7 @@ type Viewer = {
     surveyEnabled?: boolean;
     surveyLanguage?: string;
     certificateBottomImageUrl?: string;
+    classroomEnabled?: boolean;
   };
 };
 
@@ -831,6 +832,11 @@ export default function ViewerDetailPage({ params }: { params: Promise<{ viewerI
               <BarChart3 className="h-3.5 w-3.5 mr-1.5" />Results
             </Link>
           </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/admin/viewers/${viewer.id}/worksheet-builder`}>
+              <LayoutTemplate className="h-3.5 w-3.5 mr-1.5" />Worksheet Builder
+            </Link>
+          </Button>
           <Button asChild variant="default" size="sm">
             <a href={viewerUrl} target="_blank" rel="noopener noreferrer">
               <Eye className="h-3.5 w-3.5 mr-1.5" />Open
@@ -928,6 +934,7 @@ export default function ViewerDetailPage({ params }: { params: Promise<{ viewerI
               surveyEnabled={viewer.settings.surveyEnabled}
               surveyLanguage={viewer.settings.surveyLanguage}
               certificateBottomImageUrl={viewer.settings.certificateBottomImageUrl}
+              classroomEnabled={viewer.settings.classroomEnabled}
               models={models}
               currentPin={currentPin}
               onGeneratePin={async () => {

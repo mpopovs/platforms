@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { viewerId, textureCycling, rotationSpeed, backgroundColor, showModelName, ambientLightIntensity, directionalLightIntensity, widgetEnabled, storageMode, enableArucoDetection, defaultModelId, surveyEnabled, surveyLanguage, certificateBottomImageUrl, showLogoInViewer } = body as {
+    const { viewerId, textureCycling, rotationSpeed, backgroundColor, showModelName, ambientLightIntensity, directionalLightIntensity, widgetEnabled, storageMode, enableArucoDetection, defaultModelId, surveyEnabled, surveyLanguage, certificateBottomImageUrl, showLogoInViewer, classroomEnabled } = body as {
       viewerId: string;
       textureCycling: TextureCyclingSettings;
       rotationSpeed?: number;
@@ -37,6 +37,7 @@ export async function POST(request: NextRequest) {
       surveyLanguage?: string;
       certificateBottomImageUrl?: string;
       showLogoInViewer?: boolean;
+      classroomEnabled?: boolean;
     };
 
     if (!viewerId) {
@@ -83,7 +84,8 @@ export async function POST(request: NextRequest) {
       defaultModelId: defaultModelId ?? viewer.settings?.defaultModelId ?? null,
       surveyEnabled: surveyEnabled ?? viewer.settings?.surveyEnabled ?? true,
       surveyLanguage: surveyLanguage ?? viewer.settings?.surveyLanguage ?? 'en',
-      certificateBottomImageUrl: certificateBottomImageUrl ?? viewer.settings?.certificateBottomImageUrl ?? ''
+      certificateBottomImageUrl: certificateBottomImageUrl ?? viewer.settings?.certificateBottomImageUrl ?? '',
+      classroomEnabled: classroomEnabled ?? viewer.settings?.classroomEnabled ?? false
     };
 
     const { error: updateError } = await supabase

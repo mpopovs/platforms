@@ -36,6 +36,7 @@ export async function getViewerConfig(viewerId: string, supabaseClient?: any): P
     pin: row.pin_hash,
     shortCode: row.short_code,
     logo_url: row.logo_url,
+    parentViewerId: row.parent_viewer_id ?? null,
     createdAt: new Date(row.created_at).getTime(),
     updatedAt: new Date(row.updated_at).getTime(),
     settings: row.settings
@@ -65,6 +66,7 @@ export async function getViewerConfigByShortCode(shortCode: string, supabaseClie
     pin: row.pin_hash,
     shortCode: row.short_code,
     logo_url: row.logo_url,
+    parentViewerId: row.parent_viewer_id ?? null,
     createdAt: new Date(row.created_at).getTime(),
     updatedAt: new Date(row.updated_at).getTime(),
     settings: row.settings
@@ -92,6 +94,7 @@ export async function saveViewerConfig(config: ViewerConfig, supabaseClient?: an
         name: config.name,
         pin_hash: config.pin,
         short_code: config.shortCode,
+        parent_viewer_id: config.parentViewerId ?? null,
         settings: config.settings,
         updated_at: new Date().toISOString()
       })
@@ -109,6 +112,7 @@ export async function saveViewerConfig(config: ViewerConfig, supabaseClient?: an
       name: config.name,
       pin_hash: config.pin,
       short_code: config.shortCode,
+      parent_viewer_id: config.parentViewerId ?? null,
       settings: config.settings
     };
     
@@ -185,6 +189,7 @@ export async function getAllUserViewerConfigs(userId: string, supabaseClient?: a
     name: row.name,
     pin: row.pin_hash,
     shortCode: row.short_code,
+    parentViewerId: row.parent_viewer_id ?? null,
     createdAt: new Date(row.created_at).getTime(),
     updatedAt: new Date(row.updated_at).getTime(),
     settings: row.settings
@@ -365,8 +370,9 @@ export async function revokeAllEmbedTokens(viewerId: string): Promise<void> {
 /**
  * Get all models for a viewer
  */
-export async function getViewerModels(viewerId: string): Promise<ViewerModelRow[]> {
-  const { data, error } = await supabase
+export async function getViewerModels(viewerId: string, supabaseClient?: any): Promise<ViewerModelRow[]> {
+  const client = supabaseClient || supabase;
+  const { data, error } = await client
     .from('viewer_models')
     .select('*')
     .eq('viewer_id', viewerId)
@@ -453,6 +459,72 @@ export async function getViewerModelsWithTextures(viewerId: string): Promise<Vie
   });
   
   // Sort by uploaded_at DESC (newest textures first), then by order_index
+  return models.sort((a, b) => {
+    if (a.latest_texture?.uploaded_at && b.latest_texture?.uploaded_at) {
+      return new Date(b.latest_texture.uploaded_at).getTime() - new Date(a.latest_texture.uploaded_at).getTime();
+    }
+    if (a.latest_texture?.uploaded_at) return -1;
+    if (b.latest_texture?.uploaded_at) return 1;
+    return a.order_index - b.order_index;
+  });
+}
+
+/**
+ * Get models with their latest textures for a classroom viewer
+ * Fetches models from the parent (museum) viewer but only shows textures
+ * uploaded via this classroom viewer's QR codes.
+ */
+export async function getViewerModelsWithTexturesForClassroom(
+  classroomViewerId: string,
+  parentViewerId: string
+): Promise<ViewerModelWithTexture[]> {
+  const { data, error } = await supabase
+    .rpc('get_latest_textures_for_classroom_viewer', {
+      p_classroom_viewer_id: classroomViewerId,
+      p_parent_viewer_id: parentViewerId
+    });
+
+  if (error) {
+    console.error('Error fetching classroom models with textures:', error);
+    return getViewerModels(parentViewerId);
+  }
+
+  if (!data) return [];
+
+  const models = (data as any[]).map(row => {
+    const model: ViewerModelWithTexture = {
+      id: row.id,
+      viewer_id: row.viewer_id,
+      name: row.name,
+      model_file_url: normalizeStorageUrl(row.model_file_url),
+      texture_template_url: normalizeStorageUrl(row.texture_template_url),
+      qr_code_data: row.qr_code_data,
+      qr_code_image_url: normalizeStorageUrl(row.qr_code_image_url),
+      order_index: row.order_index,
+      short_code: row.short_code,
+      uv_map_url: normalizeStorageUrl(row.uv_map_url),
+      marker_id_base: row.marker_id_base,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    };
+
+    if (row.latest_texture_id) {
+      model.latest_texture = {
+        id: row.latest_texture_id,
+        model_id: row.id,
+        original_photo_url: normalizeStorageUrl(row.latest_texture_original_photo_url),
+        corrected_texture_url: normalizeStorageUrl(row.latest_texture_corrected_texture_url),
+        uploaded_at: row.latest_texture_uploaded_at,
+        processed_at: row.latest_texture_processed_at,
+        author_name: row.latest_texture_author_name,
+        author_age: row.latest_texture_author_age,
+        queue_number: row.latest_texture_queue_number
+      };
+    }
+
+    return model;
+  });
+
   return models.sort((a, b) => {
     if (a.latest_texture?.uploaded_at && b.latest_texture?.uploaded_at) {
       return new Date(b.latest_texture.uploaded_at).getTime() - new Date(a.latest_texture.uploaded_at).getTime();
@@ -699,13 +771,15 @@ export async function createModelTexture(
   textureId: string,
   modelId: string,
   originalPhotoUrl: string,
-  correctedTextureUrl: string
+  correctedTextureUrl: string,
+  uploadSourceViewerId?: string | null
 ): Promise<ModelTextureRow> {
   const row: Partial<ModelTextureRow> = {
     id: textureId,
     model_id: modelId,
     original_photo_url: originalPhotoUrl,
-    corrected_texture_url: correctedTextureUrl
+    corrected_texture_url: correctedTextureUrl,
+    ...(uploadSourceViewerId ? { upload_source_viewer_id: uploadSourceViewerId } : {})
   };
   
   const { data, error } = await supabase

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateQRCodeImage, generateTextureTemplate } from '@/lib/qr-codes';
+import { generateQRCodeImage, generateTextureTemplate, generateWorksheetFromLayout } from '@/lib/qr-codes';
 import { parseQRCodeData } from '@/lib/qr-codes';
 import { createClient } from '@/lib/supabase/server';
+import type { WorksheetLayout } from '@/lib/types/viewer';
 
 /**
  * GET /api/texture-template/[modelId]
@@ -60,15 +61,29 @@ export async function GET(
       margin: 2
     });
 
-    // Generate HTML template with optional UV map and model-specific markers
-    const htmlContent = generateTextureTemplate(
-      qrCodeDataUrl,
-      model.name,
-      viewer.name,
-      model.uv_map_url,
-      qrCodeUrl,
-      model.marker_id_base ?? 0 // Use model-specific markers or default to 0
-    );
+    // Use custom worksheet layout if the viewer has one configured
+    const worksheetLayout: WorksheetLayout | null = viewer.settings?.worksheetLayout ?? null;
+
+    const htmlContent = worksheetLayout
+      ? generateWorksheetFromLayout(
+          worksheetLayout,
+          qrCodeDataUrl,
+          model.uv_map_url,
+          model.name,
+          viewer.name,
+          qrCodeUrl,
+          model.marker_id_base ?? 0,
+          undefined, // lang — use layout default
+          model.id,  // modelId — for per-model content resolution
+        )
+      : generateTextureTemplate(
+          qrCodeDataUrl,
+          model.name,
+          viewer.name,
+          model.uv_map_url,
+          qrCodeUrl,
+          model.marker_id_base ?? 0
+        );
 
     // Return HTML
     return new NextResponse(htmlContent, {

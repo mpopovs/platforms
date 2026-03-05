@@ -70,12 +70,13 @@ export async function POST(request: NextRequest) {
       webpBuffer
     );
 
-    // Save texture record to database
+    // Save texture record to database (viewerId as upload_source for classroom filtering)
     await createModelTexture(
       textureId,
       modelId,
       originalPhotoUrl,
-      correctedTextureUrl
+      correctedTextureUrl,
+      viewerId
     );
 
     console.log(`✅ Texture ${textureId} processed and saved. ArUco cropped: ${correctionApplied}`);

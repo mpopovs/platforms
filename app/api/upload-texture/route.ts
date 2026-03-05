@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getViewerModel } from '@/lib/viewers';
+import { getViewerModel, getViewerConfig } from '@/lib/viewers';
 import { uploadUserTexturePhoto } from '@/lib/storage';
 import { generateTextureId } from '@/lib/types/viewer';
 
@@ -74,10 +74,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (model.viewer_id !== viewerId) {
-      return NextResponse.json(
-        { error: 'Invalid model for this viewer' },
-        { status: 400 }
-      );
+      // Allow if viewerId is a registered classroom child of the model's viewer
+      const childConfig = await getViewerConfig(viewerId);
+      if (!childConfig || childConfig.parentViewerId !== model.viewer_id) {
+        return NextResponse.json(
+          { error: 'Invalid model for this viewer' },
+          { status: 400 }
+        );
+      }
     }
 
     // Check if image was already processed client-side with ArUco markers
@@ -137,7 +141,8 @@ export async function POST(request: NextRequest) {
         textureId,
         modelId,
         originalPhotoUrl,
-        processedTextureUrl
+        processedTextureUrl,
+        viewerId // upload_source_viewer_id
       );
 
       // Create queue entry

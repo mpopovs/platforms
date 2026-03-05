@@ -1,5 +1,202 @@
 // Viewer types and interfaces
 
+// ─── Worksheet Builder Types ────────────────────────────────────────────────
+
+export type WorksheetElementType = 'text' | 'image' | 'qr-zone' | 'texture-zone' | 'arrow';
+
+export interface WorksheetTextStyle {
+  fontSize: number;       // pt, default 10
+  fontWeight: 'normal' | 'bold';
+  fontStyle: 'normal' | 'italic';
+  color: string;          // hex, default '#000000'
+  textAlign: 'left' | 'center' | 'right';
+  backgroundColor?: string;
+  padding?: number;       // px
+}
+
+export interface WorksheetElement {
+  id: string;
+  type: WorksheetElementType;
+  /** Left edge as percentage of page width (0–100) */
+  x: number;
+  /** Top edge as percentage of page height (0–100) */
+  y: number;
+  /** Width as percentage of page width (0–100) */
+  w: number;
+  /** Height as percentage of page height (0–100) */
+  h: number;
+  /**
+   * 'shared'    — same content on every model's worksheet (default for text/image).
+   * 'per-model' — content/image can differ per model; texture-zone & qr-zone are always per-model.
+   */
+  scope?: 'shared' | 'per-model';
+  /** Shared text content keyed by language code, e.g. { en: "...", lv: "..." } */
+  content?: Record<string, string>;
+  /** Per-model text content: { [modelId]: { [lang]: text } } — used when scope === 'per-model' */
+  modelContent?: Record<string, Record<string, string>>;
+  textStyle?: WorksheetTextStyle;
+  /** Shared image URL for type === 'image' */
+  imageUrl?: string;
+  /** Per-model image URLs: { [modelId]: url } — used when scope === 'per-model' */
+  modelImageUrl?: Record<string, string>;
+  objectFit?: 'contain' | 'cover' | 'fill';
+  /** Color for arrow elements (hex). Default '#333333'. */
+  arrowColor?: string;
+}
+
+/** Lightweight text style for instruction page sections and extra blocks. */
+export interface InstrTextStyle {
+  fontSize?: number;           // pt
+  fontWeight?: 'normal' | 'bold';
+  fontStyle?: 'normal' | 'italic';
+  color?: string;
+  textAlign?: 'left' | 'center' | 'right';
+  backgroundColor?: string;
+}
+
+/** A single row in the instruction page body — items are laid out side-by-side as columns. */
+export interface BodyRow {
+  id: string;
+  /** Ordered item IDs: 'klase'|'pin'|'observer'|'teacher-survey', or extra block IDs (position='body') */
+  items: string[];
+}
+
+/** A single question in the teacher's custom survey. */
+export type TeacherSurveyQuestion = {
+  id: string;
+  /** 'open' = short free-text answer; 'checkbox' = one or more options selectable; 'textarea' = long free-text area */
+  type: 'open' | 'checkbox' | 'textarea';
+  /** Question text per language code */
+  text: Record<string, string>;
+  /** For checkbox questions: list of option texts per language */
+  options?: Array<Record<string, string>>;
+  required?: boolean;
+};
+
+/** Teacher-facing custom survey attached to an instruction page. */
+export interface TeacherSurvey {
+  enabled: boolean;
+  /** Survey title per language, shown at the top of the fill-in page */
+  title?: Record<string, string>;
+  questions: TeacherSurveyQuestion[];
+}
+
+/** A free-form extra element added to the instruction page (below the main body). */
+export interface InstrExtraBlock {
+  id: string;
+  type: 'text' | 'image' | 'url';
+  /**
+   * Where the block appears on the page:
+   * 'body'         = inside the main body row alongside klase/pin/observer
+   * 'after-header' = full-width row between header and body
+   * 'after-body'   = below the body row, above the footer
+   * 'after-footer' = below everything (default)
+   */
+  position?: 'body' | 'after-header' | 'after-body' | 'after-footer';
+  /** Width as % of available container width; omit for auto flex sizing */
+  widthPercent?: number;
+  /** text block — content per language; supports {pin}, {klase_url}, {display_url} */
+  content?: Record<string, string>;
+  /** Text styling override for text blocks */
+  textStyle?: InstrTextStyle;
+  /** image block — data URL or absolute URL */
+  imageUrl?: string;
+  /** image max width in mm (default 80) */
+  imageMaxWidthMm?: number;
+  /** url block — the URL to display */
+  url?: string;
+  /** url block — optional label per language */
+  urlLabel?: Record<string, string>;
+  /** url block — show a QR code next to the URL */
+  showQr?: boolean;
+}
+
+/** Visual style overrides for a single section on the instruction page. */
+export interface KlaseInstructionSectionStyle {
+  bg?: string;
+  borderColor?: string;
+  /** Style for the section heading (h2 / title text) */
+  headingStyle?: InstrTextStyle;
+  /** Style for body text (hints, sub-labels) */
+  bodyStyle?: InstrTextStyle;
+}
+
+/** Per-language label overrides for the teacher instruction page. All fields are optional —
+ *  leave undefined to fall back to the built-in default for that language. */
+export interface KlaseInstructionPageLabels {
+  title?: string;
+  klaseSection?: string;
+  klaseHint?: string;
+  pinSection?: string;
+  pinHint?: string;
+  observerSection?: string;
+  observerHint?: string;
+}
+
+/** Configuration for the teacher instruction page printed alongside /klase worksheets. */
+export interface KlaseInstructionPage {
+  enabled: boolean;
+  /** Page orientation — default landscape */
+  orientation?: 'landscape' | 'portrait';
+  /** URL for the observer/novērotājs survey QR code */
+  observerSurveyUrl?: string;
+  /** Toggle individual sections */
+  showHeader?: boolean;   // default true
+  showKlase?: boolean;    // default true
+  showPin?: boolean;      // default true
+  showObserver?: boolean; // default true when observerSurveyUrl is set
+  /** Show the /klase registration URL + QR inside the PIN section (default true) */
+  showKlaseUrlInPin?: boolean;
+  /** Size in mm of the viewer URL QR code shown inside the PIN section (default 16) */
+  klaseUrlQrSizeMm?: number;
+  /** Font size in pt of the viewer URL text shown inside the PIN section (default 6) */
+  klaseUrlTextSizePt?: number;
+  /** Order of the three body sections; default ['klase','pin','observer'] */
+  sectionOrder?: ('klase' | 'pin' | 'observer')[];
+  /**
+   * Unified order of ALL items in the body zone — can contain 'klase'|'pin'|'observer'
+   * and extra block IDs (position === 'body'). Replaces sectionOrder when present.
+   */
+  bodyItemOrder?: string[];
+  /**
+   * Body layout as rows. Each row renders as a horizontal strip of columns.
+   * When present, replaces bodyItemOrder. Items use same id conventions.
+   */
+  bodyRows?: BodyRow[];
+  /** Teacher-facing custom survey attached to this instruction page. */
+  teacherSurvey?: TeacherSurvey;
+  /** Optional extra instructions shown at the bottom, keyed by language code */
+  customText?: Record<string, string>;
+  /** Per-language overrides for every label on the page */
+  translations?: Record<string, KlaseInstructionPageLabels>;
+  /** Per-section style overrides */
+  sectionStyles?: {
+    header?: KlaseInstructionSectionStyle;
+    klase?: KlaseInstructionSectionStyle;
+    pin?: KlaseInstructionSectionStyle;
+    observer?: KlaseInstructionSectionStyle;
+    footer?: KlaseInstructionSectionStyle;
+  };
+  /** Extra free-form blocks appended below the main body */
+  extraBlocks?: InstrExtraBlock[];
+}
+
+export interface WorksheetLayout {
+  version: 1;
+  elements: WorksheetElement[];
+  /** The language code used as default/fallback when a translation is missing */
+  defaultLang: string;
+  /** All language codes present in this layout */
+  languages: string[];
+  pageBackground?: string;
+  /** Printer safe-zone margin in mm (applied to all 4 sides). Default 8mm. */
+  safeMarginMm?: number;
+  /** Teacher instruction page for the /klase classroom flow */
+  klaseInstructionPage?: KlaseInstructionPage;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface ViewerConfig {
   id: string;
   userId: string;
@@ -7,6 +204,7 @@ export interface ViewerConfig {
   pin: string; // hashed PIN
   shortCode?: string; // Short code for simplified URLs (e.g., /v/abc123)
   logo_url?: string | null; // Logo to display in viewer
+  parentViewerId?: string | null; // Set when this is a classroom child viewer
   createdAt: number;
   updatedAt: number;
   settings: ViewerSettings;
@@ -38,6 +236,8 @@ export interface ViewerSettings {
   certificateBottomImageUrl?: string; // Custom image URL to display below certificate (default: /pm-story.svg)
   research_purpose?: string; // English base text describing how survey data will be used in research
   research_purpose_translations?: Partial<Record<string, string>>; // Multilanguage research purpose (en, lv, de, ru, lt, et)
+  classroomEnabled?: boolean; // Allow teachers to register classroom viewers via /klase (default: false)
+  worksheetLayout?: WorksheetLayout; // Custom worksheet layout for all models in this viewer
 }
 
 export interface TextureCyclingSettings {
@@ -84,6 +284,7 @@ export interface ViewerRow {
   pin_hash: string;
   short_code?: string;
   logo_url?: string | null;
+  parent_viewer_id?: string | null;
   settings: ViewerSettings;
   created_at: string;
   updated_at: string;
@@ -115,6 +316,7 @@ export interface ModelTextureRow {
   author_name?: string;
   author_age?: number;
   queue_number?: number;
+  upload_source_viewer_id?: string | null; // Which viewer's QR code was used to upload
 }
 
 // Extended model interface with latest texture

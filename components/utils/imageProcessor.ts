@@ -334,7 +334,8 @@ async function detectArucoMarkers(canvas: HTMLCanvasElement): Promise<DetectedMa
 async function correctPerspective(
   canvas: HTMLCanvasElement,
   markers: DetectedMarker[],
-  targetSize: number
+  targetSize: number,
+  markerIdBase: number = 0
 ): Promise<HTMLCanvasElement | null> {
   if (!cvModule) {
     throw new Error('OpenCV module not initialized');
@@ -348,18 +349,26 @@ async function correctPerspective(
     console.log('  Number of markers to process:', markers.length);
 
     // Map detected markers to their corner positions
+    // Offset map: base+0→top_left, base+1→top_right, base+2→bottom_right, base+3→bottom_left
+    const OFFSET_TO_CORNER: Record<number, keyof CornerPoints> = {
+      0: 'top_left',
+      1: 'top_right',
+      2: 'bottom_right',
+      3: 'bottom_left',
+    };
     const srcPoints: Partial<CornerPoints> = {};
 
     for (const marker of markers) {
-      if (marker.id in MARKER_ID_MAP) {
-        const cornerName = MARKER_ID_MAP[marker.id];
+      const offset = marker.id - markerIdBase;
+      if (offset >= 0 && offset <= 3) {
+        const cornerName = OFFSET_TO_CORNER[offset];
         const cornerIndex = MARKER_CORNER_MAP[cornerName];
 
         // Get the specific corner point of the marker
         const corner = marker.corners[cornerIndex];
         srcPoints[cornerName] = corner;
 
-        console.log(`  Marker ${marker.id} (${cornerName}): corner[${cornerIndex}] at (${corner.x.toFixed(1)}, ${corner.y.toFixed(1)})`);
+        console.log(`  Marker ${marker.id} (${cornerName}, offset ${offset}): corner[${cornerIndex}] at (${corner.x.toFixed(1)}, ${corner.y.toFixed(1)})`);
       }
     }
 
@@ -1286,7 +1295,24 @@ export async function processImage(file: File, options: TextureProcessingOptions
 
       if (markers && markers.length >= 4) {
         console.log(`Found ${markers.length} markers, attempting perspective correction`);
-        const processedCanvas = await correctPerspective(canvas, markers, targetSize);
+
+        // Extract all detected IDs
+        const detectedIds = markers.map(m => m.id);
+
+        // Determine which marker base has all 4 markers present.
+        // Markers [base, base+1, base+2, base+3] form one worksheet group.
+        // Group markers by their base (floor(id/4)*4) and find the first complete group.
+        const baseGroups = new Map<number, number>(); // base → count
+        for (const id of detectedIds) {
+          const base = Math.floor(id / 4) * 4;
+          baseGroups.set(base, (baseGroups.get(base) ?? 0) + 1);
+        }
+        // Find the first base (sorted ascending) that has all 4 markers
+        const sortedBases = Array.from(baseGroups.keys()).sort((a, b) => a - b);
+        const resolvedBase = sortedBases.find(b => baseGroups.get(b) === 4) ?? 0;
+        console.log(`Resolved marker base: ${resolvedBase} (groups: ${JSON.stringify(Object.fromEntries(baseGroups))})`);
+
+        const processedCanvas = await correctPerspective(canvas, markers, targetSize, resolvedBase);
 
         if (processedCanvas) {
           // Use JPEG as fallback since WebP toDataURL is not supported on all mobile browsers
@@ -1295,7 +1321,9 @@ export async function processImage(file: File, options: TextureProcessingOptions
             dataUrl,
             width: processedCanvas.width,
             height: processedCanvas.height,
-            canvas: processedCanvas
+            canvas: processedCanvas,
+            detectedMarkerIds: detectedIds,
+            detectedMarkerBase: resolvedBase,
           };
         }
       } else {

@@ -31,6 +31,7 @@ interface ViewerSettingsDialogProps {
   surveyLanguage?: string;
   certificateBottomImageUrl?: string;
   showLogoInViewer?: boolean;
+  classroomEnabled?: boolean;
 }
 
 export function ViewerSettingsDialog({
@@ -55,7 +56,8 @@ export function ViewerSettingsDialog({
   surveyEnabled: initialSurveyEnabled,
   surveyLanguage: initialSurveyLanguage,
   certificateBottomImageUrl: initialCertificateBottomImageUrl,
-  showLogoInViewer: initialShowLogoInViewer
+  showLogoInViewer: initialShowLogoInViewer,
+  classroomEnabled: initialClassroomEnabled = false
 }: ViewerSettingsDialogProps) {
   const [open, setOpen] = useState(false);
   
@@ -86,6 +88,9 @@ export function ViewerSettingsDialog({
   const [enableArucoDetection, setEnableArucoDetection] = useState(initialEnableArucoDetection ?? false);
   const [defaultModelId, setDefaultModelId] = useState<string>(initialDefaultModelId || (models[0]?.id ?? ''));
   const [copiedWidgetCode, setCopiedWidgetCode] = useState(false);
+
+  // Classroom Settings
+  const [classroomEnabled, setClassroomEnabled] = useState(initialClassroomEnabled);
   
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -131,7 +136,8 @@ export function ViewerSettingsDialog({
           surveyEnabled,
           surveyLanguage,
           certificateBottomImageUrl,
-          showLogoInViewer
+          showLogoInViewer,
+          classroomEnabled
         })
       });
 
@@ -692,6 +698,46 @@ export function ViewerSettingsDialog({
                     Processed textures are stored in the visitor's browser while originals are backed up to your cloud storage.
                   </p>
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* Classroom Viewers Section */}
+          <div className="space-y-4 p-4 border rounded-lg">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-sm">Classroom Viewers</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Allow teachers to register classroom displays via{' '}
+                  <a
+                    href="/klase"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline font-medium"
+                  >
+                    /klase
+                  </a>
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="classroomEnabled"
+                  checked={classroomEnabled}
+                  onChange={(e) => setClassroomEnabled(e.target.checked)}
+                  className="rounded"
+                />
+                <Label htmlFor="classroomEnabled" className="font-normal cursor-pointer text-sm">
+                  Enabled
+                </Label>
+              </div>
+            </div>
+
+            {classroomEnabled && (
+              <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-900">
+                <p><strong>How it works:</strong> Teachers visit <strong>/klase</strong>, register their school,
+                and receive a unique classroom viewer link + PIN + printable worksheets with QR codes.
+                Their uploads appear only on the classroom display — this museum viewer continues showing all textures.</p>
               </div>
             )}
           </div>

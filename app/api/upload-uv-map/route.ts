@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createClient as createServiceClient } from '@supabase/supabase-js';
 
 /**
  * POST /api/upload-uv-map
@@ -47,8 +48,26 @@ export async function POST(request: NextRequest) {
     const userId = (model.viewers as any).user_id;
     const viewerId = model.viewer_id;
 
-    // Upload UV map to Supabase Storage (using texture-templates bucket)
-    const fileExt = file.name.split('.').pop();
+    // Upload UV map to Supabase Storage (using texture-templates bucket).
+    // Ensure the bucket allows SVG, since self-hosted Supabase restricts MIME types by default.
+    const serviceSupabase = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+    await serviceSupabase.storage.updateBucket('texture-templates', {
+      public: true,
+      allowedMimeTypes: [
+        'image/svg+xml',
+        'image/png',
+        'image/jpeg',
+        'image/webp',
+        'image/gif',
+        'image/bmp',
+        'image/tiff',
+      ],
+    });
+
+    const fileExt = file.name.split('.').pop() ?? 'svg';
     const fileName = `${userId}/${viewerId}/${modelId}/uv-map.${fileExt}`;
 
     const { error: uploadError } = await supabase.storage

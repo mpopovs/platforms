@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getViewerModelsWithTextures } from '@/lib/viewers';
+import { getViewerModelsWithTextures, getViewerModelsWithTexturesForClassroom, getViewerConfig } from '@/lib/viewers';
 
 /**
  * GET /api/viewer-models/[viewerId]
- * Fetch all models with their latest textures for a viewer
- * Public endpoint (accessed after PIN authentication)
+ * Fetch all models with their latest textures for a viewer.
+ * For classroom (child) viewers, fetches the parent's models but
+ * filters textures to only those uploaded via this classroom's QR codes.
  */
 export async function GET(
   request: NextRequest,
@@ -20,8 +21,17 @@ export async function GET(
       );
     }
 
-    // Fetch models with textures
-    const models = await getViewerModelsWithTextures(viewerId);
+    // Check if this is a classroom (child) viewer
+    const config = await getViewerConfig(viewerId);
+    let models;
+
+    if (config?.parentViewerId) {
+      // Classroom viewer: show parent's models filtered to own uploads
+      models = await getViewerModelsWithTexturesForClassroom(viewerId, config.parentViewerId);
+    } else {
+      // Normal museum viewer: show all textures
+      models = await getViewerModelsWithTextures(viewerId);
+    }
 
     return NextResponse.json({
       success: true,

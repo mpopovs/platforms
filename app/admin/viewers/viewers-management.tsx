@@ -8,7 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Eye, Plus, Copy, Trash2, ExternalLink, ChevronRight, Box, Images, Loader2, RefreshCw } from 'lucide-react';
+import { Eye, Plus, Copy, Trash2, ExternalLink, ChevronRight, Box, Images, Loader2, RefreshCw, School } from 'lucide-react';
 import Link from 'next/link';
 import {
   createViewerAction,
@@ -22,6 +22,7 @@ type Viewer = {
   id: string;
   name: string;
   shortCode?: string;
+  parentViewerId?: string | null;
   createdAt: number;
   settings: Record<string, any>;
   models?: ViewerModelWithTexture[];
@@ -338,6 +339,22 @@ export function ViewersManagement({ initialViewers }: { initialViewers: any[] })
     window.location.reload();
   };
 
+  // Group: parent viewers first, then interleave their children right below
+  const parentViewers = viewers.filter((v: any) => !v.parentViewerId);
+  const orderedViewers: Array<any & { _isChild: boolean }> = [];
+  for (const parent of parentViewers) {
+    orderedViewers.push({ ...parent, _isChild: false });
+    const children = viewers.filter((v: any) => v.parentViewerId === parent.id);
+    for (const child of children) {
+      orderedViewers.push({ ...child, _isChild: true });
+    }
+  }
+  // Orphan children (if any) at the end
+  const orphans = viewers.filter((v: any) => v.parentViewerId && !parentViewers.find((p: any) => p.id === v.parentViewerId));
+  for (const orphan of orphans) {
+    orderedViewers.push({ ...orphan, _isChild: true });
+  }
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -345,7 +362,10 @@ export function ViewersManagement({ initialViewers }: { initialViewers: any[] })
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Viewers</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {viewers.length} viewer{viewers.length !== 1 ? 's' : ''}
+            {viewers.filter((v: any) => !v.parentViewerId).length} viewer{viewers.filter((v: any) => !v.parentViewerId).length !== 1 ? 's' : ''}
+            {viewers.filter((v: any) => !!v.parentViewerId).length > 0 && (
+              <> · {viewers.filter((v: any) => !!v.parentViewerId).length} classroom{viewers.filter((v: any) => !!v.parentViewerId).length !== 1 ? 's' : ''}</>
+            )}
           </p>
         </div>
         <CreateViewerDialog onSuccess={handleCreate} />
@@ -374,7 +394,7 @@ export function ViewersManagement({ initialViewers }: { initialViewers: any[] })
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {viewers.map((viewer: any, index: number) => {
+              {orderedViewers.map((viewer: any, index: number) => {
                 const models: ViewerModelWithTexture[] = viewer.models || [];
                 const texturedCount = models.filter((m: ViewerModelWithTexture) => m.latest_texture).length;
                 const viewerUrl = viewer.shortCode
@@ -384,19 +404,24 @@ export function ViewersManagement({ initialViewers }: { initialViewers: any[] })
                 return (
                   <tr
                     key={viewer.id}
-                    className="hover:bg-blue-50/40 cursor-pointer transition-colors group"
+                    className={`hover:bg-blue-50/40 cursor-pointer transition-colors group ${viewer._isChild ? 'bg-amber-50/30' : ''}`}
                     onClick={() => router.push(`/admin/viewers/${viewer.id}`)}
                   >
                     {/* Row number */}
-                    <td className="px-4 py-3 text-xs text-gray-400">{index + 1}</td>
+                    <td className="px-4 py-3 text-xs text-gray-400">{viewer._isChild ? '↳' : index + 1}</td>
 
                     {/* Name */}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <Eye className="h-3.5 w-3.5 text-blue-400 flex-shrink-0" />
-                        <span className="font-medium text-gray-900 group-hover:text-blue-700 transition-colors">
+                        {viewer._isChild
+                          ? <School className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
+                          : <Eye className="h-3.5 w-3.5 text-blue-400 flex-shrink-0" />}
+                        <span className={`font-medium group-hover:text-blue-700 transition-colors ${viewer._isChild ? 'text-gray-600 pl-2' : 'text-gray-900'}`}>
                           {viewer.name}
                         </span>
+                        {viewer._isChild && (
+                          <span className="text-[10px] font-semibold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">Klase</span>
+                        )}
                         <ChevronRight className="h-3.5 w-3.5 text-gray-300 group-hover:text-blue-400 transition-colors" />
                       </div>
                     </td>
