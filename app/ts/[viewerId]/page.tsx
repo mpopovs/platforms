@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, use } from 'react';
 import type { TeacherSurveyQuestion, TeacherSurvey } from '@/lib/types/viewer';
+import { LikertScale } from '@/components/survey/likert-scale';
 
 interface SurveyData {
   survey: TeacherSurvey;
@@ -227,6 +228,13 @@ function QuestionBlock({
             );
           })}
         </div>
+      )}
+
+      {question.type === 'likert' && (
+        <LikertScale
+          value={value !== undefined && value !== '' ? Number(value) : null}
+          onChange={(v) => onChange(String(v))}
+        />
       )}
     </div>
   );

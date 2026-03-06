@@ -64,8 +64,8 @@ export interface BodyRow {
 /** A single question in the teacher's custom survey. */
 export type TeacherSurveyQuestion = {
   id: string;
-  /** 'open' = short free-text answer; 'checkbox' = one or more options selectable; 'textarea' = long free-text area */
-  type: 'open' | 'checkbox' | 'textarea';
+  /** 'open' = short free-text answer; 'checkbox' = one or more options selectable; 'textarea' = long free-text area; 'likert' = 1-5 agreement scale */
+  type: 'open' | 'checkbox' | 'textarea' | 'likert';
   /** Question text per language code */
   text: Record<string, string>;
   /** For checkbox questions: list of option texts per language */

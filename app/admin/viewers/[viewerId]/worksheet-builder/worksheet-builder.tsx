@@ -10,7 +10,7 @@ import {
   RectangleHorizontal, BookOpen, ClipboardList, Rows3,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
-  Maximize2, FileText,
+  Maximize2, FileText, BarChart3,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -616,7 +616,7 @@ export default function WorksheetBuilder({ viewer, models }: { viewer: Viewer; m
     });
   }
 
-  function addTeacherSurveyQuestion(type: 'open' | 'checkbox' | 'textarea') {
+  function addTeacherSurveyQuestion(type: 'open' | 'checkbox' | 'textarea' | 'likert') {
     const id = `tsq-${Date.now()}`;
     const q: TeacherSurveyQuestion = { id, type, text: {}, ...(type === 'checkbox' ? { options: [{}] } : {}) };
     setLayout(prev => {
@@ -2397,8 +2397,8 @@ export default function WorksheetBuilder({ viewer, models }: { viewer: Viewer; m
         const ts: TeacherSurvey = ip?.teacherSurvey ?? { enabled: false, questions: [] };
         const updateTs = (patch: Partial<TeacherSurvey>) =>
           setLayout(prev => ({ ...prev, klaseInstructionPage: { enabled: false, ...prev.klaseInstructionPage, teacherSurvey: { ...(prev.klaseInstructionPage?.teacherSurvey ?? { enabled: false, questions: [] }), ...patch } } }));
-        const qTypeColor = (t: string) => t === 'open' ? 'bg-blue-100 text-blue-700' : t === 'checkbox' ? 'bg-purple-100 text-purple-700' : 'bg-orange-100 text-orange-700';
-        const qTypeIcon = (t: string) => t === 'open' ? <Type className="h-3.5 w-3.5 text-blue-500" /> : t === 'checkbox' ? <Check className="h-3.5 w-3.5 text-purple-500" /> : <FileText className="h-3.5 w-3.5 text-orange-500" />;
+        const qTypeColor = (t: string) => t === 'open' ? 'bg-blue-100 text-blue-700' : t === 'checkbox' ? 'bg-purple-100 text-purple-700' : t === 'likert' ? 'bg-teal-100 text-teal-700' : 'bg-orange-100 text-orange-700';
+        const qTypeIcon = (t: string) => t === 'open' ? <Type className="h-3.5 w-3.5 text-blue-500" /> : t === 'checkbox' ? <Check className="h-3.5 w-3.5 text-purple-500" /> : t === 'likert' ? <BarChart3 className="h-3.5 w-3.5 text-teal-500" /> : <FileText className="h-3.5 w-3.5 text-orange-500" />;
 
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -2489,6 +2489,10 @@ export default function WorksheetBuilder({ viewer, models }: { viewer: Viewer; m
                       className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-medium transition-colors">
                       <Check className="h-3.5 w-3.5" />Checkbox options
                     </button>
+                    <button onClick={() => addTeacherSurveyQuestion('likert')}
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-teal-200 bg-teal-50 hover:bg-teal-100 text-teal-700 text-xs font-medium transition-colors">
+                      <BarChart3 className="h-3.5 w-3.5" />Likert scale (1–5)
+                    </button>
                   </div>
                 </div>
 
@@ -2511,10 +2515,10 @@ export default function WorksheetBuilder({ viewer, models }: { viewer: Viewer; m
                           <div className="flex-1" />
                           {/* Type switcher */}
                           <div className="flex gap-1 border rounded-lg overflow-hidden">
-                            {(['open','textarea','checkbox'] as const).map(t => (
+                            {(['open','textarea','checkbox','likert'] as const).map(t => (
                               <button key={t} onClick={() => updateTeacherSurveyQuestion(q.id, { type: t, ...(t === 'checkbox' && !q.options ? { options: [{}] } : {}) })}
                                 className={`px-2 py-1 text-xs transition-colors ${q.type === t ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
-                                {t === 'open' ? 'Short' : t === 'textarea' ? 'Long' : 'Checkbox'}
+                                {t === 'open' ? 'Short' : t === 'textarea' ? 'Long' : t === 'checkbox' ? 'Checkbox' : 'Likert'}
                               </button>
                             ))}
                           </div>
@@ -2563,6 +2567,19 @@ export default function WorksheetBuilder({ viewer, models }: { viewer: Viewer; m
                                   <span className="text-sm text-gray-700">{opt[instrLang] ?? opt[layout.defaultLang] ?? <span className="text-gray-400 italic">Option {oi + 1}</span>}</span>
                                 </div>
                               ))}
+                            </div>
+                          )}
+                          {q.type === 'likert' && (
+                            <div className="border border-dashed border-teal-200 rounded-xl p-3 bg-teal-50">
+                              <div className="flex gap-1.5">
+                                {[1,2,3,4,5].map(v => (
+                                  <div key={v} className="flex-1 flex flex-col items-center gap-1">
+                                    <div className={`w-full h-8 rounded-lg border-2 flex items-center justify-center text-sm font-bold
+                                      ${v === 1 ? 'border-red-300 bg-red-50 text-red-500' : v === 2 ? 'border-orange-300 bg-orange-50 text-orange-500' : v === 3 ? 'border-yellow-300 bg-yellow-50 text-yellow-600' : v === 4 ? 'border-lime-300 bg-lime-50 text-lime-600' : 'border-green-300 bg-green-50 text-green-600'}`}>{v}</div>
+                                  </div>
+                                ))}
+                              </div>
+                              <p className="text-xs text-teal-500 mt-2">1 = Strongly disagree · 5 = Strongly agree</p>
                             </div>
                           )}
                         </div>

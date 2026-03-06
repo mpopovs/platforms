@@ -18,7 +18,7 @@ interface TextAnswer {
 
 interface QuestionStat {
   id: string;
-  type: 'open' | 'checkbox' | 'textarea';
+  type: 'open' | 'checkbox' | 'textarea' | 'likert';
   text: Record<string, string>;
   options?: Array<Record<string, string>>;
   totalAnswered: number;
@@ -58,7 +58,7 @@ export function TeacherSurveyResultsViewer({ viewers }: { viewers: Viewer[] }) {
     rows.push(['Question', 'Type', 'Total Answered', 'Answer / Option', 'Count / Text', 'School', 'Date']);
     for (const q of data.questions) {
       const qText = getText(q.text);
-      if (q.type === 'checkbox') {
+      if (q.type === 'checkbox' || q.type === 'likert') {
         for (const [opt, count] of Object.entries(q.optionCounts)) {
           rows.push([qText, q.type, String(q.totalAnswered), opt, String(count), '', '']);
         }
@@ -172,6 +172,42 @@ export function TeacherSurveyResultsViewer({ viewers }: { viewers: Viewer[] }) {
                         </div>
                       );
                     })}
+                  </div>
+                ) : q.type === 'likert' ? (
+                  /* Likert 1-5 distribution + average */
+                  <div className="space-y-3">
+                    {(() => {
+                      const total = q.totalAnswered;
+                      const sum = [1,2,3,4,5].reduce((acc, v) => acc + v * (q.optionCounts[String(v)] ?? 0), 0);
+                      const avg = total > 0 ? (sum / total).toFixed(2) : '—';
+                      const COLORS = ['bg-red-500','bg-orange-400','bg-yellow-400','bg-lime-500','bg-green-500'];
+                      const LABELS = ['Strongly disagree','Disagree','Neutral','Agree','Strongly agree'];
+                      return (
+                        <>
+                          <div className="text-sm font-semibold text-teal-700 mb-1">Average: {avg} / 5</div>
+                          {[1,2,3,4,5].map((v, i) => {
+                            const count = q.optionCounts[String(v)] ?? 0;
+                            const pct = total > 0 ? (count / total) * 100 : 0;
+                            return (
+                              <div key={v} className="flex items-center gap-3">
+                                <div className="w-40 text-sm flex-shrink-0">{v} — {LABELS[i]}</div>
+                                <div className="flex-1 bg-gray-100 rounded-full h-7 overflow-hidden">
+                                  <div
+                                    className={`${COLORS[i]} h-full flex items-center px-2 text-white text-xs font-medium transition-all`}
+                                    style={{ width: `${Math.max(pct, 0)}%`, minWidth: count > 0 ? '2rem' : 0 }}
+                                  >
+                                    {pct > 12 && `${count} (${pct.toFixed(0)}%)`}
+                                  </div>
+                                </div>
+                                <div className="w-20 text-sm text-gray-500 text-right">
+                                  {pct <= 12 && `${count} (${pct.toFixed(0)}%)`}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </>
+                      );
+                    })()}
                   </div>
                 ) : (
                   /* Text answers */

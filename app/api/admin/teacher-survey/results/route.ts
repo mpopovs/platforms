@@ -74,6 +74,9 @@ export async function GET(request: NextRequest) {
           for (const v of vals) {
             optionCounts[v] = (optionCounts[v] ?? 0) + 1;
           }
+        } else if (q.type === 'likert') {
+          const v = String(ans.value);
+          optionCounts[v] = (optionCounts[v] ?? 0) + 1;
         }
       }
 
@@ -84,7 +87,7 @@ export async function GET(request: NextRequest) {
         options: q.options,
         totalAnswered: allAnswers.length,
         optionCounts,
-        textAnswers: q.type !== 'checkbox' ? allAnswers : [],
+        textAnswers: q.type !== 'checkbox' && q.type !== 'likert' ? allAnswers : [],
       };
     });
 
