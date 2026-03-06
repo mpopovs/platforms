@@ -39,6 +39,7 @@ const UI: Record<LangCode, {
   openPrint: string;
   downloadPdf: string;
   registerAnother: string;
+  howItWorks: string;
 }> = {
   en: {
     langLabel: 'Worksheet language',
@@ -57,6 +58,7 @@ const UI: Record<LangCode, {
     openPrint: 'Open & print worksheets',
     downloadPdf: 'Download PDF',
     registerAnother: '← Register another class',
+    howItWorks: 'How does it work?',
   },
   lv: {
     langLabel: 'Darba lapu valoda',
@@ -75,6 +77,7 @@ const UI: Record<LangCode, {
     openPrint: 'Atvērt & izdrukāt darba lapas',
     downloadPdf: 'Lejupielādēt PDF',
     registerAnother: '← Reģistrēt citu klasi',
+    howItWorks: 'Kā tas darbojas?',
   },
   lt: {
     langLabel: 'Darbo lapų kalba',
@@ -93,6 +96,85 @@ const UI: Record<LangCode, {
     openPrint: 'Atidaryti ir spausdinti darbo lapus',
     downloadPdf: 'Atsisiųsti PDF',
     registerAnother: '← Registruoti kitą klasę',
+    howItWorks: 'Kaip tai veikia?',
+  },
+};
+
+const INSTRUCTIONS: Record<LangCode, { title: string; steps: { icon: string; heading: string; body: string }[] }> = {
+  lv: {
+    title: 'Kā lietot?',
+    steps: [
+      {
+        icon: '📝',
+        heading: 'Reģistrējiet klasi',
+        body: 'Aizpildiet formu ar skolas nosaukumu, skolotāja vārdu un skolnieku skaitu.',
+      },
+      {
+        icon: '🖨️',
+        heading: 'Izdrukājiet darba lapas',
+        body: 'Pēc reģistrācijas lejupielādējiet PDF vai atveriet darba lapas un izdrukājiet — vienu katram skolniekam.',
+      },
+      {
+        icon: '🎨',
+        heading: 'Skolnieki izkrāso',
+        body: 'Kad darba lapas kontūrzimējums ir izkrāsots, skenējiet QR kodu uz darba lapas, lai nofotogrāfētu izkrāsoto kontūrzimējumu ar stūros esošajiem marķieriem un augšupielādētu foto.',
+      },
+      {
+        icon: '📺',
+        heading: 'Atveriet klases displeju',
+        body: 'Izmantojiet reģistrācijā saņemto saiti (piem., claypixels.eu/v/xxxx), ievadiet PIN kodu. Katra skolnieka augšupielādētā tekstūra parādīsies uz jūsu klases displeja un arī uz displeja muzejā.',
+      },
+    ],
+  },
+  en: {
+    title: 'How to use?',
+    steps: [
+      {
+        icon: '📝',
+        heading: 'Register your class',
+        body: 'Fill in the form with your school name, teacher name and the number of students.',
+      },
+      {
+        icon: '🖨️',
+        heading: 'Print the worksheets',
+        body: 'After registration, download the PDF or open and print the worksheets — one per student.',
+      },
+      {
+        icon: '🎨',
+        heading: 'Students colour in',
+        body: 'Once the worksheet outline is coloured in, scan the QR code on the worksheet to photograph the coloured drawing with the corner markers and upload the photo.',
+      },
+      {
+        icon: '📺',
+        heading: 'Open the classroom display',
+        body: 'Use the link received after registration (e.g. claypixels.eu/v/xxxx), enter the PIN code. Each student’s uploaded texture will appear on your classroom display and also on the museum display.',
+      },
+    ],
+  },
+  lt: {
+    title: 'Kaip naudoti?',
+    steps: [
+      {
+        icon: '📝',
+        heading: 'Registruokite klasę',
+        body: 'Užpildykite formą su mokyklos pavadinimu, mokytojo vardu ir mokinų skaičiumi.',
+      },
+      {
+        icon: '🖨️',
+        heading: 'Išspausdinkite darbo lapus',
+        body: 'Po registracijos atsisiųskite PDF arba atidarykite darbo lapus ir išspausdinkite — po vieną kiekvienam mokiniui.',
+      },
+      {
+        icon: '🎨',
+        heading: 'Mokiniai nudažo',
+        body: 'Kai darbo lapo kontūrinis piešinys yra nudažytas, nuskenukite QR kodą ant darbo lapo, kad nufotografuotumėte nudažytą piešinį su kampųose esančiais žymekliais ir įkeltumėte nuotrauką.',
+      },
+      {
+        icon: '📺',
+        heading: 'Atidarykite klasės ekraną',
+        body: 'Naudokite po registracijos gautą nuorodą (pvz. claypixels.eu/v/xxxx), įveskite PIN kodą. Kiekvieno mokinio įkelta tekstūra bus rodoma jūsų klasės ekrane ir taip pat muziejaus ekrane.',
+      },
+    ],
   },
 };
 
@@ -101,6 +183,7 @@ export function KlaseFlow({ parentViewers }: { parentViewers: ParentViewer[] }) 
   const [loading, setLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showInstructions, setShowInstructions] = useState(false);
   const [lang, setLang] = useState<LangCode>('lv');
 
   const t = UI[lang];
@@ -252,7 +335,49 @@ export function KlaseFlow({ parentViewers }: { parentViewers: ParentViewer[] }) 
     );
   }
 
+  const instr = INSTRUCTIONS[lang];
+
   return (
+    <div className="space-y-4">
+      {/* How it works — collapsible */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setShowInstructions(v => !v)}
+          className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-gray-50 transition-colors"
+        >
+          <span className="font-semibold text-gray-800 flex items-center gap-2">
+            {t.howItWorks}
+          </span>
+          <svg
+            className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${showInstructions ? 'rotate-180' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {showInstructions && (
+          <div className="px-6 pb-6 border-t border-gray-100">
+            <h3 className="font-bold text-gray-900 mt-4 mb-4 text-base">{instr.title}</h3>
+            <ol className="space-y-4">
+              {instr.steps.map((step, i) => (
+                <li key={i} className="flex gap-4">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-900 text-white flex items-center justify-center text-sm font-bold">
+                    {i + 1}
+                  </div>
+                  <div className="flex-1 pt-0.5">
+                    <p className="font-semibold text-gray-800 text-sm mb-0.5">
+                      {step.heading}
+                    </p>
+                    <p className="text-sm text-gray-500 leading-relaxed">{step.body}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+      </div>
+
     <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-5">
       {/* Language selector */}
       <div>
@@ -391,5 +516,6 @@ export function KlaseFlow({ parentViewers }: { parentViewers: ParentViewer[] }) 
         )}
       </button>
     </form>
+    </div>
   );
 }
