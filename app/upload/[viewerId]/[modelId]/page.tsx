@@ -11,15 +11,16 @@ export default async function UploadTexturePage({
   const { viewerId, modelId } = await params;
   const supabase = await createClient();
 
-  // Get model
-  const model = await getViewerModel(modelId, supabase);
-  if (!model || model.viewer_id !== viewerId) {
-    notFound();
-  }
-
   // Get viewer
   const viewer = await getViewerConfig(viewerId, supabase);
   if (!viewer) {
+    notFound();
+  }
+
+  // Get model — allow model to belong to either this viewer or its parent (classroom viewers inherit models)
+  const model = await getViewerModel(modelId, supabase);
+  const validOwner = viewer.parentViewerId ?? viewerId;
+  if (!model || model.viewer_id !== validOwner) {
     notFound();
   }
 

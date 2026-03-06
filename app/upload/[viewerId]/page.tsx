@@ -17,8 +17,11 @@ export default async function ViewerUploadPage({
     notFound();
   }
 
+  // Classroom viewers inherit models from their parent viewer
+  const modelSourceId = viewer.parentViewerId ?? viewerId;
+
   // Get all models for this viewer (includes marker_id_base)
-  const models = await getViewerModels(viewerId, supabase);
+  const models = await getViewerModels(modelSourceId, supabase);
   if (!models || models.length === 0) {
     notFound();
   }
