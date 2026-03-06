@@ -1,7 +1,15 @@
 'use client';
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect, use, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import type { TeacherSurveyQuestion, TeacherSurvey } from '@/lib/types/viewer';
 import { LikertScale } from '@/components/survey/likert-scale';
+
+const UI_STRINGS: Record<string, { submit: string; submitting: string; thankYou: string; thankYouSub: string; errorTitle: string; loading: string; placeholderText: string; placeholderTextarea: string }> = {
+  lv: { submit: 'Iesniegt', submitting: 'Sūta…', thankYou: 'Paldies!', thankYouSub: 'Jūsu atbildes ir reģistrētas.', errorTitle: 'Aptauja nav pieejama', loading: 'Ielādē aptauju…', placeholderText: 'Jūsu atbilde…', placeholderTextarea: 'Jūsu atbilde…' },
+  en: { submit: 'Submit', submitting: 'Submitting…', thankYou: 'Thank you!', thankYouSub: 'Your responses have been recorded.', errorTitle: 'Survey unavailable', loading: 'Loading survey…', placeholderText: 'Your answer…', placeholderTextarea: 'Your answer…' },
+  lt: { submit: 'Pateikti', submitting: 'Siunčiama…', thankYou: 'Ačiū!', thankYouSub: 'Jūsų atsakymai užregistruoti.', errorTitle: 'Apklausa nepasiekiama', loading: 'Kraunama apklausa…', placeholderText: 'Jūsų atsakymas…', placeholderTextarea: 'Jūsų atsakymas…' },
+};
+function ui(lang: string) { return UI_STRINGS[lang] ?? UI_STRINGS.en; }
 
 interface SurveyData {
   survey: TeacherSurvey;
@@ -17,13 +25,21 @@ export default function TeacherSurveyPage({
 }) {
   const { viewerId } = use(params);
   const { pin, lang: urlLang } = use(searchParams);
-  const lang = urlLang || 'en';
+  const [lang, setLang] = useState(urlLang || 'en');
+  const router = useRouter();
 
   const [data, setData] = useState<SurveyData | null>(null);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [loading, setLoading] = useState(true);
   const [step, setStep] = useState<'questions' | 'submitting' | 'done' | 'error'>('questions');
   const [errorMsg, setErrorMsg] = useState('');
+
+  const switchLang = useCallback((newLang: string) => {
+    setLang(newLang);
+    const url = new URL(window.location.href);
+    url.searchParams.set('lang', newLang);
+    router.replace(url.pathname + url.search, { scroll: false });
+  }, [router]);
 
   useEffect(() => {
     fetch(`/api/teacher-survey/${viewerId}`)
@@ -90,10 +106,14 @@ export default function TeacherSurveyPage({
     }
   }
 
+  // Detect available languages from survey title keys
+  const availableLangs: string[] = data?.survey?.title ? Object.keys(data.survey.title).filter(k => data.survey.title![k]) : [];
+  const t = ui(lang);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-green-50">
-        <div className="text-green-700 animate-pulse text-lg">Loading survey…</div>
+        <div className="text-green-700 animate-pulse text-lg">{ui(lang).loading}</div>
       </div>
     );
   }
@@ -102,7 +122,7 @@ export default function TeacherSurveyPage({
     return (
       <div className="min-h-screen flex items-center justify-center bg-red-50 p-6">
         <div className="text-center text-red-700">
-          <p className="text-xl font-semibold mb-2">Survey unavailable</p>
+          <p className="text-xl font-semibold mb-2">{t.errorTitle}</p>
           <p className="text-sm">{errorMsg}</p>
         </div>
       </div>
@@ -114,8 +134,8 @@ export default function TeacherSurveyPage({
       <div className="min-h-screen flex items-center justify-center bg-green-50 p-6">
         <div className="text-center">
           <div className="text-5xl mb-4">✅</div>
-          <p className="text-2xl font-bold text-green-800 mb-2">Thank you!</p>
-          <p className="text-green-600">Your responses have been recorded.</p>
+          <p className="text-2xl font-bold text-green-800 mb-2">{t.thankYou}</p>
+          <p className="text-green-600">{t.thankYouSub}</p>
         </div>
       </div>
     );
@@ -129,8 +149,24 @@ export default function TeacherSurveyPage({
     <div className="min-h-screen bg-green-50 pb-16">
       {/* Header */}
       <div className="bg-green-700 text-white px-6 py-5 shadow">
-        <h1 className="text-xl font-bold">{title}</h1>
-        {pin && <p className="text-green-200 text-sm mt-0.5">PIN: {pin}</p>}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-bold">{title}</h1>
+            {pin && <p className="text-green-200 text-sm mt-0.5">PIN: {pin}</p>}
+          </div>
+          {availableLangs.length > 1 && (
+            <div className="flex gap-1 flex-shrink-0 mt-0.5">
+              {availableLangs.map(l => (
+                <button key={l} onClick={() => switchLang(l)}
+                  className={`px-2 py-0.5 rounded text-xs font-mono uppercase transition-colors ${
+                    lang === l ? 'bg-white text-green-800 font-bold' : 'bg-green-600 text-green-100 hover:bg-green-500'
+                  }`}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <form onSubmit={handleSubmit} className="max-w-xl mx-auto px-4 pt-6 space-y-6">
@@ -144,6 +180,8 @@ export default function TeacherSurveyPage({
             onChange={(val) => setAnswer(q.id, val)}
             onToggle={(opt) => toggleCheckbox(q.id, opt)}
             getText={getText}
+            placeholderText={t.placeholderText}
+            placeholderTextarea={t.placeholderTextarea}
           />
         ))}
 
@@ -152,7 +190,7 @@ export default function TeacherSurveyPage({
           disabled={step === 'submitting'}
           className="w-full py-3 rounded-xl bg-green-700 hover:bg-green-800 text-white font-semibold text-lg transition-colors disabled:opacity-60"
         >
-          {step === 'submitting' ? 'Submitting…' : 'Submit'}
+          {step === 'submitting' ? t.submitting : t.submit}
         </button>
       </form>
     </div>
@@ -167,6 +205,8 @@ function QuestionBlock({
   onChange,
   onToggle,
   getText,
+  placeholderText,
+  placeholderTextarea,
 }: {
   index: number;
   question: TeacherSurveyQuestion;
@@ -175,6 +215,8 @@ function QuestionBlock({
   onChange: (v: string | string[]) => void;
   onToggle: (option: string) => void;
   getText: (m: Record<string, string> | undefined, fallback?: string) => string;
+  placeholderText: string;
+  placeholderTextarea: string;
 }) {
   const text = getText(question.text, `Question ${index}`);
   const checked = (value as string[] | undefined) ?? [];
@@ -191,7 +233,7 @@ function QuestionBlock({
         <input
           type="text"
           className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-          placeholder="Your answer…"
+          placeholder={placeholderText}
           value={(value as string) ?? ''}
           onChange={e => onChange(e.target.value)}
         />
@@ -201,7 +243,7 @@ function QuestionBlock({
         <textarea
           className="w-full border border-gray-200 rounded-xl p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-400"
           rows={6}
-          placeholder="Your answer…"
+          placeholder={placeholderTextarea}
           value={(value as string) ?? ''}
           onChange={e => onChange(e.target.value)}
         />

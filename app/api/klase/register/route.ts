@@ -171,7 +171,7 @@ export async function POST(request: NextRequest) {
           sectionStyles:     instrConfig.sectionStyles,
           extraBlocks:       instrConfig.extraBlocks,
           teacherSurvey:     instrConfig.teacherSurvey as { enabled?: boolean; title?: Record<string,string>; questions?: Array<{id:string;type:'open'|'checkbox'|'textarea'|'likert';text:Record<string,string>;options?: Array<Record<string,string>>}> } | undefined,
-          teacherSurveyUrl:  instrConfig.teacherSurvey?.enabled ? `${baseUrl}/ts/${shortCode}` : undefined,
+          teacherSurveyUrl:  instrConfig.teacherSurvey?.enabled ? `${baseUrl}/ts/${shortCode}?lang=${worksheetLang}` : undefined,
         },
       );
       pageContents.unshift(instrPageContent);
