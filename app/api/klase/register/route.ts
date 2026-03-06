@@ -170,7 +170,7 @@ export async function POST(request: NextRequest) {
           bodyRows:          instrConfig.bodyRows as Array<{id:string;items:string[]}> | undefined,
           sectionStyles:     instrConfig.sectionStyles,
           extraBlocks:       instrConfig.extraBlocks,
-          teacherSurvey:     instrConfig.teacherSurvey as { enabled?: boolean; title?: Record<string,string>; questions?: Array<{id:string;type:'open'|'checkbox';text:Record<string,string>;options?: Array<Record<string,string>>}> } | undefined,
+          teacherSurvey:     instrConfig.teacherSurvey as { enabled?: boolean; title?: Record<string,string>; questions?: Array<{id:string;type:'open'|'checkbox'|'textarea'|'likert';text:Record<string,string>;options?: Array<Record<string,string>>}> } | undefined,
           teacherSurveyUrl:  instrConfig.teacherSurvey?.enabled ? `${baseUrl}/ts/${shortCode}` : undefined,
         },
       );

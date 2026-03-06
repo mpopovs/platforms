@@ -668,19 +668,20 @@ export function wrapWorksheetPages(pagesHtml: string): string {
     }
     .footer { background: #f5f5f5; padding: 8px; border-radius: 6px; text-align: center; font-size: 7pt; color: #666; }
     /* ─── Instruction page ─── */
+    .ws-page p { margin: 0; padding: 0; }
     .ws-page { width: 297mm; height: 210mm; position: relative; overflow: hidden; background: white; page-break-after: always; box-sizing: border-box; }
-    .instr-page { padding: 12mm 12mm 8mm 12mm; display: flex; flex-direction: column; gap: 6mm; }
-    .instr-header { border-bottom: 2px solid #333; padding-bottom: 4mm; }
-    .instr-header h1 { margin: 0; font-size: 16pt; color: #333; }
-    .instr-body { display: flex; flex-direction: column; flex: 1; gap: 4mm; }
-    .instr-body-row { display: flex; gap: 8mm; align-items: flex-start; flex: 1; }
-    .instr-section { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3mm; padding: 5mm; background: #f8f8f8; border-radius: 6px; border: 1px solid #e0e0e0; }
-    .instr-section h2 { margin: 0; font-size: 11pt; color: #444; text-align: center; }
-    .instr-section .instr-qr { width: 40mm; height: 40mm; display: block; }
-    .instr-section .instr-url { font-size: 6.5pt; color: #666; word-break: break-all; text-align: center; line-height: 1.3; }
-    .instr-section .instr-hint { font-size: 7pt; color: #888; text-align: center; line-height: 1.4; margin: 0; }
+    .instr-page { padding: 12mm 12mm 8mm 12mm; display: flex; flex-direction: column; gap: 4mm; height: 210mm; }
+    .instr-header { border-bottom: 2px solid #333; padding-bottom: 3mm; }
+    .instr-header h1 { margin: 0; font-size: 14pt; color: #333; }
+    .instr-body { display: flex; flex-direction: column; flex: 1; gap: 3mm; min-height: 0; }
+    .instr-body-row { display: flex; gap: 5mm; align-items: flex-start; }
+    .instr-section { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2mm; padding: 4mm; background: #f8f8f8; border-radius: 6px; border: 1px solid #e0e0e0; overflow: visible; }
+    .instr-section h2 { margin: 0; font-size: 10pt; color: #444; text-align: center; }
+    .instr-section .instr-qr { width: 28mm; height: 28mm; display: block; }
+    .instr-section .instr-url { font-size: 5.5pt; color: #666; word-break: break-all; text-align: center; line-height: 1.3; margin: 0; padding: 0; }
+    .instr-section .instr-hint { font-size: 6pt; color: #888; text-align: center; line-height: 1.4; margin: 0; padding: 0; }
     .instr-pin { background: #fff8e6; border-color: #f5c842; }
-    .pin-display { font-size: 32pt; font-family: monospace; font-weight: bold; letter-spacing: 6px; color: #b8860b; background: white; border: 2px solid #f5c842; border-radius: 8px; padding: 4mm 8mm; text-align: center; }
+    .pin-display { font-size: 20pt; font-family: monospace; font-weight: bold; letter-spacing: 4px; color: #b8860b; background: white; border: 2px solid #f5c842; border-radius: 8px; padding: 3mm 6mm; text-align: center; }
     .instr-custom { font-size: 8pt; color: #555; background: #f0f4ff; border: 1px solid #c0cff8; border-radius: 6px; padding: 4mm 6mm; line-height: 1.5; }
     .instr-extras { display: flex; flex-wrap: wrap; gap: 4mm; }
     .instr-extra-text { flex: 1; min-width: 40mm; font-size: 8pt; color: #333; line-height: 1.6; white-space: pre-wrap; padding: 3mm 4mm; background: #fafafa; border: 1px solid #e5e5e5; border-radius: 4px; }
@@ -693,11 +694,11 @@ export function wrapWorksheetPages(pagesHtml: string): string {
     .instr-pin-url { display: flex; align-items: center; gap: 3mm; margin-top: 2mm; padding-top: 2mm; border-top: 1px dashed rgba(0,0,0,0.15); width: 100%; justify-content: center; }
     .instr-pin-url img { width: 16mm; height: 16mm; display: block; flex-shrink: 0; }
     .instr-pin-url-text { font-size: 6pt; color: #888; word-break: break-all; line-height: 1.4; }
-    .instr-teacher-survey { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3mm; padding: 5mm; background: #f0fdf4; border-radius: 6px; border: 1px solid #86efac; }
-    .instr-teacher-survey h2 { margin: 0; font-size: 11pt; color: #15803d; text-align: center; }
-    .instr-teacher-survey .ts-qr { width: 36mm; height: 36mm; display: block; }
-    .instr-teacher-survey .ts-url { font-size: 6pt; color: #16a34a; word-break: break-all; text-align: center; line-height: 1.3; }
-    .instr-teacher-survey .ts-hint { font-size: 7pt; color: #4ade80; text-align: center; font-style: italic; margin: 0; }
+    .instr-teacher-survey { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2mm; padding: 4mm; background: #f0fdf4; border-radius: 6px; border: 1px solid #86efac; overflow: visible; }
+    .instr-teacher-survey h2 { margin: 0; font-size: 10pt; color: #15803d; text-align: center; }
+    .instr-teacher-survey .ts-qr { width: 28mm; height: 28mm; display: block; }
+    .instr-teacher-survey .ts-url { font-size: 5.5pt; color: #16a34a; word-break: break-all; text-align: center; line-height: 1.3; margin: 0; padding: 0; }
+    .instr-teacher-survey .ts-hint { font-size: 6pt; color: #555; text-align: center; font-style: italic; margin: 0; padding: 0; }
     /* Portrait instruction page */
     @page portrait-instr { size: A4 portrait; margin: 0; }
     .instr-portrait { page: portrait-instr; width: 210mm; height: 297mm; }
@@ -746,7 +747,7 @@ export interface InstrPageOpts {
   teacherSurvey?: {
     enabled?: boolean;
     title?: Record<string, string>;
-    questions?: Array<{ id: string; type: 'open' | 'checkbox'; text: Record<string, string>; options?: Array<Record<string, string>> }>;
+    questions?: Array<{ id: string; type: 'open' | 'checkbox' | 'textarea' | 'likert'; text: Record<string, string>; options?: Array<Record<string, string>> }>;
   };
   extraBlocks?: Array<{
     id: string;

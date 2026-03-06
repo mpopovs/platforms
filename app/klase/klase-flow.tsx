@@ -270,30 +270,6 @@ export function KlaseFlow({ parentViewers }: { parentViewers: ParentViewer[] }) 
             </svg>
           </div>
           <h2 className="text-2xl font-bold text-gray-900">{result.classroomName}</h2>
-          <p className="text-gray-500 mt-1 text-sm">{t.successSubtitle(result.modelCount)}</p>
-          <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-800 text-left">
-            {t.arucoNote}
-          </div>
-        </div>
-
-        {/* Classroom display link */}
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-1">
-          <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">{t.displayLinkLabel}</p>
-          <a
-            href={result.viewerLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-800 font-mono text-sm break-all hover:underline"
-          >
-            {result.viewerLink}
-          </a>
-        </div>
-
-        {/* PIN */}
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-1">
-          <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">{t.pinLabel}</p>
-          <p className="text-3xl font-mono font-bold text-amber-900 tracking-widest">{result.pin}</p>
-          <p className="text-xs text-amber-600">{t.pinHint}</p>
         </div>
 
         {/* Print worksheets */}

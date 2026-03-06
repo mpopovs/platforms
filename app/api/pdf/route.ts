@@ -72,12 +72,18 @@ export async function POST(request: NextRequest) {
 
     const page = await browser.newPage();
 
+    // Set viewport to A4 landscape so flex/grid layouts compute at the correct width
+    // before the PDF is rendered (297mm × 210mm at 96dpi ≈ 1123×794px)
+    await page.setViewport({ width: 1123, height: 794, deviceScaleFactor: 1 });
+
     // All assets are now inline base64 — domcontentloaded is sufficient
     await page.setContent(inlinedHtml, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    // Generate PDF matching the print CSS (A4, no margin — all margins are in the HTML)
+    // Generate PDF: explicit A4 landscape dimensions, preferCSSPageSize lets individual
+    // portrait pages override via @page rules if ever needed
     const pdfBuffer = Buffer.from(await page.pdf({
-      format: 'A4',
+      width: '297mm',
+      height: '210mm',
       printBackground: true,
       margin: { top: 0, right: 0, bottom: 0, left: 0 },
       preferCSSPageSize: true,
