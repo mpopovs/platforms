@@ -486,7 +486,8 @@ export async function getViewerModelsWithTexturesForClassroom(
 
   if (error) {
     console.error('Error fetching classroom models with textures:', error);
-    return getViewerModels(parentViewerId);
+    // Fall back to parent's textures so the viewer doesn't go blank
+    return getViewerModelsWithTextures(parentViewerId);
   }
 
   if (!data) return [];

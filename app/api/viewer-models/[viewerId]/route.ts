@@ -26,7 +26,8 @@ export async function GET(
     let models;
 
     if (config?.parentViewerId) {
-      // Classroom viewer: show parent's models filtered to own uploads
+      // Classroom viewer: show classroom-uploaded textures, falling back to any texture
+      // per model when no classroom-specific texture exists yet
       models = await getViewerModelsWithTexturesForClassroom(viewerId, config.parentViewerId);
     } else {
       // Normal museum viewer: show all textures

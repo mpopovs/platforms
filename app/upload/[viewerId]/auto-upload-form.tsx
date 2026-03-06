@@ -420,14 +420,14 @@ export function AutoUploadForm({
           </div>
 
           {/* info.mp4 */}
-          <div className="flex-1 flex items-center justify-center px-4 pb-32 relative z-10">
+          <div className="flex-1 flex items-center justify-center px-4 pb-64">
             <video
               src="/info.mp4"
               autoPlay
               loop
               muted
               playsInline
-              className="max-w-full max-h-[calc(100vh-300px)] w-auto h-auto object-contain"
+              className="max-w-full max-h-[calc(100vh-320px)] w-auto h-auto object-contain"
             />
           </div>
 
