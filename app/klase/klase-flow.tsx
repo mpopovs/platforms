@@ -40,6 +40,7 @@ const UI: Record<LangCode, {
   downloadPdf: string;
   registerAnother: string;
   howItWorks: string;
+  consentText: string;
 }> = {
   en: {
     langLabel: 'Worksheet language',
@@ -59,6 +60,7 @@ const UI: Record<LangCode, {
     downloadPdf: 'Download PDF',
     registerAnother: '← Register another class',
     howItWorks: 'How does it work?',
+    consentText: 'I consent to my anonymized data (generated 3D texture and survey responses) being stored and used for academic research and application (UX) improvement. No personal data is collected.',
   },
   lv: {
     langLabel: 'Darba lapu valoda',
@@ -78,6 +80,7 @@ const UI: Record<LangCode, {
     downloadPdf: 'Lejupielādēt PDF',
     registerAnother: '← Reģistrēt citu klasi',
     howItWorks: 'Kā tas darbojas?',
+    consentText: 'Es piekrītu, ka mani anonimizētie dati (radītā 3D tekstūra un atbildēs) tiek saglabāti un izmantoti akadēmiskajos pētījumos, kā arī lietotnes lietotāju pieredzes (UX) uzlabošanai. Personas dati netiek ievākti.',
   },
   lt: {
     langLabel: 'Darbo lapų kalba',
@@ -97,6 +100,7 @@ const UI: Record<LangCode, {
     downloadPdf: 'Atsisiųsti PDF',
     registerAnother: '← Registruoti kitą klasę',
     howItWorks: 'Kaip tai veikia?',
+    consentText: 'Sutinku, kad mano anonimizuoti duomenys (sukurta 3D tekstūra ir apklausos atsakymai) būtų saugomi ir naudojami akademiniams tyrimams bei programėlės (UX) tobulinimui. Jokie asmens duomenys nėra renkami.',
   },
 };
 
@@ -497,6 +501,20 @@ export function KlaseFlow({ parentViewers }: { parentViewers: ParentViewer[] }) 
           {error}
         </div>
       )}
+
+      {/* Consent checkbox */}
+      <label className="flex items-start gap-3 cursor-pointer group">
+        <input
+          type="checkbox"
+          name="consent"
+          required
+          className="mt-0.5 w-4 h-4 flex-shrink-0 accent-gray-900 cursor-pointer"
+        />
+        <span className="text-sm text-gray-600 leading-snug">
+          {t.consentText}
+          <span className="text-red-500 ml-0.5">*</span>
+        </span>
+      </label>
 
       <button
         type="submit"
