@@ -493,7 +493,8 @@ import {
   updateViewerModel,
   deleteViewerModel,
   reorderViewerModels,
-  getViewerModelsWithTextures
+  getViewerModelsWithTextures,
+  getViewerModelsWithTexturesForClassroom
 } from '@/lib/viewers';
 import { generateModelId, type QRCodeData } from '@/lib/types/viewer';
 import { 
@@ -827,6 +828,11 @@ export async function getViewerModelsWithTexturesAction(viewerId: string) {
   const viewerConfig = await getViewerConfig(viewerId);
   if (!viewerConfig) {
     return [];
+  }
+
+  // Classroom viewers: models belong to parent viewer, textures filtered by this classroom
+  if (viewerConfig.parentViewerId) {
+    return getViewerModelsWithTexturesForClassroom(viewerId, viewerConfig.parentViewerId);
   }
 
   return getViewerModelsWithTextures(viewerId);

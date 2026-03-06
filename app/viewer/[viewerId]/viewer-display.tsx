@@ -16,6 +16,7 @@ type ViewerConfig = {
   id: string;
   name: string;
   logo_url?: string | null;
+  parentViewerId?: string | null;
   settings: ViewerSettings;
   updatedAt: number;
 };
@@ -134,7 +135,9 @@ function PinEntryForm({ viewerId, onSuccess }: { viewerId: string; onSuccess: ()
 }
 
 function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerConfig }) {
-  const { settings } = config;
+  // Guard: settings may be null in the DB for older/incomplete rows
+  const settings = config.settings ?? {} as ViewerConfig['settings'];
+  console.log('[viewer] ViewerContent init - viewerId:', viewerId, 'settings:', settings, 'parentViewerId:', config.parentViewerId);
   const [models, setModels] = useState<ViewerModelWithTexture[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -197,28 +200,31 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
 
     async function fetchModels() {
       try {
+        console.log('[viewer] fetching models for', viewerId);
         const response = await fetch(`/api/viewer-models/${viewerId}`);
         
         if (response.ok) {
           const data = await response.json();
+          console.log('[viewer] models loaded:', data.models?.length, data.models);
           setModels(data.models || []);
           hasModels = (data.models || []).length > 0;
           setError(''); // Clear any previous errors
         } else {
+          const errBody = await response.json().catch(() => ({}));
+          console.error('[viewer] models API error:', response.status, errBody);
           // Only set error if we don't have models loaded yet
           if (!hasModels) {
-            setError('Failed to load 3D models');
+            setError(`Failed to load 3D models (${response.status}: ${(errBody as any).error || 'unknown'})`);
           } else {
             console.warn('Failed to fetch model updates, continuing with cached data');
           }
         }
       } catch (err) {
+        console.error('[viewer] fetch exception:', err);
         // Network error - only set error on initial load, not during updates
         if (!hasModels) {
-          console.error('Initial load failed:', err);
           setError('Failed to load 3D models');
         }
-        // No logging when we already have models - this is expected during offline polling
       } finally {
         setLoading(false);
       }
@@ -447,6 +453,12 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
     );
   }
 
+  // Determine if there's any text content to display
+  const hasTitle = !!(settings.displayTitle || config.name);
+  const hasMessage = !!settings.displayMessage;
+  const hasCustomContent = !!settings.customContent;
+  const hasAnyContent = hasTitle || hasMessage || hasCustomContent;
+
   // Fallback to text display if no models
   return (
     <div 
@@ -457,51 +469,90 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
         alignItems: 'center',
         justifyContent: 'center',
         padding: '32px',
-        background: settings.backgroundColor || '#ffffff',
-        color: settings.textColor || '#000000'
+        background: settings.backgroundColor || '#000000',
+        color: settings.textColor || '#ffffff'
       }}
     >
-      <div style={{ maxWidth: '1200px', width: '100%', textAlign: 'center' }}>
-        <h1 style={{ 
-          fontSize: '80px', 
-          fontWeight: 'bold', 
-          lineHeight: '1.2',
-          marginBottom: '40px'
-        }}>
-          {settings.displayTitle || config.name}
-        </h1>
-        
-        {settings.displayMessage && (
-          <p style={{ 
-            fontSize: '40px', 
-            lineHeight: '1.6', 
-            whiteSpace: 'pre-wrap',
-            marginBottom: '32px'
+      {hasAnyContent ? (
+        <div style={{ maxWidth: '1200px', width: '100%', textAlign: 'center' }}>
+          {hasTitle && (
+            <h1 style={{ 
+              fontSize: '80px', 
+              fontWeight: 'bold', 
+              lineHeight: '1.2',
+              marginBottom: '40px'
+            }}>
+              {settings.displayTitle || config.name}
+            </h1>
+          )}
+          
+          {hasMessage && (
+            <p style={{ 
+              fontSize: '40px', 
+              lineHeight: '1.6', 
+              whiteSpace: 'pre-wrap',
+              marginBottom: '32px'
+            }}>
+              {settings.displayMessage}
+            </p>
+          )}
+          
+          {hasCustomContent && (
+            <div 
+              style={{ 
+                marginTop: '64px', 
+                padding: '32px', 
+                borderRadius: '12px',
+                background: 'rgba(255, 255, 255, 0.05)',
+                fontSize: '32px'
+              }}
+              dangerouslySetInnerHTML={{ __html: settings.customContent! }}
+            />
+          )}
+        </div>
+      ) : (
+        /* Empty state — no models and no configured text content */
+        <div style={{ maxWidth: '800px', width: '100%', textAlign: 'center' }}>
+          <div style={{
+            width: '120px',
+            height: '120px',
+            borderRadius: '50%',
+            background: 'rgba(255,255,255,0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 40px',
+            fontSize: '60px'
           }}>
-            {settings.displayMessage}
+            🖼️
+          </div>
+          <h1 style={{
+            fontSize: '60px',
+            fontWeight: 'bold',
+            lineHeight: '1.2',
+            marginBottom: '24px',
+            opacity: 0.9
+          }}>
+            Waiting for content
+          </h1>
+          <p style={{
+            fontSize: '32px',
+            lineHeight: '1.6',
+            opacity: 0.6
+          }}>
+            No models or content have been added yet.<br />
+            Upload photos using the worksheet QR code to get started.
           </p>
-        )}
-        
-        {settings.customContent && (
-          <div 
-            style={{ 
-              marginTop: '64px', 
-              padding: '32px', 
-              borderRadius: '12px',
-              background: 'rgba(255, 255, 255, 0.05)',
-              fontSize: '32px'
-            }}
-            dangerouslySetInnerHTML={{ __html: settings.customContent }}
-          />
-        )}
-      </div>
+        </div>
+      )}
       
       <div style={{
         position: 'fixed',
         bottom: '16px',
         right: '16px',
         fontSize: '20px',
-        opacity: 0.6
+        opacity: 0.4,
+        color: settings.textColor || '#ffffff'
       }}>
         Last updated: {new Date(config.updatedAt).toLocaleString()}
       </div>

@@ -24,6 +24,8 @@ export default async function ViewersPage() {
   // Fetch models for each viewer using the same authenticated client
   const viewersWithModels = await Promise.all(
     viewers.map(async (viewer) => {
+      // Classroom viewers inherit models from their parent viewer
+      const modelOwnerId = (viewer as any).parentViewerId || viewer.id;
       const { data: models } = await supabase
         .from('viewer_models')
         .select(`
@@ -31,7 +33,7 @@ export default async function ViewersPage() {
           qr_code_data, qr_code_image_url, order_index, short_code,
           uv_map_url, marker_id_base, created_at, updated_at
         `)
-        .eq('viewer_id', viewer.id)
+        .eq('viewer_id', modelOwnerId)
         .order('order_index', { ascending: true });
 
       // For each model, get the latest texture

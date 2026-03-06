@@ -597,6 +597,101 @@ export async function getViewerModelsWithAllTextures(viewerId: string): Promise<
 }
 
 /**
+ * Get all models with ALL their textures for a classroom viewer
+ * Returns parent's models but only textures uploaded via this classroom viewer.
+ * Used for texture cycling in classroom displays.
+ */
+export async function getViewerModelsWithAllTexturesForClassroom(
+  classroomViewerId: string,
+  parentViewerId: string
+): Promise<ViewerModelWithAllTextures[]> {
+  const { data, error } = await supabase
+    .from('viewer_models')
+    .select(`
+      id,
+      viewer_id,
+      name,
+      model_file_url,
+      texture_template_url,
+      qr_code_data,
+      qr_code_image_url,
+      order_index,
+      short_code,
+      uv_map_url,
+      created_at,
+      updated_at,
+      model_textures (
+        id,
+        original_photo_url,
+        corrected_texture_url,
+        uploaded_at,
+        processed_at,
+        author_name,
+        author_age,
+        upload_source_viewer_id
+      )
+    `)
+    .eq('viewer_id', parentViewerId)
+    .order('order_index', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching classroom all textures:', error);
+    return [];
+  }
+
+  if (!data || data.length === 0) return [];
+
+  const modelMap = new Map<string, ViewerModelWithAllTextures>();
+
+  for (const row of data as any[]) {
+    if (!modelMap.has(row.id)) {
+      modelMap.set(row.id, {
+        id: row.id,
+        viewer_id: row.viewer_id,
+        name: row.name,
+        model_file_url: normalizeStorageUrl(row.model_file_url),
+        texture_template_url: normalizeStorageUrl(row.texture_template_url),
+        qr_code_data: row.qr_code_data,
+        qr_code_image_url: normalizeStorageUrl(row.qr_code_image_url),
+        order_index: row.order_index,
+        short_code: row.short_code,
+        uv_map_url: normalizeStorageUrl(row.uv_map_url),
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        textures: []
+      });
+    }
+
+    const model = modelMap.get(row.id)!;
+    const textures: any[] = Array.isArray(row.model_textures) ? row.model_textures : [];
+    for (const t of textures) {
+      // Only include textures uploaded via this classroom viewer
+      if (t.upload_source_viewer_id === classroomViewerId) {
+        model.textures.push({
+          id: t.id,
+          model_id: row.id,
+          original_photo_url: normalizeStorageUrl(t.original_photo_url),
+          corrected_texture_url: normalizeStorageUrl(t.corrected_texture_url),
+          uploaded_at: t.uploaded_at,
+          processed_at: t.processed_at,
+          author_name: t.author_name,
+          author_age: t.author_age
+        });
+      }
+    }
+  }
+
+  // Sort textures within each model newest-first
+  for (const model of modelMap.values()) {
+    model.textures.sort((a, b) =>
+      new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime()
+    );
+  }
+
+  return Array.from(modelMap.values());
+}
+
+/**
  * Create a new 3D model for a viewer
  */
 export async function createViewerModel(

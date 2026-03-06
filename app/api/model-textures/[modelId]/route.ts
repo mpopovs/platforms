@@ -52,10 +52,20 @@ export async function GET(
     }
 
     // Fetch all textures for this model
-    const { data: textures, error: texturesError } = await supabase
+    // Optional: filter textures to a specific classroom viewer's uploads
+    const { searchParams } = new URL(request.url);
+    const viewerIdFilter = searchParams.get('viewerId');
+
+    let texturesQuery = supabase
       .from('model_textures')
       .select('*')
-      .eq('model_id', modelId)
+      .eq('model_id', modelId);
+
+    if (viewerIdFilter) {
+      texturesQuery = texturesQuery.eq('upload_source_viewer_id', viewerIdFilter);
+    }
+
+    const { data: textures, error: texturesError } = await texturesQuery
       .order('uploaded_at', { ascending: false });
 
     if (texturesError) {

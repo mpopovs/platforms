@@ -17,6 +17,7 @@ interface Texture {
   corrected_texture_url: string;
   original_photo_url: string;
   uploaded_at: string;
+  upload_source_viewer_id?: string | null;
 }
 
 interface AllTexturesDialogProps {
@@ -25,6 +26,8 @@ interface AllTexturesDialogProps {
   modelId: string;
   modelName: string;
   onTextureDeleted?: () => void;
+  /** When set (classroom viewer), only show textures uploaded via this viewer */
+  filterViewerId?: string;
 }
 
 export function AllTexturesDialog({
@@ -32,7 +35,8 @@ export function AllTexturesDialog({
   onOpenChange,
   modelId,
   modelName,
-  onTextureDeleted
+  onTextureDeleted,
+  filterViewerId
 }: AllTexturesDialogProps) {
   const [textures, setTextures] = useState<Texture[]>([]);
   const [loading, setLoading] = useState(false);
@@ -51,14 +55,17 @@ export function AllTexturesDialog({
       
       return () => clearInterval(interval);
     }
-  }, [open, modelId]);
+}, [open, modelId, filterViewerId]);
 
   const fetchTextures = async (silent = false) => {
     if (!silent) {
       setLoading(true);
     }
     try {
-      const response = await fetch(`/api/model-textures/${modelId}`);
+      const url = filterViewerId
+        ? `/api/model-textures/${modelId}?viewerId=${filterViewerId}`
+        : `/api/model-textures/${modelId}`;
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch textures');
       }
@@ -118,7 +125,7 @@ export function AllTexturesDialog({
             <div>
               <DialogTitle>All Textures for {modelName}</DialogTitle>
               <DialogDescription>
-                View and manage all textures uploaded for this model
+                {filterViewerId ? 'Textures uploaded by this class' : 'View and manage all textures uploaded for this model'}
               </DialogDescription>
             </div>
             <Button

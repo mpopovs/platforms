@@ -54,11 +54,14 @@ function ViewerTexturesDialog({
   onOpenChange,
   viewerName,
   models,
+  classroomViewerId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   viewerName: string;
   models: ViewerModelWithTexture[];
+  /** When set, only fetch textures uploaded via this classroom viewer */
+  classroomViewerId?: string;
 }) {
   const [texturesByModel, setTexturesByModel] = useState<Record<string, Texture[]>>({});
   const [loading, setLoading] = useState(false);
@@ -76,7 +79,10 @@ function ViewerTexturesDialog({
     try {
       const results = await Promise.all(
         models.map(async (m) => {
-          const res = await fetch(`/api/model-textures/${m.id}`);
+          const url = classroomViewerId
+            ? `/api/model-textures/${m.id}?viewerId=${classroomViewerId}`
+            : `/api/model-textures/${m.id}`;
+          const res = await fetch(url);
           const data = res.ok ? await res.json() : { textures: [] };
           return { modelId: m.id, textures: (data.textures || []) as Texture[] };
         })
@@ -118,7 +124,7 @@ function ViewerTexturesDialog({
             <div>
               <DialogTitle>Textures — {viewerName}</DialogTitle>
               <DialogDescription>
-                {loading ? 'Loading…' : `${totalCount} texture${totalCount !== 1 ? 's' : ''} across ${models.length} model${models.length !== 1 ? 's' : ''}`}
+                {loading ? 'Loading…' : `${totalCount} texture${totalCount !== 1 ? 's' : ''} across ${models.length} model${models.length !== 1 ? 's' : ''}${classroomViewerId ? ' (this class only)' : ''}`}
               </DialogDescription>
             </div>
             <Button variant="ghost" size="sm" onClick={() => fetchAll()} disabled={loading} className="ml-4">
@@ -398,7 +404,7 @@ export function ViewersManagement({ initialViewers }: { initialViewers: any[] })
                 const models: ViewerModelWithTexture[] = viewer.models || [];
                 const texturedCount = models.filter((m: ViewerModelWithTexture) => m.latest_texture).length;
                 const viewerUrl = viewer.shortCode
-                  ? `${protocol}://${rootDomain}/${viewer.shortCode}`
+                  ? `${protocol}://${rootDomain}/v/${viewer.shortCode}`
                   : `${protocol}://${rootDomain}/viewer/${viewer.id}`;
 
                 return (
@@ -510,6 +516,7 @@ export function ViewersManagement({ initialViewers }: { initialViewers: any[] })
           onOpenChange={(open: boolean) => { if (!open) setTexturesViewer(null); }}
           viewerName={texturesViewer.name}
           models={texturesViewer.models || []}
+          classroomViewerId={texturesViewer.parentViewerId ? texturesViewer.id : undefined}
         />
       )}
     </div>

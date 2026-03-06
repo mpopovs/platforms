@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getViewerModelsWithAllTextures } from '@/lib/viewers';
+import { getViewerModelsWithAllTextures, getViewerModelsWithAllTexturesForClassroom, getViewerConfig } from '@/lib/viewers';
 
 /**
  * GET /api/viewer-models-all-textures/[viewerId]
  * Fetch all models with ALL their textures for a viewer
  * Used for texture cycling display mode
  * Public endpoint (accessed after PIN authentication)
+ * For classroom (child) viewers, fetches parent's models but filters textures
+ * to only those uploaded via this classroom viewer.
  */
 export async function GET(
   request: NextRequest,
@@ -21,8 +23,17 @@ export async function GET(
       );
     }
 
-    // Fetch models with all textures
-    const models = await getViewerModelsWithAllTextures(viewerId);
+    // Check if this is a classroom (child) viewer
+    const config = await getViewerConfig(viewerId);
+    let models;
+
+    if (config?.parentViewerId) {
+      // Classroom viewer: use parent's models, filter textures to this classroom
+      models = await getViewerModelsWithAllTexturesForClassroom(viewerId, config.parentViewerId);
+    } else {
+      // Normal viewer: fetch all textures for all models
+      models = await getViewerModelsWithAllTextures(viewerId);
+    }
 
     return NextResponse.json({
       success: true,

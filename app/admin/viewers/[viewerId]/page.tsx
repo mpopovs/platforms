@@ -3,7 +3,7 @@
 import { useState, useEffect, use, useCallback } from 'react';
 import { useActionState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Eye, Copy, ArrowLeft, Trash2, QrCode, Download, Map as MapIcon, FileImage, Palette, Upload, Plus, FileText, BarChart3, Edit, Check, Code, LayoutTemplate } from 'lucide-react';
+import { Eye, Copy, ArrowLeft, Trash2, QrCode, Download, Map as MapIcon, FileImage, Palette, Upload, Plus, FileText, BarChart3, Edit, Check, Code, LayoutTemplate, Images, Loader2, RefreshCw as RefreshCwIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -51,6 +51,7 @@ type Viewer = {
     certificateBottomImageUrl?: string;
     classroomEnabled?: boolean;
   };
+  parent_viewer_id?: string | null;
 };
 
 type ModelManagementProps = {
@@ -59,6 +60,8 @@ type ModelManagementProps = {
   viewerName: string;
   widgetEnabled: boolean;
   initialModels: ViewerModelWithTexture[];
+  /** When this is a classroom (child) viewer, pass its ID to highlight classroom textures */
+  classroomViewerId?: string | null;
 };
 
 type PinState = {
@@ -84,6 +87,148 @@ type UploadModelState = {
 
 // Import necessary components
 import { AllTexturesDialog } from '@/components/all-textures-dialog';
+
+/** Shows all textures uploaded via this classroom viewer, grouped by model */
+function ClassroomTexturesDialog({
+  open,
+  onOpenChange,
+  viewerName,
+  classroomViewerId,
+  models,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  viewerName: string;
+  classroomViewerId: string;
+  models: ViewerModelWithTexture[];
+}) {
+  const [texturesByModel, setTexturesByModel] = useState<Record<string, any[]>>({});
+  const [loading, setLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || models.length === 0) return;
+    fetchAll();
+    const iv = setInterval(() => fetchAll(true), 8000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const fetchAll = async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
+      const results = await Promise.all(
+        models.map(async (m) => {
+          const res = await fetch(`/api/model-textures/${m.id}?viewerId=${classroomViewerId}`);
+          const data = res.ok ? await res.json() : { textures: [] };
+          return { modelId: m.id, modelName: m.name, textures: (data.textures || []) as any[] };
+        })
+      );
+      const map: Record<string, any[]> = {};
+      results.forEach(({ modelId, textures }) => { map[modelId] = textures; });
+      setTexturesByModel(map);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  };
+
+  const handleDelete = async (modelId: string, textureId: string) => {
+    if (!confirm('Delete this texture? This cannot be undone.')) return;
+    setDeletingId(textureId);
+    try {
+      const res = await fetch(`/api/model-textures/${modelId}?textureId=${textureId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      setTexturesByModel((prev) => ({
+        ...prev,
+        [modelId]: prev[modelId].filter((t) => t.id !== textureId),
+      }));
+    } catch {
+      alert('Failed to delete texture');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const totalCount = Object.values(texturesByModel).reduce((s, ts) => s + ts.length, 0);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <DialogTitle>Class Textures — {viewerName}</DialogTitle>
+              <DialogDescription>
+                {loading ? 'Loading…' : `${totalCount} texture${totalCount !== 1 ? 's' : ''} uploaded by this class across ${models.length} model${models.length !== 1 ? 's' : ''}`}
+              </DialogDescription>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => fetchAll()} disabled={loading} className="ml-4">
+              <RefreshCwIcon className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
+        </DialogHeader>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+          </div>
+        ) : totalCount === 0 ? (
+          <div className="text-center py-12 text-sm text-gray-400">No textures uploaded by this class yet</div>
+        ) : (
+          <div className="space-y-6">
+            {models.map((model) => {
+              const textures = texturesByModel[model.id] || [];
+              if (textures.length === 0) return null;
+              return (
+                <div key={model.id}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <h3 className="text-sm font-semibold text-gray-700">{model.name}</h3>
+                    <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{textures.length}</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {textures.map((texture, i) => (
+                      <div key={texture.id} className="relative group rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                        <img
+                          src={texture.corrected_texture_url}
+                          alt={`Texture ${i + 1}`}
+                          className="w-full aspect-square object-cover"
+                        />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
+                        <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="h-7 w-7 p-0"
+                            disabled={deletingId === texture.id}
+                            onClick={() => handleDelete(model.id, texture.id)}
+                          >
+                            {deletingId === texture.id
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <Trash2 className="h-3.5 w-3.5" />}
+                          </Button>
+                        </div>
+                        {i === 0 && (
+                          <span className="absolute bottom-1.5 left-1.5 text-xs bg-green-500 text-white px-1.5 py-0.5 rounded-full font-medium">
+                            Latest
+                          </span>
+                        )}
+                        <div className="px-2 py-1.5 text-xs text-gray-500">
+                          {new Date(texture.uploaded_at).toLocaleString()}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function UploadModelDialog({ 
   viewerId, 
@@ -162,7 +307,7 @@ function UploadModelDialog({
   );
 }
 
-function ModelManagement({ viewerId, viewerShortCode, viewerName, widgetEnabled, initialModels }: ModelManagementProps) {
+function ModelManagement({ viewerId, viewerShortCode, viewerName, widgetEnabled, initialModels, classroomViewerId }: ModelManagementProps) {
   const [models, setModels] = useState<ViewerModelWithTexture[]>(initialModels);
 
   const refreshModels = useCallback(async () => {
@@ -210,6 +355,7 @@ function ModelManagement({ viewerId, viewerShortCode, viewerName, widgetEnabled,
                   viewerName={viewerName}
                   widgetEnabled={widgetEnabled}
                   onDelete={refreshModels}
+                  classroomViewerId={classroomViewerId}
                 />
               ))}
             </tbody>
@@ -226,7 +372,8 @@ function ModelRow({
   viewerId,
   viewerName,
   widgetEnabled,
-  onDelete
+  onDelete,
+  classroomViewerId
 }: {
   index: number;
   model: ViewerModelWithTexture;
@@ -234,6 +381,7 @@ function ModelRow({
   viewerName: string;
   widgetEnabled: boolean;
   onDelete: () => void;
+  classroomViewerId?: string | null;
 }) {
   const [showTexturesDialog, setShowTexturesDialog] = useState(false);
   const [showUVMapDialog, setShowUVMapDialog] = useState(false);
@@ -492,6 +640,7 @@ function ModelRow({
         modelId={model.id}
         modelName={model.name}
         onTextureDeleted={onDelete}
+        filterViewerId={classroomViewerId ?? undefined}
       />
 
       <Dialog open={showUVMapDialog} onOpenChange={setShowUVMapDialog}>
@@ -723,6 +872,7 @@ export default function ViewerDetailPage({ params }: { params: Promise<{ viewerI
   const [isLoading, setIsLoading] = useState(true);
   const [showLogoDialog, setShowLogoDialog] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [showClassroomTexturesDialog, setShowClassroomTexturesDialog] = useState(false);
 
   const [deleteState, deleteAction, isDeleting] = useActionState<any, FormData>(deleteViewerAction, {});
   const [updateState, updateAction, isUpdating] = useActionState<any, FormData>(updateViewerAction, {});
@@ -799,10 +949,10 @@ export default function ViewerDetailPage({ params }: { params: Promise<{ viewerI
   }
 
   const viewerUrl = typeof window !== 'undefined' 
-    ? `${window.location.origin}/${viewer.short_code || viewer.id}`
-    : `/${viewer.short_code || viewer.id}`;
+    ? `${window.location.origin}/v/${viewer.short_code || viewer.id}`
+    : `/v/${viewer.short_code || viewer.id}`;
   const embedCode = embedTokenState.embedToken && typeof window !== 'undefined'
-    ? `<iframe src="${window.location.origin}/${viewer.short_code || viewer.id}?embed=${embedTokenState.embedToken}" width="800" height="600" frameborder="0"></iframe>`
+    ? `<iframe src="${window.location.origin}/v/${viewer.short_code || viewer.id}?embed=${embedTokenState.embedToken}" width="800" height="600" frameborder="0"></iframe>`
     : '';
 
   return (
@@ -959,6 +1109,15 @@ export default function ViewerDetailPage({ params }: { params: Promise<{ viewerI
       <div className="rounded-xl border bg-white">
         <div className="flex items-center justify-between px-5 py-3 border-b">
           <h2 className="font-semibold text-sm">3D Models</h2>
+          {viewer.parent_viewer_id && models.length > 0 && (
+            <button
+              onClick={() => setShowClassroomTexturesDialog(true)}
+              className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2.5 py-1 rounded-md transition-colors"
+            >
+              <Images className="h-3.5 w-3.5" />
+              All class textures
+            </button>
+          )}
         </div>
         <div className="p-4">
           <ModelManagement
@@ -967,10 +1126,22 @@ export default function ViewerDetailPage({ params }: { params: Promise<{ viewerI
             viewerName={viewer.name}
             widgetEnabled={viewer.settings?.widgetEnabled ?? false}
             initialModels={models}
+            classroomViewerId={viewer.parent_viewer_id ? viewer.id : null}
           />
         </div>
       </div>
 
+
+      {/* ── Classroom all-textures dialog ── */}
+      {viewer.parent_viewer_id && (
+        <ClassroomTexturesDialog
+          open={showClassroomTexturesDialog}
+          onOpenChange={setShowClassroomTexturesDialog}
+          viewerName={viewer.name}
+          classroomViewerId={viewer.id}
+          models={models}
+        />
+      )}
 
       {/* Edit Viewer Dialog */}
       <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
