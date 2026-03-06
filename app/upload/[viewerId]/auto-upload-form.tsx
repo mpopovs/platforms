@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Camera, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { processImage } from '@/components/utils/imageProcessor';
+import { Inline3DPreview } from './[modelId]/inline-3d-preview';
 import { CertificateDisplay } from './[modelId]/certificate-display';
 import { CertificateDownloadButton } from './[modelId]/certificate-download-button';
 import { Survey } from '@/components/survey/survey';
@@ -114,6 +115,7 @@ interface AutoUploadFormProps {
 type Phase =
   | 'idle'       // waiting for photo
   | 'processing' // ArUco detection in progress
+  | 'preview3d'  // showing 3D preview before upload
   | 'uploading'  // sending to server
   | 'survey'     // survey shown, upload running in bg
   | 'done'       // upload complete, show certificate
@@ -136,16 +138,17 @@ export function AutoUploadForm({
   const [preview, setPreview] = useState<string | null>(null);
   const [processedPreview, setProcessedPreview] = useState<string | null>(null);
 
+  // 3D preview callbacks
+  const [previewApprove, setPreviewApprove] = useState<((captureDataUrl?: string) => void) | null>(null);
+  const [previewCancel, setPreviewCancel] = useState<(() => void) | null>(null);
+
   // Upload result
   const [textureId, setTextureId] = useState<string | null>(null);
   const [textureIdPromise, setTextureIdPromise] = useState<Promise<string> | null>(null);
   const [queueNumber, setQueueNumber] = useState<number | null>(null);
-  const [certificatePreviewCapture] = useState<string | null>(null);
+  const [certificatePreviewCapture, setCertificatePreviewCapture] = useState<string | null>(null);
   const [uploadComplete, setUploadComplete] = useState(false);
   const [showSurvey, setShowSurvey] = useState(false);
-
-  // Summary across all scans in this session
-  const [uploadedModels, setUploadedModels] = useState<string[]>([]);
 
   useEffect(() => {
     // Preload OpenCV.js if not already present
@@ -193,8 +196,11 @@ export function AutoUploadForm({
     setTextureId(null);
     setTextureIdPromise(null);
     setQueueNumber(null);
+    setCertificatePreviewCapture(null);
     setUploadComplete(false);
     setShowSurvey(false);
+    setPreviewApprove(null);
+    setPreviewCancel(null);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -244,39 +250,47 @@ export function AutoUploadForm({
       setDetectedModel(matched);
       setProcessedPreview(result.dataUrl);
 
-      // Upload (with optional survey)
-      if (surveyEnabled) {
-        let resolveId!: (id: string) => void;
-        const promise = new Promise<string>((r) => { resolveId = r; });
-        setTextureIdPromise(promise);
-        setPhase('survey');
-        setShowSurvey(true);
+      // Show 3D preview before uploading
+      setPhase('preview3d');
+      const capturedFile = rawFile;
+      const capturedDataUrl = result.dataUrl;
+      const capturedModel = matched;
 
-        doUpload(rawFile, result.dataUrl, matched.id)
-          .then(({ textureId: tid, queueNumber: qn }) => {
-            setTextureId(tid);
-            setQueueNumber(qn);
-            resolveId(tid);
-          })
-          .catch((err: Error) => {
-            setPhase('error');
-            setErrorMsg(err.message);
-            resolveId('');
-          });
-      } else {
-        setPhase('uploading');
-        try {
-          const { textureId: tid, queueNumber: qn } = await doUpload(rawFile, result.dataUrl, matched.id);
-          setTextureId(tid);
-          setQueueNumber(qn);
-          setUploadedModels((prev) => [...prev, matched.name]);
-          setUploadComplete(true);
-          setPhase('done');
-        } catch (err: any) {
-          setPhase('error');
-          setErrorMsg(err.message || 'Upload failed. Please try again.');
+      setPreviewApprove(() => (captureDataUrl?: string) => {
+        if (captureDataUrl) setCertificatePreviewCapture(captureDataUrl);
+        if (surveyEnabled) {
+          let resolveId!: (id: string) => void;
+          const promise = new Promise<string>((r) => { resolveId = r; });
+          setTextureIdPromise(promise);
+          setPhase('survey');
+          setShowSurvey(true);
+          doUpload(capturedFile, capturedDataUrl, capturedModel.id)
+            .then(({ textureId: tid, queueNumber: qn }) => {
+              setTextureId(tid);
+              setQueueNumber(qn);
+              resolveId(tid);
+            })
+            .catch((err: Error) => {
+              setPhase('error');
+              setErrorMsg(err.message);
+              resolveId('');
+            });
+        } else {
+          setPhase('uploading');
+          doUpload(capturedFile, capturedDataUrl, capturedModel.id)
+            .then(({ textureId: tid, queueNumber: qn }) => {
+              setTextureId(tid);
+              setQueueNumber(qn);
+              setUploadComplete(true);
+              setPhase('done');
+            })
+            .catch((err: Error) => {
+              setPhase('error');
+              setErrorMsg(err.message || 'Upload failed. Please try again.');
+            });
         }
-      }
+      });
+      setPreviewCancel(() => () => handleRestart());
     } catch (err: any) {
       console.error('processImage error:', err);
       setPhase('error');
@@ -292,6 +306,21 @@ export function AutoUploadForm({
   const isError = phase === 'error';
   const isDone = phase === 'done';
   const isSurvey = phase === 'survey';
+  const isPreview3d = phase === 'preview3d';
+
+  // ── 3D preview (full-screen, replaces everything) ──────────────────────
+  if (isPreview3d && detectedModel && processedPreview) {
+    return (
+      <Inline3DPreview
+        modelUrl={detectedModel.model_file_url}
+        textureUrl={processedPreview}
+        modelName={detectedModel.name}
+        viewerName={viewerName}
+        onCancel={() => { if (previewCancel) previewCancel(); else handleRestart(); }}
+        onApprove={(captureDataUrl) => { if (previewApprove) previewApprove(captureDataUrl); }}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col min-h-screen bg-white">
@@ -336,7 +365,6 @@ export function AutoUploadForm({
             setShowSurvey(false);
             setUploadComplete(true);
             setPhase('done');
-            if (detectedModel) setUploadedModels((prev) => [...prev, detectedModel.name]);
           }}
         />
       )}
@@ -358,28 +386,6 @@ export function AutoUploadForm({
           {certificateBottomImageUrl && (
             <div className="px-4 pb-4">
               <img src={certificateBottomImageUrl} alt="" className="w-full h-auto" />
-            </div>
-          )}
-
-          {/* Session summary */}
-          {uploadedModels.length > 0 && (
-            <div className="px-4 pb-4">
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800">
-                <div className="font-semibold mb-1">Uploaded this session ({uploadedModels.length}):</div>
-                <ul className="list-disc list-inside space-y-0.5">
-                  {uploadedModels.map((name, i) => (
-                    <li key={i}>{name}</li>
-                  ))}
-                </ul>
-                {uploadedModels.length < models.length && (
-                  <div className="mt-2 text-green-700">
-                    {models.length - uploadedModels.length} worksheet(s) remaining.
-                  </div>
-                )}
-                {uploadedModels.length >= models.length && (
-                  <div className="mt-2 font-semibold">🎉 All worksheets uploaded!</div>
-                )}
-              </div>
             </div>
           )}
 
@@ -409,16 +415,20 @@ export function AutoUploadForm({
       {isIdle && (
         <>
           {/* Header with viewer name */}
-          <div className="px-4 pt-8 pb-4 text-center">
+          <div className="flex-shrink-0 text-center py-6 px-4">
             <h1 className="text-2xl font-semibold text-gray-800">{viewerName}</h1>
-            <p className="text-gray-500 mt-1 text-sm">
-              Take a photo of any worksheet — the model is detected automatically.
-            </p>
-            {uploadedModels.length > 0 && (
-              <div className="mt-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2 inline-block">
-                ✔ {uploadedModels.length} / {models.length} uploaded
-              </div>
-            )}
+          </div>
+
+          {/* info.mp4 */}
+          <div className="flex-1 flex items-center justify-center px-4 pb-32 relative z-10">
+            <video
+              src="/info.mp4"
+              autoPlay
+              loop
+              muted
+              playsInline
+              className="max-w-full max-h-[calc(100vh-300px)] w-auto h-auto object-contain"
+            />
           </div>
 
           <div className="fixed bottom-0 left-0 right-0 z-50 p-4 bg-white border-t border-gray-200 shadow-lg">
