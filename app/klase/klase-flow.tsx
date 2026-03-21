@@ -38,6 +38,7 @@ const UI: Record<LangCode, {
   pinLabel: string; pinHint: string;
   openPrint: string;
   downloadPdf: string;
+  emailSent: (email: string) => string;
   registerAnother: string;
   howItWorks: string;
   consentText: string;
@@ -58,6 +59,7 @@ const UI: Record<LangCode, {
     pinLabel: 'PIN code to open the display', pinHint: 'Save this PIN — it will not be shown again.',
     openPrint: 'Open & print worksheets',
     downloadPdf: 'Download PDF',
+    emailSent: (email: string) => `Worksheets PDF has been sent to ${email}`,
     registerAnother: '← Register another class',
     howItWorks: 'How does it work?',
     consentText: 'I consent to my anonymized data (generated 3D texture and survey responses) being stored and used for academic research and application (UX) improvement. No personal data is collected.',
@@ -78,9 +80,10 @@ const UI: Record<LangCode, {
     pinLabel: 'PIN kods displeja atvēršanai', pinHint: 'Saglabājiet šo PIN — tā netiks parādīts vēlreiz.',
     openPrint: 'Atvērt & izdrukāt darba lapas',
     downloadPdf: 'Lejupielādēt PDF',
+    emailSent: (email: string) => `Darba lapas PDF ir nosūtītas uz ${email}`,
     registerAnother: '← Reģistrēt citu klasi',
     howItWorks: 'Kā tas darbojas?',
-    consentText: 'Es piekrītu, ka mani anonimizētie dati (radītā 3D tekstūra un atbildēs) tiek saglabāti un izmantoti akadēmiskajos pētījumos, kā arī lietotnes lietotāju pieredzes (UX) uzlabošanai. Personas dati netiek ievākti.',
+    consentText: 'Es piekrītu, ka mani anonīmie dati (radītā 3D tekstūra un atbildes) tiek saglabāti un izmantoti akadēmiskajos pētījumos, kā arī lietotnes lietotāju pieredzes (UX) uzlabošanai. Personas dati netiek ievākti.',
   },
   lt: {
     langLabel: 'Darbo lapų kalba',
@@ -98,6 +101,7 @@ const UI: Record<LangCode, {
     pinLabel: 'PIN kodas ekranui atidaryti', pinHint: 'Išsaugokite šį PIN — jis daugiau nebus rodomas.',
     openPrint: 'Atidaryti ir spausdinti darbo lapus',
     downloadPdf: 'Atsisiųsti PDF',
+    emailSent: (email: string) => `Darbo lapų PDF išsiųstas į ${email}`,
     registerAnother: '← Registruoti kitą klasę',
     howItWorks: 'Kaip tai veikia?',
     consentText: 'Sutinku, kad mano anonimizuoti duomenys (sukurta 3D tekstūra ir apklausos atsakymai) būtų saugomi ir naudojami akademiniams tyrimams bei programėlės (UX) tobulinimui. Jokie asmens duomenys nėra renkami.',
@@ -184,6 +188,7 @@ const INSTRUCTIONS: Record<LangCode, { title: string; steps: { icon: string; hea
 
 export function KlaseFlow({ parentViewers }: { parentViewers: ParentViewer[] }) {
   const [result, setResult] = useState<RegistrationResult | null>(null);
+  const [submittedEmail, setSubmittedEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState('');
@@ -216,6 +221,7 @@ export function KlaseFlow({ parentViewers }: { parentViewers: ParentViewer[] }) 
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || t.errorFallback);
+      setSubmittedEmail((payload.teacher_email as string) || '');
       setResult(data);
     } catch (err: any) {
       setError(err.message || t.errorFallback);
@@ -295,15 +301,12 @@ export function KlaseFlow({ parentViewers }: { parentViewers: ParentViewer[] }) 
             </>
           )}
         </button>
-        <button
-          onClick={openWorksheets}
-          className="w-full flex items-center justify-center gap-2 border border-gray-300 hover:border-gray-500 text-gray-700 hover:text-gray-900 font-medium py-3 rounded-xl transition-colors text-sm"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17H17.01M17 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V7l-4-4zm0 0v4h4M9 11h6M9 15h6" />
-          </svg>
-          {t.openPrint}
-        </button>
+
+        {submittedEmail ? (
+          <p className="text-center text-sm text-green-700 bg-green-50 rounded-xl px-4 py-2">
+            {t.emailSent(submittedEmail)}
+          </p>
+        ) : null}
 
         <button
           onClick={() => setResult(null)}

@@ -1,11 +1,70 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
+import nodemailer from 'nodemailer';
 import { generateViewerId, generatePin } from '@/lib/types/viewer';
 import { saveViewerConfig, getViewerConfig, getViewerModels } from '@/lib/viewers';
 import { generateShortCode } from '@/lib/short-links';
 import { generateQRCodeImage, generateWorksheetPageContent, generateWorksheetFromLayout, generateKlaseInstructionPageContent, wrapWorksheetPages } from '@/lib/qr-codes';
 import { protocol, rootDomain } from '@/lib/utils';
+
+async function sendWorksheetEmail(options: {
+  to: string;
+  classroomName: string;
+  viewerLink: string;
+  plainPin: string;
+  worksheetHtml: string;
+  baseUrl: string;
+  lang: string;
+}) {
+  const { to, classroomName, viewerLink, plainPin, worksheetHtml, baseUrl, lang } = options;
+
+  // Generate PDF via internal API call
+  const pdfRes = await fetch(`${baseUrl}/api/pdf`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ html: worksheetHtml }),
+  });
+  if (!pdfRes.ok) {
+    throw new Error(`PDF generation failed with status ${pdfRes.status}`);
+  }
+  const pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
+
+  const subjects: Record<string, string> = {
+    lv: `Klases reģistrācija – ${classroomName}`,
+    ru: `Регистрация класса – ${classroomName}`,
+    en: `Class registration – ${classroomName}`,
+  };
+  const bodies: Record<string, string> = {
+    lv: `Labdien!\n\nJūsu klase ir veiksmīgi reģistrēta.\n\nKlases nosaukums: ${classroomName}\nSaite uz skatītāju: ${viewerLink}\nPIN kods: ${plainPin}\n\nPielikumā atradīsiet darba lapas PDF failu.\n\nClaypixels`,
+    ru: `Здравствуйте!\n\nВаш класс успешно зарегистрирован.\n\nНазвание класса: ${classroomName}\nСсылка на просмотрщик: ${viewerLink}\nPIN-код: ${plainPin}\n\nРабочие листы PDF прилагаются.\n\nClaypixels`,
+    en: `Hello!\n\nYour classroom has been successfully registered.\n\nClass name: ${classroomName}\nViewer link: ${viewerLink}\nPIN code: ${plainPin}\n\nThe worksheets PDF is attached.\n\nClaypixels`,
+  };
+
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT ?? 587),
+    secure: false,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+
+  await transporter.sendMail({
+    from: `Claypixels <${process.env.SMTP_FROM ?? process.env.SMTP_USER}>`,
+    to,
+    subject: subjects[lang] ?? subjects.en,
+    text: bodies[lang] ?? bodies.en,
+    attachments: [
+      {
+        filename: 'worksheets.pdf',
+        content: pdfBuffer,
+        contentType: 'application/pdf',
+      },
+    ],
+  });
+}
 
 /** Service role client — bypasses RLS for public classroom registration */
 function serviceClient() {
@@ -178,6 +237,21 @@ export async function POST(request: NextRequest) {
     }
 
     const worksheetHtml = wrapWorksheetPages(pageContents.join('\n'));
+
+    // Fire-and-forget: send PDF to teacher's email (does not block the response)
+    if (teacher_email?.trim()) {
+      sendWorksheetEmail({
+        to: teacher_email.trim(),
+        classroomName,
+        viewerLink,
+        plainPin,
+        worksheetHtml,
+        baseUrl,
+        lang: worksheetLang,
+      }).catch((err: unknown) => {
+        console.error('[klase/register] email send failed:', err);
+      });
+    }
 
     return NextResponse.json({
       success: true,

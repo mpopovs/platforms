@@ -33,8 +33,7 @@ export default async function HomePage() {
 
         <footer className="w-full border-t border-gray-100 bg-white py-5 px-4 mt-10">
           <p className="text-center text-sm text-gray-400">
-            © {year} <span className="font-medium text-gray-500">&ldquo;We Rock&rdquo;</span> — All rights reserved.
-            Developed by &ldquo;Art More&rdquo;, SIA
+            © {year} All rights reserved
           </p>
         </footer>
       </div>
