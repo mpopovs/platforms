@@ -207,6 +207,20 @@ button[aria-label="Play animation"] {
   -webkit-tap-highlight-color: transparent !important;
 }
 
+/* Samsung Frame TV: keep viewer pinned to full screen even if browser chrome reappears.
+   position:fixed with all four edges at 0 already handles this, but we reinforce it here
+   so nothing can accidentally push the container around. */
+.viewer-fullscreen-container {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  overflow: hidden !important;
+}
+
 /* Ensure proper z-index and positioning for overlay buttons */
 .w-full.h-full.relative > button {
   pointer-events: auto !important;

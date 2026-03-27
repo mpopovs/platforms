@@ -32,9 +32,15 @@ export default async function HomePage() {
         </main>
 
         <footer className="w-full border-t border-gray-100 bg-white py-5 px-4 mt-10">
-          <p className="text-center text-sm text-gray-400">
-            © {year} All rights reserved
-          </p>
+          <div className="flex items-center justify-between max-w-2xl mx-auto">
+            <p className="text-sm text-gray-400">© {year} All rights reserved</p>
+            <a
+              href="/credits"
+              className="text-sm text-gray-300 hover:text-gray-400 transition-colors"
+            >
+              Credits
+            </a>
+          </div>
         </footer>
       </div>
     </>

@@ -421,10 +421,10 @@ export function UploadTextureForm({
   }, [uploadedSuccessfully, onQueueStatusChange]);
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 pb-32">
-      {/* Photo button - fixed at bottom when visible */}
+    <form onSubmit={handleSubmit} className="space-y-0">
+      {/* Photo button - natural flow below the video */}
       {!processedPreview && !processing && !show3DPreview && !hasArUcoError && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 p-4 bg-white border-t border-gray-200 shadow-lg">
+        <div className="w-full p-4 bg-white">
           <div className="w-full max-w-3xl mx-auto">
             <input
               type="file"
@@ -438,14 +438,14 @@ export function UploadTextureForm({
             />
             <label
               htmlFor="photo"
-              className={`w-full bg-blue-500 hover:bg-blue-600 active:bg-blue-700 rounded-xl py-12 flex items-center justify-center cursor-pointer transition-colors shadow-md ${
+              className={`w-full bg-blue-500 hover:bg-blue-600 active:bg-blue-700 rounded-xl py-8 flex items-center justify-center cursor-pointer transition-colors shadow-md h-auto ${
                 processing ? 'opacity-50 pointer-events-none' : ''
               }`}
             >
               {processing ? (
-                <div className="text-6xl animate-pulse">⏳</div>
+                <div className="text-4xl animate-pulse">⏳</div>
               ) : (
-                <Camera className="size-32 text-white" strokeWidth={2} />
+                <Camera className="size-16 text-white" strokeWidth={2} />
               )}
             </label>
           </div>

@@ -415,6 +415,23 @@ export function ModelCarousel({
     }
   }, []);
 
+  // Auto re-enter fullscreen after a page reload triggered by WebGL recovery or preventive reload.
+  // Samsung Frame TV cannot re-enter fullscreen without a user gesture, so we use a stored flag
+  // set just before the reload to re-invoke the fullscreen request on the new page load.
+  useEffect(() => {
+    const shouldRestore = sessionStorage.getItem('requestFullscreenOnLoad');
+    if (shouldRestore) {
+      sessionStorage.removeItem('requestFullscreenOnLoad');
+      // Short delay to let the page fully render before requesting fullscreen
+      const timer = setTimeout(() => {
+        toggleFullscreen();
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  // toggleFullscreen is stable (useCallback with [] deps) — safe to omit from deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Handle animation state changes from Model3D
   const handleAnimationStateChange = useCallback((hasAnimations: boolean, isPlaying: boolean) => {
     setModelHasAnimations(hasAnimations);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -144,6 +144,7 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
   const [currentQueueNumber, setCurrentQueueNumber] = useState<number | null>(null);
   const [contextLost, setContextLost] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
+  const contextRecoveryTimerRef = useRef<NodeJS.Timeout | null>(null);
   const supabase = createClient();
 
   // Clean old cached data on viewer startup (prevent quota issues)
@@ -287,16 +288,23 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
   useEffect(() => {
     const handleContextLost = (e: Event) => {
       e.preventDefault();
-      console.error('WebGL context lost, attempting recovery...');
+      console.error('WebGL context lost, waiting for self-restore...');
       setContextLost(true);
-      // Reload page after short delay to recover
-      setTimeout(() => {
+      // Give WebGL up to 8 seconds to self-restore (Samsung TV Tizen often recovers on its own)
+      // Only reload as a last resort to avoid losing fullscreen state
+      contextRecoveryTimerRef.current = setTimeout(() => {
+        console.log('WebGL not restored after 8s, reloading page...');
+        sessionStorage.setItem('requestFullscreenOnLoad', '1');
         window.location.reload();
-      }, 2000);
+      }, 8000);
     };
 
     const handleContextRestored = () => {
       console.log('WebGL context restored');
+      if (contextRecoveryTimerRef.current) {
+        clearTimeout(contextRecoveryTimerRef.current);
+        contextRecoveryTimerRef.current = null;
+      }
       setContextLost(false);
     };
 
@@ -307,8 +315,10 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
     }
 
     // Preventive reload after 12 hours to avoid memory leaks
+    // Set sessionStorage flag so the page re-enters fullscreen automatically after reload
     const preventiveReload = setTimeout(() => {
       console.log('Preventive reload after 12 hours of operation');
+      sessionStorage.setItem('requestFullscreenOnLoad', '1');
       window.location.reload();
     }, 12 * 60 * 60 * 1000); // 12 hours
 
@@ -316,6 +326,9 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
       if (canvas) {
         canvas.removeEventListener('webglcontextlost', handleContextLost);
         canvas.removeEventListener('webglcontextrestored', handleContextRestored);
+      }
+      if (contextRecoveryTimerRef.current) {
+        clearTimeout(contextRecoveryTimerRef.current);
       }
       clearTimeout(preventiveReload);
     };
@@ -326,8 +339,10 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
     const handleError = (event: ErrorEvent) => {
       console.error('Global error caught:', event.error);
       if (event.error?.message?.includes('WebGL') || event.error?.message?.includes('GPU')) {
-        console.error('WebGL/GPU error detected, reloading...');
-        setTimeout(() => window.location.reload(), 2000);
+        // Soft recovery: briefly show recovery screen then clear — avoids losing fullscreen
+        console.error('WebGL/GPU error detected, attempting soft recovery...');
+        setContextLost(true);
+        setTimeout(() => setContextLost(false), 3000);
       }
     };
 
@@ -377,7 +392,7 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
   // If models exist, show 3D carousel
   if (models.length > 0) {
     return (
-      <div className="w-screen h-screen relative overflow-hidden" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
+      <div className="viewer-fullscreen-container" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
         <ModelCarousel
           models={models}
           rotationSpeed={settings.rotationSpeed || 0.5}

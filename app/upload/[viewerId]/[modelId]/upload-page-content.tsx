@@ -65,17 +65,17 @@ export function UploadPageContent({
             </h1>
           </div>
 
-          {/* Main Content Area - GIF hidden while queue status is shown */}
+          {/* Main Content Area - 1:1 full-width video */}
           {!showQueueStatus && (
-            <div className="flex-1 flex items-center justify-center px-4 pb-32 relative z-10">
-              <div className="w-full flex items-center justify-center">
+            <div className="w-full">
+              <div className="w-full aspect-square">
                 <video
                   src="/info.mp4"
                   autoPlay
                   loop
                   muted
                   playsInline
-                  className="max-w-full max-h-[calc(100vh-300px)] w-auto h-auto object-contain"
+                  className="w-full h-full object-cover"
                 />
               </div>
             </div>
