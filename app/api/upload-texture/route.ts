@@ -84,6 +84,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Determine moderation status: check if the owning viewer has moderation enabled
+    const ownerViewerConfig = await getViewerConfig(model.viewer_id);
+    const moderationEnabled = ownerViewerConfig?.settings?.textureModerationEnabled === true;
+    const moderationStatus: 'pending' | 'approved' = moderationEnabled ? 'pending' : 'approved';
+
     // Check if image was already processed client-side with ArUco markers
     const clientProcessed = formData.get('clientProcessed') === 'true';
 
@@ -142,7 +147,8 @@ export async function POST(request: NextRequest) {
         modelId,
         originalPhotoUrl,
         processedTextureUrl,
-        viewerId // upload_source_viewer_id
+        viewerId, // upload_source_viewer_id
+        moderationStatus
       );
 
       // Create queue entry
@@ -173,7 +179,11 @@ export async function POST(request: NextRequest) {
           originalPhotoUrl,
           correctedTextureUrl: processedTextureUrl,
           queueNumber,
-          message: 'Texture uploaded and processed with ArUco markers successfully!'
+          moderationStatus,
+          pendingModeration: moderationStatus === 'pending',
+          message: moderationStatus === 'pending'
+            ? 'Texture uploaded and is pending teacher approval before appearing in the viewer.'
+            : 'Texture uploaded and processed with ArUco markers successfully!'
         },
         { status: 200 }
       );
@@ -206,7 +216,7 @@ export async function POST(request: NextRequest) {
         throw new Error(`Failed to create queue entry: ${queueInsertError.message}`);
       }
       
-      // No client-side processing - trigger server-side processing
+      // No client-side processing - trigger server-side processing (pass moderationStatus along)
       fetch(`${request.nextUrl.origin}/api/process-texture`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -215,7 +225,8 @@ export async function POST(request: NextRequest) {
           viewerId,
           modelId,
           originalPhotoUrl: photoUrl,
-          clientProcessed: false
+          clientProcessed: false,
+          moderationStatus
         })
       }).catch(err => console.error('Error triggering texture processing:', err));
 
@@ -227,7 +238,11 @@ export async function POST(request: NextRequest) {
           modelId,
           originalPhotoUrl: photoUrl,
           queueNumber,
-          message: 'Texture uploaded successfully. Processing in progress...'
+          moderationStatus,
+          pendingModeration: moderationStatus === 'pending',
+          message: moderationStatus === 'pending'
+            ? 'Texture uploaded and is pending teacher approval before appearing in the viewer.'
+            : 'Texture uploaded successfully. Processing in progress...'
         },
         { status: 200 }
       );

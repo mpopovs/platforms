@@ -50,6 +50,7 @@ type Viewer = {
     surveyLanguage?: string;
     certificateBottomImageUrl?: string;
     classroomEnabled?: boolean;
+    textureModerationEnabled?: boolean;
   };
   parent_viewer_id?: string | null;
 };
@@ -87,6 +88,7 @@ type UploadModelState = {
 
 // Import necessary components
 import { AllTexturesDialog } from '@/components/all-textures-dialog';
+import { TextureModerationPanel } from '@/components/texture-moderation-panel';
 
 /** Shows all textures uploaded via this classroom viewer, grouped by model */
 function ClassroomTexturesDialog({
@@ -1085,6 +1087,7 @@ export default function ViewerDetailPage({ params }: { params: Promise<{ viewerI
               surveyLanguage={viewer.settings.surveyLanguage}
               certificateBottomImageUrl={viewer.settings.certificateBottomImageUrl}
               classroomEnabled={viewer.settings.classroomEnabled}
+              textureModerationEnabled={viewer.settings.textureModerationEnabled}
               models={models}
               currentPin={currentPin}
               onGeneratePin={async () => {
@@ -1130,6 +1133,23 @@ export default function ViewerDetailPage({ params }: { params: Promise<{ viewerI
           />
         </div>
       </div>
+
+      {/* ── Texture Moderation ── */}
+      {viewer.settings?.textureModerationEnabled && (
+        <div className="rounded-xl border bg-white">
+          <div className="flex items-center justify-between px-5 py-3 border-b">
+            <div>
+              <h2 className="font-semibold text-sm">Texture Moderation</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Review and approve or reject uploaded textures before they appear in the viewer.
+              </p>
+            </div>
+          </div>
+          <div className="p-4">
+            <TextureModerationPanel viewerId={viewer.id} />
+          </div>
+        </div>
+      )}
 
 
       {/* ── Classroom all-textures dialog ── */}

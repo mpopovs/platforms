@@ -14,6 +14,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { textureId, viewerId, modelId, originalPhotoUrl } = body;
+    const moderationStatus: 'pending' | 'approved' = body.moderationStatus === 'pending' ? 'pending' : 'approved';
 
     if (!textureId || !viewerId || !modelId || !originalPhotoUrl) {
       return NextResponse.json(
@@ -76,7 +77,8 @@ export async function POST(request: NextRequest) {
       modelId,
       originalPhotoUrl,
       correctedTextureUrl,
-      viewerId
+      viewerId,
+      moderationStatus
     );
 
     console.log(`✅ Texture ${textureId} processed and saved. ArUco cropped: ${correctionApplied}`);

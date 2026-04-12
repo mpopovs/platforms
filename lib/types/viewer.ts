@@ -237,6 +237,7 @@ export interface ViewerSettings {
   research_purpose?: string; // English base text describing how survey data will be used in research
   research_purpose_translations?: Partial<Record<string, string>>; // Multilanguage research purpose (en, lv, de, ru, lt, et)
   classroomEnabled?: boolean; // Allow teachers to register classroom viewers via /klase (default: false)
+  textureModerationEnabled?: boolean; // Require admin approval before textures appear in viewer (default: false)
   worksheetLayout?: WorksheetLayout; // Custom worksheet layout for all models in this viewer
 }
 
@@ -317,6 +318,7 @@ export interface ModelTextureRow {
   author_age?: number;
   queue_number?: number;
   upload_source_viewer_id?: string | null; // Which viewer's QR code was used to upload
+  moderation_status?: 'pending' | 'approved' | 'rejected'; // Moderation state (default: 'approved')
 }
 
 // Extended model interface with latest texture
