@@ -7,6 +7,65 @@ import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import * as THREE from 'three';
 import { getModel, storeModel, getTexture, storeTexture } from '@/lib/texture-cache';
 
+// ─── Module-level decoded-texture preload cache ───────────────────────────────
+// The carousel pre-decodes the next texture into a THREE.Texture while the
+// current one is on screen. Model3D consumes it instantly (no decode delay).
+const preloadCache = new Map<string, THREE.Texture>();
+const MAX_PRELOAD_CACHE = 6;
+
+/**
+ * Pre-decode a texture from IndexedDB / network into a THREE.Texture.
+ * Safe to call speculatively — already-cached URLs are skipped.
+ */
+export async function preloadTexture(url: string, signal?: AbortSignal): Promise<void> {
+  if (!url || url.startsWith('local://') || preloadCache.has(url)) return;
+  try {
+    let blob: Blob | null = await getTexture(url);
+    if (signal?.aborted) return;
+    if (!blob) {
+      const res = await fetch(url, { signal });
+      if (!res.ok || signal?.aborted) return;
+      blob = await res.blob();
+    }
+    if (signal?.aborted) return;
+    const objectURL = URL.createObjectURL(blob);
+    await new Promise<void>((resolve) => {
+      new THREE.TextureLoader().load(
+        objectURL,
+        (t) => {
+          URL.revokeObjectURL(objectURL);
+          if (signal?.aborted) { t.dispose(); resolve(); return; }
+          t.colorSpace = THREE.SRGBColorSpace;
+          t.flipY = false;
+          // Evict LRU entry if over limit
+          if (preloadCache.size >= MAX_PRELOAD_CACHE) {
+            const oldest = preloadCache.keys().next().value;
+            if (oldest) { preloadCache.get(oldest)?.dispose(); preloadCache.delete(oldest); }
+          }
+          preloadCache.set(url, t);
+          console.log('[Preload] Texture ready:', url.split('/').pop());
+          resolve();
+        },
+        undefined,
+        (err) => { URL.revokeObjectURL(objectURL); console.warn('[Preload] Decode error:', err); resolve(); }
+      );
+    });
+  } catch (err: unknown) {
+    if ((err as Error)?.name !== 'AbortError') console.warn('[Preload] Failed:', url, err);
+  }
+}
+
+/**
+ * Consume a preloaded texture — removes it from cache and transfers ownership
+ * to the caller (Model3D), which disposes it when done.
+ */
+export function consumePreloadedTexture(url: string): THREE.Texture | null {
+  const t = preloadCache.get(url) ?? null;
+  if (t) preloadCache.delete(url);
+  return t;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Export interface for animation control
 export interface Model3DHandle {
   playAnimation: () => void;
@@ -51,6 +110,12 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
   const [hasAnimations, setHasAnimations] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  // isModelReady: the model for the CURRENT modelUrl has finished loading.
+  // isTextureReady: the texture for the CURRENT textureUrl has finished loading.
+  // Both must be true before we make the primitive visible — prevents the
+  // "new texture on old model" flash when the carousel advances.
+  const [isModelReady, setIsModelReady] = useState(false);
+  const [isTextureReady, setIsTextureReady] = useState<boolean>(!textureUrl);
 
   // Play animation function
   const playAnimation = useCallback(() => {
@@ -105,6 +170,9 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
     hasPlayedOnceRef.current = false;
     setHasAnimations(false);
     setIsPlaying(false);
+    // Mark model as NOT ready for the new URL — prevents the old model
+    // from showing with the new texture during the async load.
+    setIsModelReady(false);
     
     // Cleanup previous mixer
     if (mixerRef.current) {
@@ -131,6 +199,7 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
             const loader = new GLTFLoader();
             loader.load(objectURL, (gltf) => {
               setModel(gltf.scene);
+              setIsModelReady(true);
               
               // Setup animations if present
               if (gltf.animations && gltf.animations.length > 0) {
@@ -157,6 +226,7 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
             const loader = new OBJLoader();
             loader.load(objectURL, (obj) => {
               setModel(obj);
+              setIsModelReady(true);
               URL.revokeObjectURL(objectURL);
             }, undefined, (err) => {
               console.error('[Model3D] Failed to load OBJ from cache:', err);
@@ -189,6 +259,7 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
             const loader = new GLTFLoader();
             loader.load(objectURL, (gltf) => {
               setModel(gltf.scene);
+              setIsModelReady(true);
               
               // Setup animations if present
               if (gltf.animations && gltf.animations.length > 0) {
@@ -215,6 +286,7 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
             const loader = new OBJLoader();
             loader.load(objectURL, (obj) => {
               setModel(obj);
+              setIsModelReady(true);
               URL.revokeObjectURL(objectURL);
             }, undefined, (err) => {
               console.error('[Model3D] Failed to load OBJ from network:', err);
@@ -262,16 +334,32 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
 
   // Load texture with IndexedDB caching
   useEffect(() => {
+    // Always clear the previous texture when the URL changes (including when null).
+    // Without this, the old texture stays in state and gets applied to the next model
+    // while the new texture loads asynchronously — causing one texture to appear on all models.
+    setTexture(null);
+
     if (!textureUrl) {
+      // No texture needed — mark as ready immediately so model renders without delay
+      setIsTextureReady(true);
       console.log('[Texture] No texture URL provided, skipping texture load');
       return;
     }
 
+    // New URL coming in — hide the model until this texture finishes loading
+    setIsTextureReady(false);
+
     // Skip invalid URLs (like local://indexeddb placeholder)
     if (textureUrl.startsWith('local://') || textureUrl === 'local://indexeddb') {
       console.log('[Texture] Skipping local placeholder URL:', textureUrl);
+      setIsTextureReady(true); // Don't block on placeholder URLs
       return;
     }
+
+    // cancelled flag: if the effect is cleaned up before the async load finishes,
+    // we discard the result so a stale texture can't overwrite the correct one.
+    let cancelled = false;
+    let loadedTexture: THREE.Texture | null = null;
 
     const loadTextureWithCache = async () => {
       try {
@@ -288,46 +376,58 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
         if (textureUrl.startsWith('data:') || textureUrl.startsWith('blob:')) {
             console.log('[Texture] Data/Blob URL detected, skipping cache');
             const textureLoader = new THREE.TextureLoader();
-            textureLoader.load(textureUrl, (loadedTexture) => {
-              loadedTexture.colorSpace = THREE.SRGBColorSpace;
-              loadedTexture.flipY = false;
-              setTexture(loadedTexture);
+            textureLoader.load(textureUrl, (t) => {
+              if (cancelled) { t.dispose(); return; }
+              t.colorSpace = THREE.SRGBColorSpace;
+              t.flipY = false;
+              loadedTexture = t;
+              setTexture(t);
+              setIsTextureReady(true);
               console.log('[Texture] Loaded from temporary URL successfully');
             }, undefined, (err) => {
               console.error('[Texture] Failed to load from temporary URL:', err);
+              if (!cancelled) setIsTextureReady(true);
             });
             return;
         }
 
         // Check IndexedDB cache first (skip if caching disabled)
         const cachedBlob = shouldUseCache ? await getTexture(textureUrl) : null;
+        if (cancelled) return;
         
         if (cachedBlob) {
           console.log('[Texture] Found in cache');
-          // Load from cached blob
           const objectURL = URL.createObjectURL(cachedBlob);
           const textureLoader = new THREE.TextureLoader();
-          textureLoader.load(objectURL, (loadedTexture) => {
-            loadedTexture.colorSpace = THREE.SRGBColorSpace;
-            loadedTexture.flipY = false;
-            setTexture(loadedTexture);
+          textureLoader.load(objectURL, (t) => {
             URL.revokeObjectURL(objectURL);
+            if (cancelled) { t.dispose(); return; }
+            t.colorSpace = THREE.SRGBColorSpace;
+            t.flipY = false;
+            loadedTexture = t;
+            setTexture(t);
+            setIsTextureReady(true);
             console.log('[Texture] Loaded from cache successfully');
           }, undefined, (err) => {
             console.error('[Texture] Failed to load from cache:', err);
             URL.revokeObjectURL(objectURL);
+            // Allow model to show even without texture rather than blocking forever
+            if (!cancelled) setIsTextureReady(true);
           });
         } else {
           console.log('[Texture] Not in cache, fetching from network:', textureUrl);
-          // Fetch from network and cache
           const response = await fetch(textureUrl);
+          if (cancelled) return;
           
           if (!response.ok) {
             console.error(`[Texture] Failed to fetch: HTTP ${response.status}`);
+            // Unblock rendering on fetch failure
+            if (!cancelled) setIsTextureReady(true);
             return;
           }
           
           const blob = await response.blob();
+          if (cancelled) return;
           console.log('[Texture] Fetched successfully, size:', blob.size);
           
           // Store in IndexedDB for next time (skip if caching disabled)
@@ -336,31 +436,50 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
               console.warn('[Cache] Failed to store texture:', err)
             );
           }
+          if (cancelled) return;
           
           const objectURL = URL.createObjectURL(blob);
           const textureLoader = new THREE.TextureLoader();
-          textureLoader.load(objectURL, (loadedTexture) => {
-            loadedTexture.colorSpace = THREE.SRGBColorSpace;
-            loadedTexture.flipY = false;
-            setTexture(loadedTexture);
+          textureLoader.load(objectURL, (t) => {
             URL.revokeObjectURL(objectURL);
+            if (cancelled) { t.dispose(); return; }
+            t.colorSpace = THREE.SRGBColorSpace;
+            t.flipY = false;
+            loadedTexture = t;
+            setTexture(t);
+            setIsTextureReady(true);
             console.log('[Texture] Loaded from network successfully');
           }, undefined, (err) => {
             console.error('[Texture] Failed to load from network:', err);
             URL.revokeObjectURL(objectURL);
+            // Unblock rendering so a fetch error doesn't freeze the display
+            if (!cancelled) setIsTextureReady(true);
           });
         }
       } catch (error) {
         console.error('[Texture] Error loading texture from URL:', textureUrl, error);
+        // Unblock rendering on unexpected errors
+        if (!cancelled) setIsTextureReady(true);
       }
     };
 
-    loadTextureWithCache();
+    // Fast path: carousel already pre-decoded this texture — use it instantly.
+    const preloaded = consumePreloadedTexture(textureUrl);
+    if (preloaded) {
+      loadedTexture = preloaded; // track for cleanup
+      setTexture(preloaded);
+      setIsTextureReady(true);
+      console.log('[Texture] Instant from preload cache:', textureUrl.split('/').pop());
+    } else {
+      loadTextureWithCache();
+    }
 
-    // Cleanup function to dispose of previous texture
     return () => {
-      if (texture) {
-        texture.dispose();
+      cancelled = true;
+      // Dispose the texture loaded by this specific effect run (not stale closure state).
+      if (loadedTexture) {
+        loadedTexture.dispose();
+        loadedTexture = null;
       }
     };
   }, [textureUrl, modelId, textureId]);
@@ -433,17 +552,20 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
     }
   }, [hasAnimations, model, playAnimation]);
 
-  // Update loading state when model is loaded
+  // Keep the spinner up until BOTH the model and its texture are ready.
+  // This prevents the brief flash of an untextured (white) model on Samsung Frame TV.
   useEffect(() => {
-    setIsLoading(!model);
-  }, [model]);
+    setIsLoading(!isModelReady || !isTextureReady);
+  }, [isModelReady, isTextureReady]);
 
-  if (!model) {
-    // Return null instead of placeholder - parent will show spinner
-    return null;
-  }
-
-  return <primitive ref={meshRef} object={model} />;
+  // Always render the group so the rotation ref is stable.
+  // The primitive is hidden (visible=false) until BOTH model and texture are ready —
+  // this prevents the new texture from briefly appearing on the old model during transitions.
+  return (
+    <group ref={meshRef}>
+      {model && <primitive object={model} visible={isModelReady && isTextureReady} />}
+    </group>
+  );
 });
 
 // Display name for debugging

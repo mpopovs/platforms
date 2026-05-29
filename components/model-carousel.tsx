@@ -6,6 +6,8 @@ import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import type { ViewerModelWithTexture, DisplayModeSettings, TextureCyclingSettings, ViewerModelWithAllTextures, ModelTexturePair } from '@/lib/types/viewer';
 import { Maximize, Play } from 'lucide-react';
 import { Model3D, Model3DHandle } from './model-3d';
+import { preloadTexture } from './model-3d';
+import { prefetchTextures } from '@/lib/texture-cache';
 
 interface ModelCarouselProps {
   models: ViewerModelWithTexture[];
@@ -56,6 +58,7 @@ export function ModelCarousel({
   const queueInitializedRef = useRef(false);
   const mouseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const model3DRef = useRef<Model3DHandle>(null);
+  const prefetchAbortRef = useRef<AbortController | null>(null);
   
   // Animation state
   const [modelHasAnimations, setModelHasAnimations] = useState(false);;
@@ -192,6 +195,60 @@ export function ModelCarousel({
       }
     }
   }, [allModelsWithTextures, settings.textureCycling.priorityTimeWindow, settings.textureCycling.priorityRepeatCount, settings.textureCycling.enabled]);
+
+  // Background-prefetch all textures into IndexedDB so Samsung Frame TV loads them instantly.
+  // Runs whenever the display queue changes. Uses low concurrency (2) to stay responsive.
+  useEffect(() => {
+    if (!settings.textureCycling.enabled || displayQueue.length === 0) return;
+
+    // Abort any previous prefetch run
+    if (prefetchAbortRef.current) {
+      prefetchAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    prefetchAbortRef.current = controller;
+
+    // Collect unique texture URLs (skip placeholders and duplicates)
+    const seen = new Set<string>();
+    const toFetch: Array<{ url: string; modelId: string; textureId: string }> = [];
+    for (const pair of displayQueue) {
+      if (!pair.texture) continue;
+      const url = pair.texture.corrected_texture_url && !pair.texture.corrected_texture_url.startsWith('local://')
+        ? pair.texture.corrected_texture_url
+        : pair.texture.original_photo_url;
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      toFetch.push({ url, modelId: pair.model.id, textureId: pair.texture.id });
+    }
+
+    if (toFetch.length > 0) {
+      console.log(`[Carousel] Background prefetch: ${toFetch.length} unique textures`);
+      prefetchTextures(toFetch, controller.signal).catch(err => {
+        if ((err as Error)?.name !== 'AbortError') {
+          console.warn('[Carousel] Prefetch failed:', err);
+        }
+      });
+    }
+
+    return () => {
+      controller.abort();
+    };
+  }, [displayQueue, settings.textureCycling.enabled]);
+
+  // Look-ahead: pre-decode the next texture while the current one is on screen.
+  // When the carousel advances, Model3D picks it from the preload cache instantly.
+  useEffect(() => {
+    if (!displayQueue.length) return;
+    // Preload the next 2 items in the queue
+    for (let ahead = 1; ahead <= 2; ahead++) {
+      const nextPair = displayQueue[(currentIndex + ahead) % displayQueue.length];
+      if (!nextPair?.texture) continue;
+      const url = nextPair.texture.corrected_texture_url && !nextPair.texture.corrected_texture_url.startsWith('local://')
+        ? nextPair.texture.corrected_texture_url
+        : nextPair.texture.original_photo_url;
+      if (url) preloadTexture(url).catch(() => {}); // fire-and-forget
+    }
+  }, [currentIndex, displayQueue]);
 
   // Sort models by texture upload time (newest first) and jump to newest when updated
   useEffect(() => {
@@ -635,7 +692,7 @@ export function ModelCarousel({
   }
 
   return (
-    <div className="w-full h-full relative" style={{ backgroundColor }}>
+    <div className="w-full h-full relative" style={{ backgroundColor, cursor: isFullscreen && !showControls ? 'none' : 'default' }}>
       <Canvas 
         shadows 
         style={{ 
@@ -718,10 +775,19 @@ export function ModelCarousel({
         />
       </Canvas>
 
-      {/* Loading spinner overlay */}
+      {/* Subtle loading indicator: soft blurred pulsing glow instead of a hard spinner.
+          Barely visible on a dark background — just enough to indicate activity. */}
       {isModelLoading && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="w-16 h-16 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+          <div
+            className="animate-pulse rounded-full"
+            style={{
+              width: '56px',
+              height: '56px',
+              background: 'radial-gradient(circle, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.0) 70%)',
+              filter: 'blur(10px)',
+            }}
+          />
         </div>
       )}
       

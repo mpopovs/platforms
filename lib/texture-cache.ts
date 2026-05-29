@@ -251,6 +251,56 @@ export async function cleanOldCache(daysToKeep: number = 7): Promise<void> {
 }
 
 /**
+ * Background-prefetch a list of textures into IndexedDB.
+ * Already-cached URLs are skipped. Downloads are throttled to
+ * CONCURRENCY=2 to avoid overwhelming Samsung Frame TV memory/network.
+ */
+export async function prefetchTextures(
+  textures: Array<{ url: string; modelId: string; textureId: string }>,
+  signal?: AbortSignal
+): Promise<void> {
+  const CONCURRENCY = 2;
+
+  // Filter to only URLs not yet in cache
+  const uncached: Array<{ url: string; modelId: string; textureId: string }> = [];
+  for (const item of textures) {
+    if (signal?.aborted) return;
+    try {
+      const blob = await getTexture(item.url);
+      if (!blob) uncached.push(item);
+    } catch {
+      uncached.push(item); // treat error as uncached
+    }
+  }
+
+  console.log(`[Prefetch] ${textures.length - uncached.length}/${textures.length} already cached, warming ${uncached.length}`);
+
+  for (let i = 0; i < uncached.length; i += CONCURRENCY) {
+    if (signal?.aborted) return;
+    const batch = uncached.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(async ({ url, modelId, textureId }) => {
+      if (signal?.aborted) return;
+      try {
+        const response = await fetch(url, { signal });
+        if (!response.ok) return;
+        const blob = await response.blob();
+        if (signal?.aborted) return;
+        await storeTexture(url, blob, modelId, textureId);
+        console.log(`[Prefetch] Cached texture ${i + 1}/${uncached.length}:`, url.split('/').pop());
+      } catch (err: unknown) {
+        if ((err as Error)?.name !== 'AbortError') {
+          console.warn('[Prefetch] Failed to cache texture:', url, err);
+        }
+      }
+    }));
+    // Small pause between batches — keeps Samsung TV responsive
+    if (!signal?.aborted) {
+      await new Promise<void>(resolve => setTimeout(resolve, 150));
+    }
+  }
+}
+
+/**
  * Clear all cached data
  */
 export async function clearAllCache(): Promise<void> {
