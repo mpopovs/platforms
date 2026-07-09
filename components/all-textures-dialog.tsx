@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Trash2, Loader2, RefreshCw } from 'lucide-react';
+import { getStorageThumbnailUrl } from '@/lib/storage';
 
 interface Texture {
   id: string;
@@ -192,8 +193,10 @@ export function AllTexturesDialog({
                     Processed Texture
                   </p>
                   <img
-                    src={texture.corrected_texture_url}
+                    src={getStorageThumbnailUrl(texture.corrected_texture_url, { width: 800, quality: 70 })}
                     alt="Processed texture"
+                    loading="lazy"
+                    decoding="async"
                     className="w-full rounded-md border border-gray-200 bg-white"
                   />
                 </div>

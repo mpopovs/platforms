@@ -28,6 +28,37 @@ export function normalizeStorageUrl(url: string): string {
 }
 
 /**
+ * Build a resized/compressed version of a Supabase Storage public URL using the
+ * built-in imgproxy-based image transformation endpoint (self-hosted Supabase has
+ * ENABLE_IMAGE_TRANSFORMATION=true). This lets us request small thumbnails instead
+ * of downloading full-resolution textures just to render a preview grid.
+ *
+ * Falls back to the original URL untouched if it's not a recognizable
+ * `.../storage/v1/object/public/...` URL (e.g. local blob/indexeddb placeholders),
+ * since those can't be transformed.
+ */
+export function getStorageThumbnailUrl(
+  url: string,
+  options: { width?: number; height?: number; quality?: number } = {}
+): string {
+  if (!url || !url.includes('/storage/v1/object/public/')) return url;
+
+  const { width = 300, height, quality = 60 } = options;
+  const transformed = url.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/');
+  const params = new URLSearchParams({
+    width: String(width),
+    quality: String(quality),
+  });
+  if (height) {
+    // Only crop to an exact box when a height was explicitly requested
+    // (e.g. square grid thumbnails). Otherwise let aspect ratio scale freely.
+    params.set('height', String(height));
+    params.set('resize', 'cover');
+  }
+  return `${transformed}?${params.toString()}`;
+}
+
+/**
  * Upload a 3D model file to storage
  */
 export async function upload3DModel(

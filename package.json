@@ -4,7 +4,9 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "generate-short-codes": "tsx scripts/generate-short-codes.ts"
+    "generate-short-codes": "tsx scripts/generate-short-codes.ts",
+    "exhibition-stress-test": "tsx scripts/create-exhibition-stress-test.ts",
+    "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@auth/upstash-redis-adapter": "^2.11.1",

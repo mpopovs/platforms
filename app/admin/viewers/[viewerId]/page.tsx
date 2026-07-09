@@ -17,6 +17,7 @@ import {
   updateModelNameAction,
   updateModelFileAction
 } from '@/app/actions';
+import { getStorageThumbnailUrl } from '@/lib/storage';
 import type { ViewerModelWithTexture } from '@/lib/types/viewer';
 import { ViewerSettingsDialog } from '@/components/viewer-settings-dialog';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -191,8 +192,12 @@ function ClassroomTexturesDialog({
                     {textures.map((texture, i) => (
                       <div key={texture.id} className="relative group rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
                         <img
-                          src={texture.corrected_texture_url}
+                          src={getStorageThumbnailUrl(texture.corrected_texture_url, { width: 300, height: 300 })}
                           alt={`Texture ${i + 1}`}
+                          loading="lazy"
+                          decoding="async"
+                          width={300}
+                          height={300}
                           className="w-full aspect-square object-cover"
                         />
                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />

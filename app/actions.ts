@@ -884,3 +884,113 @@ export async function deleteTextureAction(
     return { success: false, error: error.message || 'Failed to delete texture' };
   }
 }
+
+// ============================================================================
+// Exhibition Grid Actions
+// ============================================================================
+
+import {
+  createExhibitionConfig,
+  getExhibitionConfigById,
+  updateExhibitionConfig,
+  deleteExhibitionConfig,
+  regenerateExhibitionAccessToken,
+} from '@/lib/exhibition';
+import type { GridLayout, ExhibitionCellConfig, ExhibitionTunables } from '@/lib/types/exhibition';
+
+/** Create a new named exhibition config. */
+export async function createExhibitionConfigAction(input: {
+  name: string;
+  layout: GridLayout;
+  cells: ExhibitionCellConfig[];
+  tunables?: Partial<ExhibitionTunables>;
+}) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: 'You must be logged in' };
+
+  if (!input.name?.trim()) return { success: false, error: 'Name is required' };
+
+  try {
+    const { config, accessToken } = await createExhibitionConfig(
+      user.id,
+      input.name.trim(),
+      input.layout,
+      input.cells,
+      input.tunables,
+      supabase
+    );
+    return { success: true, config: { ...config, accessToken } };
+  } catch (error: any) {
+    console.error('Error creating exhibition config:', error);
+    return { success: false, error: error.message || 'Failed to create exhibition config' };
+  }
+}
+
+/** Update an existing exhibition config's name/layout/cells/tunables. */
+export async function updateExhibitionConfigAction(
+  id: string,
+  updates: {
+    name?: string;
+    layout?: GridLayout;
+    cells?: ExhibitionCellConfig[];
+    tunables?: Partial<ExhibitionTunables>;
+  }
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: 'You must be logged in' };
+
+  try {
+    const existing = await getExhibitionConfigById(id, supabase);
+    if (!existing) return { success: false, error: 'Exhibition config not found' };
+    if (existing.userId !== user.id) return { success: false, error: 'Unauthorized' };
+
+    const config = await updateExhibitionConfig(id, updates, supabase);
+    revalidatePath('/admin/exhibition');
+    return { success: true, config };
+  } catch (error: any) {
+    console.error('Error updating exhibition config:', error);
+    return { success: false, error: error.message || 'Failed to update exhibition config' };
+  }
+}
+
+/** Delete an exhibition config. */
+export async function deleteExhibitionConfigAction(id: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: 'You must be logged in' };
+
+  try {
+    const existing = await getExhibitionConfigById(id, supabase);
+    if (!existing) return { success: false, error: 'Exhibition config not found' };
+    if (existing.userId !== user.id) return { success: false, error: 'Unauthorized' };
+
+    await deleteExhibitionConfig(id, supabase);
+    revalidatePath('/admin/exhibition');
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error deleting exhibition config:', error);
+    return { success: false, error: error.message || 'Failed to delete exhibition config' };
+  }
+}
+
+/** Issue a new access token for the show route, invalidating the old show URL. */
+export async function regenerateExhibitionTokenAction(id: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: 'You must be logged in' };
+
+  try {
+    const existing = await getExhibitionConfigById(id, supabase);
+    if (!existing) return { success: false, error: 'Exhibition config not found' };
+    if (existing.userId !== user.id) return { success: false, error: 'Unauthorized' };
+
+    const accessToken = await regenerateExhibitionAccessToken(id, supabase);
+    revalidatePath('/admin/exhibition');
+    return { success: true, accessToken };
+  } catch (error: any) {
+    console.error('Error regenerating exhibition token:', error);
+    return { success: false, error: error.message || 'Failed to regenerate access token' };
+  }
+}

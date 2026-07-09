@@ -8,13 +8,14 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Eye, Plus, Copy, Trash2, ExternalLink, ChevronRight, Box, Images, Loader2, RefreshCw, School } from 'lucide-react';
+import { Eye, Plus, Copy, Trash2, ExternalLink, ChevronRight, ChevronDown, Box, Images, Loader2, RefreshCw, School } from 'lucide-react';
 import Link from 'next/link';
 import {
   createViewerAction,
   deleteViewerAction,
 } from '@/app/actions';
 import { rootDomain, protocol } from '@/lib/utils';
+import { getStorageThumbnailUrl } from '@/lib/storage';
 import type { ViewerModelWithTexture } from '@/lib/types/viewer';
 import type { TextureCyclingSettings } from '@/lib/types/viewer';
 
@@ -154,8 +155,12 @@ function ViewerTexturesDialog({
                     {textures.map((texture, i) => (
                       <div key={texture.id} className="relative group rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
                         <img
-                          src={texture.corrected_texture_url}
+                          src={getStorageThumbnailUrl(texture.corrected_texture_url, { width: 300, height: 300 })}
                           alt={`Texture ${i + 1}`}
+                          loading="lazy"
+                          decoding="async"
+                          width={300}
+                          height={300}
                           className="w-full aspect-square object-cover"
                         />
                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
@@ -335,6 +340,7 @@ function ViewerRowDelete({ viewerId, onDelete }: { viewerId: string; onDelete: (
 export function ViewersManagement({ initialViewers }: { initialViewers: any[] }) {
   const [viewers, setViewers] = useState(initialViewers);
   const [texturesViewer, setTexturesViewer] = useState<any | null>(null);
+  const [collapsedParentIds, setCollapsedParentIds] = useState<Set<string>>(new Set());
   const router = useRouter();
 
   const handleDelete = (viewerId: string) => {
@@ -345,14 +351,26 @@ export function ViewersManagement({ initialViewers }: { initialViewers: any[] })
     window.location.reload();
   };
 
+  const toggleParentCollapsed = (parentId: string) => {
+    setCollapsedParentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(parentId)) next.delete(parentId);
+      else next.add(parentId);
+      return next;
+    });
+  };
+
   // Group: parent viewers first, then interleave their children right below
+  // (children are hidden while their parent is collapsed, accordion-style)
   const parentViewers = viewers.filter((v: any) => !v.parentViewerId);
-  const orderedViewers: Array<any & { _isChild: boolean }> = [];
+  const orderedViewers: Array<any & { _isChild: boolean; _childCount?: number }> = [];
   for (const parent of parentViewers) {
-    orderedViewers.push({ ...parent, _isChild: false });
     const children = viewers.filter((v: any) => v.parentViewerId === parent.id);
-    for (const child of children) {
-      orderedViewers.push({ ...child, _isChild: true });
+    orderedViewers.push({ ...parent, _isChild: false, _childCount: children.length });
+    if (!collapsedParentIds.has(parent.id)) {
+      for (const child of children) {
+        orderedViewers.push({ ...child, _isChild: true });
+      }
     }
   }
   // Orphan children (if any) at the end
@@ -419,6 +437,20 @@ export function ViewersManagement({ initialViewers }: { initialViewers: any[] })
                     {/* Name */}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
+                        {!viewer._isChild && viewer._childCount > 0 && (
+                          <button
+                            className="text-gray-400 hover:text-blue-500 flex-shrink-0 -ml-1 p-0.5 rounded hover:bg-blue-50 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleParentCollapsed(viewer.id);
+                            }}
+                            title={collapsedParentIds.has(viewer.id) ? 'Show klases' : 'Hide klases'}
+                          >
+                            {collapsedParentIds.has(viewer.id)
+                              ? <ChevronRight className="h-3.5 w-3.5" />
+                              : <ChevronDown className="h-3.5 w-3.5" />}
+                          </button>
+                        )}
                         {viewer._isChild
                           ? <School className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
                           : <Eye className="h-3.5 w-3.5 text-blue-400 flex-shrink-0" />}
@@ -427,6 +459,11 @@ export function ViewersManagement({ initialViewers }: { initialViewers: any[] })
                         </span>
                         {viewer._isChild && (
                           <span className="text-[10px] font-semibold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">Klase</span>
+                        )}
+                        {!viewer._isChild && viewer._childCount > 0 && (
+                          <span className="text-[10px] font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full">
+                            {viewer._childCount} klase{viewer._childCount !== 1 ? 's' : ''}
+                          </span>
                         )}
                         <ChevronRight className="h-3.5 w-3.5 text-gray-300 group-hover:text-blue-400 transition-colors" />
                       </div>
