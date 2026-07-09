@@ -8,6 +8,8 @@ import { Maximize, Play } from 'lucide-react';
 import { Model3D, Model3DHandle } from './model-3d';
 import { preloadTexture } from './model-3d';
 import { prefetchTextures } from '@/lib/texture-cache';
+import { getIsOnline, subscribeConnectivity } from '@/lib/connectivity-monitor';
+import { TEXTURE_POLL_INTERVAL_MS } from '@/lib/viewer-runtime-config';
 
 interface ModelCarouselProps {
   models: ViewerModelWithTexture[];
@@ -109,7 +111,12 @@ export function ModelCarousel({
       return;
     }
 
-    async function fetchAllTextures() {
+    async function fetchAllTextures(isBackgroundPoll: boolean) {
+      // Skip background polls while offline — avoid failed requests and
+      // retry loops draining performance on the TV.
+      if (isBackgroundPoll && !getIsOnline()) {
+        return;
+      }
       try {
         const response = await fetch(`/api/viewer-models-all-textures/${viewerId}`);
         if (response.ok) {
@@ -121,11 +128,22 @@ export function ModelCarousel({
       }
     }
 
-    fetchAllTextures();
+    fetchAllTextures(false);
 
-    // Poll for updates every 30 seconds
-    const interval = setInterval(fetchAllTextures, 30000);
-    return () => clearInterval(interval);
+    // Poll for updates in the background — this never reloads the page, it
+    // just silently swaps in new texture data.
+    const interval = setInterval(() => fetchAllTextures(true), TEXTURE_POLL_INTERVAL_MS);
+
+    // Resume immediately once connectivity is restored, instead of waiting
+    // for the next scheduled poll.
+    const unsubscribe = subscribeConnectivity((online) => {
+      if (online) fetchAllTextures(true);
+    });
+
+    return () => {
+      clearInterval(interval);
+      unsubscribe();
+    };
   }, [viewerId, settings.textureCycling.enabled]);
 
   // Build display queue: priority textures (6x), then all textures in cycle
@@ -200,6 +218,9 @@ export function ModelCarousel({
   // Runs whenever the display queue changes. Uses low concurrency (2) to stay responsive.
   useEffect(() => {
     if (!settings.textureCycling.enabled || displayQueue.length === 0) return;
+    // Don't attempt prefetching while offline — there's nothing to fetch and
+    // it would just generate failed network requests.
+    if (!getIsOnline()) return;
 
     // Abort any previous prefetch run
     if (prefetchAbortRef.current) {

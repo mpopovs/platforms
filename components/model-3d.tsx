@@ -6,6 +6,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import * as THREE from 'three';
 import { getModel, storeModel, getTexture, storeTexture } from '@/lib/texture-cache';
+import { getIsOnline } from '@/lib/connectivity-monitor';
 
 // ─── Module-level decoded-texture preload cache ───────────────────────────────
 // The carousel pre-decodes the next texture into a THREE.Texture while the
@@ -234,6 +235,14 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
             });
           }
         } else {
+          // Not cached. While offline, skip the network attempt entirely —
+          // it would just fail (or hang until a slow timeout) and log noise.
+          if (!getIsOnline()) {
+            console.warn('[Model3D] Offline and model not cached, skipping fetch:', modelUrl);
+            setIsLoading(false);
+            return;
+          }
+
           // Fetch from network and cache
           const response = await fetch(modelUrl);
           
@@ -415,6 +424,15 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
             if (!cancelled) setIsTextureReady(true);
           });
         } else {
+          // Not cached. While offline, skip the network attempt entirely — it
+          // would just fail and log noise; unblock rendering immediately so
+          // the model can still display without its texture.
+          if (!getIsOnline()) {
+            console.warn('[Texture] Offline and texture not cached, skipping fetch:', textureUrl);
+            if (!cancelled) setIsTextureReady(true);
+            return;
+          }
+
           console.log('[Texture] Not in cache, fetching from network:', textureUrl);
           const response = await fetch(textureUrl);
           if (cancelled) return;

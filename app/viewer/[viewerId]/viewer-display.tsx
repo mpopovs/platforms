@@ -11,6 +11,8 @@ import { ServiceWorkerRegistration } from '@/components/service-worker-registrat
 import { createClient } from '@/lib/supabase/client';
 import type { ViewerModelWithTexture, ViewerSettings } from '@/lib/types/viewer';
 import { cleanOldCache } from '@/lib/texture-cache';
+import { getIsOnline, startConnectivityMonitor, subscribeConnectivity } from '@/lib/connectivity-monitor';
+import { MODEL_POLL_INTERVAL_MS, PREVENTIVE_RELOAD_AFTER_MS, REFRESH_GATE_CHECK_INTERVAL_MS, isDaytime } from '@/lib/viewer-runtime-config';
 
 type ViewerConfig = {
   id: string;
@@ -145,6 +147,7 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
   const [contextLost, setContextLost] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const contextRecoveryTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const refetchModelsRef = useRef<() => void>(() => {});
   const supabase = createClient();
 
   // Clean old cached data on viewer startup (prevent quota issues)
@@ -195,11 +198,19 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
     };
   }, [viewerId]);
 
-  // Fetch models with textures
+  // Fetch models with textures (background-only updates — never a page reload)
   useEffect(() => {
     let hasModels = false;
 
-    async function fetchModels() {
+    async function fetchModels(isBackgroundPoll: boolean) {
+      // While offline, skip background polls entirely: no failed requests
+      // spamming the console, no retry loops draining performance on the TV.
+      // The initial (non-background) load still attempts once so cached
+      // Supabase/SW responses can populate the UI.
+      if (isBackgroundPoll && !getIsOnline()) {
+        return;
+      }
+
       try {
         console.log('[viewer] fetching models for', viewerId);
         const response = await fetch(`/api/viewer-models/${viewerId}`);
@@ -231,60 +242,48 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
       }
     }
 
-    fetchModels();
+    refetchModelsRef.current = () => fetchModels(true);
 
-    // Poll for updates every 30 seconds
+    fetchModels(false);
+
+    // Poll for updates in the background — this silently swaps in new data
+    // without ever reloading the page, so it's safe to run at any time of day.
     const interval = setInterval(() => {
       // During polling, we already have models so errors won't break display
       hasModels = true;
-      fetchModels();
-    }, 30000);
+      fetchModels(true);
+    }, MODEL_POLL_INTERVAL_MS);
     
     return () => clearInterval(interval);
   }, [viewerId]);
 
-  // Handle online/offline events - refetch data when browser reconnects
+  // Track real connectivity (navigator.onLine + same-origin probe, since
+  // navigator.onLine alone is unreliable on Tizen/Smart TV browsers).
+  // While offline, background update checks are fully paused; they resume
+  // automatically as soon as connectivity is restored.
   useEffect(() => {
-    // Set initial online status
-    setIsOnline(navigator.onLine);
+    startConnectivityMonitor();
+    setIsOnline(getIsOnline());
 
-    const handleOnline = () => {
-      console.log('Browser reconnected, refetching data...');
-      setIsOnline(true);
-      setLoading(true);
-      fetch(`/api/viewer-models/${viewerId}`)
-        .then(response => {
-          if (response.ok) {
-            return response.json();
-          }
-          throw new Error('Failed to reload models');
-        })
-        .then(data => {
-          setModels(data.models || []);
-          setError('');
-          setLoading(false);
-        })
-        .catch(err => {
-          console.error('Error refetching models:', err);
-          setError('Failed to reload 3D models');
-          setLoading(false);
-        });
-    };
+    const unsubscribe = subscribeConnectivity((online) => {
+      setIsOnline(online);
+      if (online) {
+        console.log('[viewer] Connectivity restored — resuming background update checks');
+        refetchModelsRef.current();
+      } else {
+        console.log('[viewer] Offline — pausing all background update checks');
+      }
+    });
 
-    const handleOffline = () => {
-      console.log('Browser went offline');
-      setIsOnline(false);
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
+    return unsubscribe;
   }, [viewerId]);
 
-  // Handle WebGL context loss and restore
+  // Handle WebGL context loss and restore.
+  // NOTE: This reload is intentionally exempt from the daytime no-reload rule.
+  // A lost WebGL context already means the display is showing nothing/broken
+  // (the "Recovering display..." overlay below), so there's no flash to avoid
+  // — reloading immediately is strictly better than leaving a dead canvas up
+  // for hours until night.
   useEffect(() => {
     const handleContextLost = (e: Event) => {
       e.preventDefault();
@@ -314,13 +313,34 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
       canvas.addEventListener('webglcontextrestored', handleContextRestored);
     }
 
-    // Preventive reload after 12 hours to avoid memory leaks
-    // Set sessionStorage flag so the page re-enters fullscreen automatically after reload
-    const preventiveReload = setTimeout(() => {
-      console.log('Preventive reload after 12 hours of operation');
+    // Preventive reload after ~12 hours to avoid memory leaks. This must NEVER
+    // happen during the configured daytime window (see requirement: the
+    // visible page must not reload while people are around to see it).
+    // Set sessionStorage flag so the page re-enters fullscreen automatically after reload.
+    let reloadDue = false;
+    let gateInterval: ReturnType<typeof setInterval> | null = null;
+
+    const reloadIfNightOrDefer = () => {
+      if (!reloadDue) return;
+      if (isDaytime()) {
+        console.log('[viewer] Preventive reload is due but deferred — daytime window active, will retry later');
+        return;
+      }
+      console.log('[viewer] Preventive reload after 12h of operation (night window, safe to refresh)');
+      if (gateInterval) clearInterval(gateInterval);
       sessionStorage.setItem('requestFullscreenOnLoad', '1');
       window.location.reload();
-    }, 12 * 60 * 60 * 1000); // 12 hours
+    };
+
+    const preventiveReload = setTimeout(() => {
+      reloadDue = true;
+      reloadIfNightOrDefer();
+      // Still daytime (or otherwise deferred) — keep re-checking until it's
+      // safe to reload without ever flashing/interrupting the display.
+      if (reloadDue) {
+        gateInterval = setInterval(reloadIfNightOrDefer, REFRESH_GATE_CHECK_INTERVAL_MS);
+      }
+    }, PREVENTIVE_RELOAD_AFTER_MS);
 
     return () => {
       if (canvas) {
@@ -331,6 +351,7 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
         clearTimeout(contextRecoveryTimerRef.current);
       }
       clearTimeout(preventiveReload);
+      if (gateInterval) clearInterval(gateInterval);
     };
   }, []);
 
