@@ -8,7 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Eye, Plus, Copy, Trash2, ExternalLink, ChevronRight, ChevronDown, Box, Images, Loader2, RefreshCw, School } from 'lucide-react';
+import { Eye, Plus, Copy, Trash2, ExternalLink, ChevronRight, ChevronDown, Box, Images, Loader2, RefreshCw, School, LayoutGrid } from 'lucide-react';
 import Link from 'next/link';
 import {
   createViewerAction,
@@ -392,7 +392,15 @@ export function ViewersManagement({ initialViewers }: { initialViewers: any[] })
             )}
           </p>
         </div>
-        <CreateViewerDialog onSuccess={handleCreate} />
+        <div className="flex items-center gap-2">
+          <Button variant="outline" asChild>
+            <Link href="/admin/exhibition">
+              <LayoutGrid className="h-4 w-4 mr-2" />
+              Exhibition Grid
+            </Link>
+          </Button>
+          <CreateViewerDialog onSuccess={handleCreate} />
+        </div>
       </div>
 
       {viewers.length === 0 ? (
