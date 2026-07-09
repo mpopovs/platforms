@@ -14,6 +14,19 @@ interface UseExhibitionDataResult {
 }
 
 /**
+ * Cheap structural equality check for the plain-JSON model+texture rows this
+ * endpoint returns. Used to avoid replacing a model's object identity in
+ * state when a poll returns byte-for-byte the same data — without this,
+ * every 30s poll would create a brand-new `modelsById` object even when
+ * nothing changed, cascading into unnecessary re-renders and (previously) a
+ * periodic full-screen "flash" back to the preload screen.
+ */
+function sameModel(a: ViewerModelWithAllTextures | undefined, b: ViewerModelWithAllTextures): boolean {
+  if (!a) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
  * Fetches (and live-polls) model+texture data for every viewer referenced by
  * an exhibition config, via the same public endpoint the single-model viewer
  * already uses for texture cycling (/api/viewer-models-all-textures/[viewerId]).
@@ -54,9 +67,17 @@ export function useExhibitionData(
         if (cancelled) return;
         const models = (data.models || []) as ViewerModelWithAllTextures[];
         setModelsById((prev) => {
+          let changed = false;
           const next = { ...prev };
-          for (const m of models) next[m.id] = m;
-          return next;
+          for (const m of models) {
+            if (!sameModel(prev[m.id], m)) {
+              next[m.id] = m;
+              changed = true;
+            }
+          }
+          // Returning the SAME reference when nothing changed lets React bail
+          // out of the re-render entirely (Object.is check on state setters).
+          return changed ? next : prev;
         });
         setFailedViewerIds((prev) => prev.filter((id) => id !== viewerId));
       } catch (err) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ExhibitionConfig, ExhibitionCellConfig } from '@/lib/types/exhibition';
 import type { ViewerModelWithAllTextures } from '@/lib/types/viewer';
 import { getModel, storeModel, getTexture, storeTexture } from '@/lib/texture-cache';
@@ -10,6 +10,7 @@ import { resolveCellTexture } from './use-cell-texture';
 export interface ExhibitionPreloadProgress {
   loaded: number;
   total: number;
+  /** Becomes true once the initial preload finishes and NEVER reverts to false afterward. */
   done: boolean;
 }
 
@@ -32,6 +33,12 @@ export function useExhibitionPreload(
   dataLoading: boolean
 ): ExhibitionPreloadProgress {
   const [progress, setProgress] = useState<ExhibitionPreloadProgress>({ loaded: 0, total: 0, done: false });
+  // Latch: once the grid has been shown once, later effect re-runs (e.g. a
+  // new upload arriving mid-show causes modelsById to change) must never
+  // flip `done` back to false — that would hide the already-visible grid
+  // behind the full-screen loading spinner again, which is exactly the
+  // "screen randomly refreshes" bug this guards against.
+  const hasCompletedOnceRef = useRef(false);
 
   useEffect(() => {
     if (!config || dataLoading) return;
@@ -54,11 +61,14 @@ export function useExhibitionPreload(
 
       let loaded = 0;
       const total = modelUrlToId.size + textureJobs.length;
-      setProgress({ loaded, total, done: false });
+      const alreadyCompletedOnce = hasCompletedOnceRef.current;
+      if (!alreadyCompletedOnce) setProgress({ loaded, total, done: false });
 
       const bump = () => {
         loaded += 1;
-        if (!cancelled) setProgress({ loaded, total, done: false });
+        // Only drive the blocking progress UI on the very first run — later
+        // background top-ups warm the cache silently.
+        if (!cancelled && !alreadyCompletedOnce) setProgress({ loaded, total, done: false });
       };
 
       async function preloadModel(url: string, modelId: string) {
@@ -118,7 +128,10 @@ export function useExhibitionPreload(
       }
       await Promise.all(Array.from({ length: concurrency }, worker));
 
-      if (!cancelled) setProgress({ loaded: total, total, done: true });
+      if (!cancelled) {
+        hasCompletedOnceRef.current = true;
+        setProgress({ loaded: total, total, done: true });
+      }
     }
 
     run();

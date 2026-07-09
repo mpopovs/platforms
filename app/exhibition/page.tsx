@@ -5,7 +5,7 @@ import { ExhibitionGrid } from '@/components/exhibition/exhibition-grid';
 import { useExhibitionData } from '@/components/exhibition/use-exhibition-data';
 import { useExhibitionPreload } from '@/components/exhibition/use-exhibition-preload';
 import type { ExhibitionConfig } from '@/lib/types/exhibition';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Maximize, Minimize } from 'lucide-react';
 
 const CURSOR_IDLE_HIDE_MS = 3000;
 
@@ -29,6 +29,7 @@ export default function ExhibitionPage({
   const [paused, setPaused] = useState(false);
   const [forceAdvanceSignal, setForceAdvanceSignal] = useState(0);
   const [cursorHidden, setCursorHidden] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const cursorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Load the config by token ──────────────────────────────────────────
@@ -72,6 +73,17 @@ export default function ExhibitionPage({
     } else {
       (document.exitFullscreen || (document as any).webkitExitFullscreen)?.call(document);
     }
+  }, []);
+
+  // ── Track real fullscreen state (so the button icon/label stay accurate
+  // even when fullscreen is toggled via the browser's own UI/Escape key) ──
+  useEffect(() => {
+    function onFullscreenChange() {
+      setIsFullscreen(!!document.fullscreenElement);
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    onFullscreenChange();
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
   }, []);
 
   // ── Hotkeys: space = pause/resume rotation, n = force-next-texture, f = fullscreen ──
@@ -135,6 +147,31 @@ export default function ExhibitionPage({
         paused={paused}
         forceAdvanceSignal={forceAdvanceSignal}
       />
+      <button
+        onClick={toggleFullscreen}
+        title={isFullscreen ? 'Exit fullscreen (F)' : 'Enter fullscreen (F)'}
+        style={{
+          position: 'fixed',
+          bottom: 20,
+          right: 20,
+          zIndex: 50,
+          width: 44,
+          height: 44,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: 8,
+          border: '1px solid rgba(255,255,255,0.25)',
+          background: 'rgba(0,0,0,0.55)',
+          color: '#fff',
+          cursor: 'pointer',
+          opacity: cursorHidden ? 0 : 1,
+          pointerEvents: cursorHidden ? 'none' : 'auto',
+          transition: 'opacity 0.3s ease',
+        }}
+      >
+        {isFullscreen ? <Minimize style={{ width: 20, height: 20 }} /> : <Maximize style={{ width: 20, height: 20 }} />}
+      </button>
     </div>
   );
 }

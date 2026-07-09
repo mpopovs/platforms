@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Copy, Loader2, Save, Trash2, RefreshCw, Download, Upload, X } from 'lucide-react';
+import { Copy, Loader2, Save, Trash2, RefreshCw, Download, Upload, X, Plus, ExternalLink, Pencil } from 'lucide-react';
 import {
   GRID_PRESETS,
   createDefaultCellConfig,
@@ -198,13 +198,14 @@ export function ExhibitionCuration({
     setCells([]);
   }
 
-  async function handleDelete() {
-    if (!activeConfigId) return;
-    if (!confirm(`Delete exhibition "${name}"? This cannot be undone.`)) return;
-    const result = await deleteExhibitionConfigAction(activeConfigId);
+  async function handleDelete(configId: string = activeConfigId ?? '') {
+    if (!configId) return;
+    const target = configs.find((c) => c.id === configId);
+    if (!confirm(`Delete exhibition "${target?.name ?? name}"? This cannot be undone.`)) return;
+    const result = await deleteExhibitionConfigAction(configId);
     if (result.success) {
-      setConfigs((prev) => prev.filter((c) => c.id !== activeConfigId));
-      newConfig();
+      setConfigs((prev) => prev.filter((c) => c.id !== configId));
+      if (configId === activeConfigId) newConfig();
     } else {
       setError(result.error || 'Failed to delete');
     }
@@ -258,20 +259,9 @@ export function ExhibitionCuration({
           <p className="text-sm text-gray-500 mt-0.5">Curate the multi-model show display for the art show.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <select
-            className="text-sm border border-gray-300 rounded-md px-2 py-1.5 bg-white"
-            value={activeConfigId ?? ''}
-            onChange={(e) => {
-              const cfg = configs.find((c) => c.id === e.target.value);
-              if (cfg) loadConfig(cfg);
-              else newConfig();
-            }}
-          >
-            <option value="">New exhibition…</option>
-            {configs.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+          <Button variant="outline" size="sm" onClick={newConfig}>
+            <Plus className="h-3.5 w-3.5 mr-1.5" /> New Exhibition
+          </Button>
           <Button variant="outline" size="sm" onClick={exportJson}>
             <Download className="h-3.5 w-3.5 mr-1.5" /> Export
           </Button>
@@ -289,7 +279,7 @@ export function ExhibitionCuration({
             </Button>
           </label>
           {activeConfigId && (
-            <Button variant="outline" size="sm" onClick={handleDelete} className="text-red-600 hover:text-red-700">
+            <Button variant="outline" size="sm" onClick={() => handleDelete()} className="text-red-600 hover:text-red-700">
               <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete
             </Button>
           )}
@@ -303,6 +293,58 @@ export function ExhibitionCuration({
       {error && (
         <div className="p-3 text-sm text-red-600 bg-red-50 rounded-md border border-red-200">{error}</div>
       )}
+
+      <Card>
+        <CardContent className="pt-6">
+          <p className="text-sm font-semibold text-gray-700 mb-3">
+            Saved Exhibitions{configs.length > 0 && <span className="text-gray-400 font-normal"> ({configs.length})</span>}
+          </p>
+          {configs.length === 0 ? (
+            <p className="text-sm text-gray-400">No exhibitions saved yet — build one below and click Save.</p>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {configs.map((c) => {
+                const url = `${protocol}://${rootDomain}/exhibition?token=${c.accessToken}`;
+                const isActive = activeConfigId === c.id;
+                return (
+                  <div
+                    key={c.id}
+                    className={`flex items-center gap-3 py-2.5 flex-wrap rounded-md ${isActive ? 'bg-blue-50/60 -mx-2 px-2' : ''}`}
+                  >
+                    <div className="min-w-[140px]">
+                      <p className="text-sm font-medium text-gray-900">{c.name}</p>
+                      <p className="text-xs text-gray-400">{c.cells.length} cell{c.cells.length !== 1 ? 's' : ''}</p>
+                    </div>
+                    <code className="text-xs text-gray-500 flex-1 min-w-[180px] truncate">{url}</code>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(url)} title="Copy show URL">
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="sm" asChild title="Open show URL">
+                        <a href={url} target="_blank" rel="noopener noreferrer">
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => loadConfig(c)} title="Edit">
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDelete(c.id)}
+                        className="text-red-500 hover:text-red-600"
+                        title="Delete"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="pt-6 space-y-4">
