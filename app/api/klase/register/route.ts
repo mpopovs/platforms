@@ -236,7 +236,7 @@ export async function POST(request: NextRequest) {
       pageContents.unshift(instrPageContent);
     }
 
-    const worksheetHtml = wrapWorksheetPages(pageContents.join('\n'));
+    const worksheetHtml = wrapWorksheetPages(pageContents);
 
     // Fire-and-forget: send PDF to teacher's email (does not block the response)
     if (teacher_email?.trim()) {

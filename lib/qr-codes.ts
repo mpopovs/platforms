@@ -625,21 +625,57 @@ export function generateWorksheetPageContent(
 }
 
 /**
- * Wrap multiple worksheet page contents into a single printable HTML document.
- * Each page content should come from generateWorksheetPageContent().
+ * Wrap worksheet contents into portrait A4 sheets with two A5-landscape worksheets
+ * per sheet. Teacher instruction pages retain their configured full-page layout.
  */
-export function wrapWorksheetPages(pagesHtml: string): string {
+export function wrapWorksheetPages(pagesHtml: string[]): string {
+  const documentPages: string[] = [];
+  let worksheetPanels: string[] = [];
+
+  const appendWorksheetSheet = () => {
+    if (worksheetPanels.length === 0) return;
+    documentPages.push(`<div class="worksheet-sheet">
+  ${worksheetPanels.map(page => `<div class="worksheet-panel">${page}</div>`).join('\n  ')}
+</div>`);
+    worksheetPanels = [];
+  };
+
+  for (const page of pagesHtml) {
+    if (page.includes('instr-page')) {
+      appendWorksheetSheet();
+      documentPages.push(page);
+      continue;
+    }
+
+    worksheetPanels.push(page);
+    if (worksheetPanels.length === 2) appendWorksheetSheet();
+  }
+  appendWorksheetSheet();
+
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
   <title>Classroom Worksheets</title>
   <style>
-    @page { size: A4 landscape; margin: 0; }
+    @page { size: A4 portrait; margin: 0; }
+    @page landscape-instr { size: A4 landscape; margin: 0; }
     body { margin: 0; padding: 0; font-family: Arial, sans-serif; background: white; }
     .template {
       width: 297mm; height: 210mm; padding: 15mm; box-sizing: border-box;
       position: relative; page-break-after: always;
+    }
+    .worksheet-sheet {
+      width: 210mm; height: 297mm; box-sizing: border-box;
+      display: flex; flex-direction: column; overflow: hidden;
+      break-after: page; page-break-after: always;
+    }
+    .worksheet-panel { width: 210mm; height: 148.5mm; flex: none; overflow: hidden; }
+    .worksheet-panel > .template,
+    .worksheet-panel > .ws-page {
+      width: 297mm; height: 210mm;
+      transform: scale(0.7070707); transform-origin: top left;
+      break-after: auto; page-break-after: auto;
     }
     .header { background: #333; color: white; padding: 8px; border-radius: 6px; text-align: center; }
     .header h1 { font-size: 12pt; margin: 0 0 3px 0; color: white; }
@@ -701,11 +737,12 @@ export function wrapWorksheetPages(pagesHtml: string): string {
     .instr-teacher-survey .ts-hint { font-size: 6pt; color: #555; text-align: center; font-style: italic; margin: 0; padding: 0; }
     /* Portrait instruction page */
     @page portrait-instr { size: A4 portrait; margin: 0; }
+    .instr-page:not(.instr-portrait) { page: landscape-instr; }
     .instr-portrait { page: portrait-instr; width: 210mm; height: 297mm; }
   </style>
 </head>
 <body>
-${pagesHtml}
+${documentPages.join('\n')}
 </body>
 </html>`.trim();
 }
