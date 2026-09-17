@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { ExhibitionCellConfig } from '@/lib/types/exhibition';
+import { cyclingUsesInterval, nextTextureChangeDelayMs, type ExhibitionCellConfig } from '@/lib/types/exhibition';
 import type { ViewerModelWithAllTextures, ModelTextureRow } from '@/lib/types/viewer';
 import { getStorageThumbnailUrl } from '@/lib/storage';
 
@@ -72,20 +72,33 @@ interface UseCellTextureOptions {
   textureQuality: number;
   /** Bump this number to force an immediate advance to the next texture ('user-uploads' cells only). */
   forceAdvanceSignal?: number;
+  /** Pick each wait randomly around the interval (see nextTextureChangeDelayMs) instead of a fixed period. */
+  randomTiming?: boolean;
 }
 
 /** Live version of resolveCellTexture(): drives cycle/random/newest-first swaps over time for 'user-uploads' cells. */
-export function useCellTexture({ cell, model, textureMaxDim, textureQuality, forceAdvanceSignal = 0 }: UseCellTextureOptions): CellTextureResult {
+export function useCellTexture({
+  cell,
+  model,
+  textureMaxDim,
+  textureQuality,
+  forceAdvanceSignal = 0,
+  randomTiming = false,
+}: UseCellTextureOptions): CellTextureResult {
   const [cycleIndex, setCycleIndex] = useState(0);
   const newestId = model ? sortNewestFirst(model.textures)[0]?.id : undefined;
 
-  // Drive cycle/random swaps on an interval for 'user-uploads' cells.
+  // Drive cycle/random swaps on a timer for 'user-uploads' cells. Each wait is
+  // scheduled separately so random timing can vary it from one change to the next.
   useEffect(() => {
     if (cell.textureMode !== 'user-uploads') return;
-    if (cell.cycling.strategy === 'newest-first') return; // handled by the effect below instead
-    const intervalMs = Math.max(1, cell.cycling.intervalSec) * 1000;
+    if (!cyclingUsesInterval(cell.cycling.strategy)) return; // 'newest-first' is handled by the effect below instead
 
-    const id = setInterval(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const scheduleNext = () => {
+      timer = setTimeout(advance, nextTextureChangeDelayMs(cell.cycling.intervalSec, randomTiming));
+    };
+    const advance = () => {
       setCycleIndex((prev) => {
         const pool = model ? sortNewestFirst(model.textures) : [];
         if (pool.length === 0) return prev;
@@ -98,11 +111,13 @@ export function useCellTexture({ cell, model, textureMaxDim, textureQuality, for
         // 'cycle': advance sequentially through the newest-first-sorted pool
         return (prev + 1) % pool.length;
       });
-    }, intervalMs);
+      scheduleNext();
+    };
 
-    return () => clearInterval(id);
+    scheduleNext();
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cell.textureMode, cell.cycling.strategy, cell.cycling.intervalSec, model]);
+  }, [cell.textureMode, cell.cycling.strategy, cell.cycling.intervalSec, randomTiming, model]);
 
   // 'newest-first': jump to index 0 the moment a new upload arrives for this model.
   useEffect(() => {

@@ -84,6 +84,14 @@ interface Model3DProps {
   onAnimationStateChange?: (hasAnimations: boolean, isPlaying: boolean) => void;
   onLoadingChange?: (isLoading: boolean) => void;
   disableCache?: boolean; // Skip IndexedDB caching (e.g., for upload previews)
+  /**
+   * When the texture URL changes but the model stays the same, keep showing the
+   * current texture until the new one has loaded instead of hiding the model
+   * meanwhile. Used by the exhibition grid, where textures swap in place.
+   */
+  keepTextureWhileLoading?: boolean;
+  /** Called right after a loaded texture has been put on the model (before the next frame draws it). */
+  onTextureApplied?: () => void;
 }
 
 /**
@@ -99,12 +107,19 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
   textureId = '',
   onAnimationStateChange,
   onLoadingChange,
-  disableCache = false
+  disableCache = false,
+  keepTextureWhileLoading = false,
+  onTextureApplied
 }, ref) => {
   const meshRef = useRef<THREE.Group>(null);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
   const animationsRef = useRef<THREE.AnimationClip[]>([]);
   const hasPlayedOnceRef = useRef(false);
+  // keepTextureWhileLoading: textures replaced by a URL change but still on the
+  // model until their replacement is applied (disposed then, or on unmount).
+  const displacedTexturesRef = useRef<THREE.Texture[]>([]);
+  // Model id the currently applied texture was put on.
+  const appliedTextureModelIdRef = useRef<string | null>(null);
   
   const [model, setModel] = useState<THREE.Group | null>(null);
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
@@ -343,10 +358,18 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
 
   // Load texture with IndexedDB caching
   useEffect(() => {
-    // Always clear the previous texture when the URL changes (including when null).
-    // Without this, the old texture stays in state and gets applied to the next model
-    // while the new texture loads asynchronously — causing one texture to appear on all models.
-    setTexture(null);
+    // Same model, new texture: leave the current one showing until the new one is ready.
+    const holdCurrentTexture =
+      keepTextureWhileLoading && !!textureUrl && texture !== null && appliedTextureModelIdRef.current === modelId;
+
+    if (!holdCurrentTexture) {
+      // Always clear the previous texture when the URL changes (including when null).
+      // Without this, the old texture stays in state and gets applied to the next model
+      // while the new texture loads asynchronously — causing one texture to appear on all models.
+      setTexture(null);
+      displacedTexturesRef.current.forEach((t) => t.dispose());
+      displacedTexturesRef.current = [];
+    }
 
     if (!textureUrl) {
       // No texture needed — mark as ready immediately so model renders without delay
@@ -356,7 +379,7 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
     }
 
     // New URL coming in — hide the model until this texture finishes loading
-    setIsTextureReady(false);
+    if (!holdCurrentTexture) setIsTextureReady(false);
 
     // Skip invalid URLs (like local://indexeddb placeholder)
     if (textureUrl.startsWith('local://') || textureUrl === 'local://indexeddb') {
@@ -496,11 +519,19 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
       cancelled = true;
       // Dispose the texture loaded by this specific effect run (not stale closure state).
       if (loadedTexture) {
-        loadedTexture.dispose();
+        // It may still be on screen while the next texture loads — dispose it once replaced.
+        if (keepTextureWhileLoading) displacedTexturesRef.current.push(loadedTexture);
+        else loadedTexture.dispose();
         loadedTexture = null;
       }
     };
   }, [textureUrl, modelId, textureId]);
+
+  // Declared after the texture effect so, on unmount, this runs after its cleanup.
+  useEffect(() => () => {
+    displacedTexturesRef.current.forEach((t) => t.dispose());
+    displacedTexturesRef.current = [];
+  }, []);
 
   // Apply texture to model
   useEffect(() => {
@@ -513,6 +544,14 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
             material.needsUpdate = true;
           }
         }
+      });
+      appliedTextureModelIdRef.current = modelId;
+      onTextureApplied?.();
+      // Textures held on screen while this one loaded can go now.
+      displacedTexturesRef.current = displacedTexturesRef.current.filter((t) => {
+        if (t === texture) return true;
+        t.dispose();
+        return false;
       });
     }
   }, [model, texture]);

@@ -251,6 +251,78 @@ export async function cleanOldCache(daysToKeep: number = 7): Promise<void> {
 }
 
 /**
+ * Marks a cached texture/model as still in use by moving its timestamp to now,
+ * so age-based cleanup (cleanOldCache, deleteStaleCachedAssets) keeps it.
+ * Skips the rewrite if it was refreshed within `minIntervalMs` (re-putting a
+ * record re-stores its blob, so this shouldn't happen on every check).
+ * Resolves false if the URL isn't cached.
+ */
+export async function touchCachedAsset(kind: 'texture' | 'model', url: string, minIntervalMs: number): Promise<boolean> {
+  const db = await openDB();
+  const storeName = kind === 'texture' ? TEXTURE_STORE : MODEL_STORE;
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([storeName], 'readwrite');
+    const store = transaction.objectStore(storeName);
+    let found = false;
+
+    const request = store.get(url);
+    request.onsuccess = () => {
+      const record = request.result as CachedTexture | CachedModel | undefined;
+      if (!record) return;
+      found = true;
+      if (Date.now() - record.timestamp >= minIntervalMs) {
+        store.put({ ...record, timestamp: Date.now() });
+      }
+    };
+
+    transaction.oncomplete = () => {
+      db.close();
+      resolve(found);
+    };
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+/**
+ * Deletes cached textures and models belonging to `modelIds` that are older
+ * than `maxAgeMs` and not listed in `keepUrls` — e.g. removed uploads, or
+ * resized variants nothing requests any more. Returns how many were deleted.
+ */
+export async function deleteStaleCachedAssets(modelIds: string[], keepUrls: Set<string>, maxAgeMs: number): Promise<number> {
+  const db = await openDB();
+  const cutoff = Date.now() - maxAgeMs;
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([TEXTURE_STORE, MODEL_STORE], 'readwrite');
+    let deleted = 0;
+
+    for (const storeName of [TEXTURE_STORE, MODEL_STORE]) {
+      const index = transaction.objectStore(storeName).index('modelId');
+      for (const modelId of modelIds) {
+        const cursorRequest = index.openCursor(IDBKeyRange.only(modelId));
+        cursorRequest.onsuccess = () => {
+          const cursor = cursorRequest.result;
+          if (!cursor) return;
+          const record = cursor.value as CachedTexture | CachedModel;
+          if (record.timestamp < cutoff && !keepUrls.has(record.url)) {
+            cursor.delete();
+            deleted++;
+          }
+          cursor.continue();
+        };
+      }
+    }
+
+    transaction.oncomplete = () => {
+      db.close();
+      resolve(deleted);
+    };
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+/**
  * Background-prefetch a list of textures into IndexedDB.
  * Already-cached URLs are skipped. Downloads are throttled to
  * CONCURRENCY=2 to avoid overwhelming Samsung Frame TV memory/network.

@@ -62,6 +62,13 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Pages that show live, editable data (admin/curation, login) must always
+// come from the network — serving a cached copy first would show stale data
+// after saving and refreshing. Only display pages are cached for offline boot.
+function isLiveDataPage(url) {
+  return url.pathname.startsWith('/admin') || url.pathname.startsWith('/login');
+}
+
 function isStaticBuildAsset(url) {
   return (
     url.pathname.startsWith('/_next/static/') ||
@@ -137,7 +144,10 @@ self.addEventListener('fetch', (event) => {
   // (JS/CSS/fonts/icons): cache-first with background revalidation. This is
   // what allows the viewer to boot instantly with no network connection at
   // all, showing the last successfully loaded page/shell.
-  if (url.origin === self.location.origin && (event.request.mode === 'navigate' || isStaticBuildAsset(url))) {
+  if (
+    url.origin === self.location.origin &&
+    ((event.request.mode === 'navigate' && !isLiveDataPage(url)) || isStaticBuildAsset(url))
+  ) {
     event.respondWith(
       caches.open(CACHE_NAME).then((cache) =>
         cache.match(event.request).then((cachedResponse) => {
@@ -188,6 +198,23 @@ self.addEventListener('message', (event) => {
     );
   }
   
+  // A display page asks for itself and the scripts/styles it loaded to be
+  // cached right away, so it can boot offline even if it has only been opened
+  // once (normally the page is only cached on the visit after the SW installs).
+  if (event.data.type === 'CACHE_URLS' && Array.isArray(event.data.urls)) {
+    event.waitUntil(
+      caches.open(CACHE_NAME).then((cache) =>
+        Promise.all(
+          event.data.urls.map((url) =>
+            fetch(url)
+              .then((response) => (response.ok ? cache.put(url, response) : undefined))
+              .catch(() => {})
+          )
+        )
+      )
+    );
+  }
+
   if (event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }

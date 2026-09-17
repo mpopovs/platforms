@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -15,7 +15,29 @@ import {
   type GridLayout,
   type TextureMode,
   type TextureCycleStrategy,
+  type WaterfallConfig,
+  type TextureChangeBlinkConfig,
+  DEFAULT_BACKGROUND_COLOR,
   DEFAULT_EXHIBITION_TUNABLES,
+  DEFAULT_TEXTURE_CHANGE_BLINK,
+  TEXTURE_CHANGE_BLINK_FRAMES_MAX,
+  TEXTURE_CHANGE_BLINK_FRAMES_MIN,
+  DEFAULT_MODEL_SCALE,
+  DEFAULT_WATERFALL_CONFIG,
+  MODEL_SCALE_MAX,
+  MODEL_SCALE_MIN,
+  WATERFALL_LOOP_GAP_MAX,
+  WATERFALL_SPEED_MAX,
+  WATERFALL_SPEED_MIN,
+  normalizeBackgroundColor,
+  normalizeModelScale,
+  normalizeRandomTextureTiming,
+  normalizeShowConnectionIndicator,
+  normalizeTextureChangeBlink,
+  normalizeWaterfallConfig,
+  cyclingUsesInterval,
+  waterfallLoopPeriod,
+  RANDOM_TEXTURE_TIMING_SPREAD,
 } from '@/lib/types/exhibition';
 import {
   createExhibitionConfigAction,
@@ -24,6 +46,7 @@ import {
   regenerateExhibitionTokenAction,
 } from '@/app/actions';
 import { ExhibitionGrid } from '@/components/exhibition/exhibition-grid';
+import { LiveConnectionIndicator } from '@/components/exhibition/connection-indicator';
 import { useExhibitionData } from '@/components/exhibition/use-exhibition-data';
 import { rootDomain, protocol } from '@/lib/utils';
 
@@ -59,6 +82,15 @@ const PRESET_LABELS: Record<GridPresetKey, string> = {
   'hero-plus-9': 'Hero + 9',
 };
 
+function formatWaterfallLoop({ speed, loopGap }: WaterfallConfig): string {
+  const seconds = (waterfallLoopPeriod(loopGap) * 100) / speed;
+  return `one loop every ${seconds >= 10 ? Math.round(seconds) : seconds.toFixed(1)}s`;
+}
+
+function formatBlinkLength(frames: number): string {
+  return `${frames} frame${frames === 1 ? '' : 's'} (≈${Math.round((frames * 1000) / 60)} ms at 60 fps)`;
+}
+
 function allModelsFlat(viewers: BrowserViewer[]): Array<BrowserModel & { viewerName: string }> {
   return viewers.flatMap((v) => v.models.map((m) => ({ ...m, viewerName: v.name })));
 }
@@ -77,6 +109,12 @@ export function ExhibitionCuration({
   const [presetKey, setPresetKey] = useState<GridPresetKey>('2x2');
   const [layout, setLayout] = useState<GridLayout>(GRID_PRESETS['2x2']);
   const [cells, setCells] = useState<ExhibitionCellConfig[]>([]);
+  const [modelScale, setModelScale] = useState(DEFAULT_MODEL_SCALE);
+  const [waterfall, setWaterfall] = useState<WaterfallConfig>(DEFAULT_WATERFALL_CONFIG);
+  const [showConnectionIndicator, setShowConnectionIndicator] = useState(true);
+  const [backgroundColor, setBackgroundColor] = useState(DEFAULT_BACKGROUND_COLOR);
+  const [textureChangeBlink, setTextureChangeBlink] = useState<TextureChangeBlinkConfig>(DEFAULT_TEXTURE_CHANGE_BLINK);
+  const [randomTextureTiming, setRandomTextureTiming] = useState(false);
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null);
   const [texturesByModel, setTexturesByModel] = useState<Record<string, ModelTextureOption[]>>({});
   const [saving, setSaving] = useState(false);
@@ -97,11 +135,29 @@ export function ExhibitionCuration({
       layout,
       cells,
       tunables: DEFAULT_EXHIBITION_TUNABLES,
+      modelScale,
+      waterfall,
+      showConnectionIndicator,
+      backgroundColor,
+      textureChangeBlink,
+      randomTextureTiming,
       accessToken: accessToken ?? '',
       createdAt: 0,
       updatedAt: 0,
     }),
-    [activeConfigId, name, layout, cells, accessToken]
+    [
+      activeConfigId,
+      name,
+      layout,
+      cells,
+      modelScale,
+      waterfall,
+      showConnectionIndicator,
+      backgroundColor,
+      textureChangeBlink,
+      randomTextureTiming,
+      accessToken,
+    ]
   );
 
   function applyPreset(key: GridPresetKey) {
@@ -153,7 +209,17 @@ export function ExhibitionCuration({
     setError(null);
     try {
       if (activeConfigId) {
-        const result = await updateExhibitionConfigAction(activeConfigId, { name, layout, cells });
+        const result = await updateExhibitionConfigAction(activeConfigId, {
+          name,
+          layout,
+          cells,
+          modelScale,
+          waterfall,
+          showConnectionIndicator,
+          backgroundColor,
+          textureChangeBlink,
+          randomTextureTiming,
+        });
         if (!result.success || !result.config) {
           setError(result.error || 'Failed to save');
           return;
@@ -161,7 +227,17 @@ export function ExhibitionCuration({
         setConfigs((prev) => prev.map((c) => (c.id === activeConfigId ? result.config! : c)));
         setAccessToken(result.config.accessToken);
       } else {
-        const result = await createExhibitionConfigAction({ name, layout, cells });
+        const result = await createExhibitionConfigAction({
+          name,
+          layout,
+          cells,
+          modelScale,
+          waterfall,
+          showConnectionIndicator,
+          backgroundColor,
+          textureChangeBlink,
+          randomTextureTiming,
+        });
         if (!result.success || !result.config) {
           setError(result.error || 'Failed to save');
           return;
@@ -181,6 +257,12 @@ export function ExhibitionCuration({
     setName(config.name);
     setLayout(config.layout);
     setCells(config.cells);
+    setModelScale(config.modelScale);
+    setWaterfall(config.waterfall);
+    setShowConnectionIndicator(config.showConnectionIndicator);
+    setBackgroundColor(config.backgroundColor);
+    setTextureChangeBlink(config.textureChangeBlink);
+    setRandomTextureTiming(config.randomTextureTiming);
     setSelectedCellId(null);
     // Best-effort match to a known preset label; falls back silently if custom.
     const matchedPreset = (Object.keys(GRID_PRESETS) as GridPresetKey[]).find(
@@ -196,6 +278,12 @@ export function ExhibitionCuration({
     setName('New Exhibition');
     applyPreset('2x2');
     setCells([]);
+    setModelScale(DEFAULT_MODEL_SCALE);
+    setWaterfall(DEFAULT_WATERFALL_CONFIG);
+    setShowConnectionIndicator(true);
+    setBackgroundColor(DEFAULT_BACKGROUND_COLOR);
+    setTextureChangeBlink(DEFAULT_TEXTURE_CHANGE_BLINK);
+    setRandomTextureTiming(false);
   }
 
   async function handleDelete(configId: string = activeConfigId ?? '') {
@@ -223,7 +311,21 @@ export function ExhibitionCuration({
   }
 
   function exportJson() {
-    const blob = new Blob([JSON.stringify({ name, layout, cells }, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(
+        {
+          name,
+          layout,
+          cells,
+          modelScale,
+          waterfall,
+          showConnectionIndicator,
+          backgroundColor,
+          textureChangeBlink,
+          randomTextureTiming,
+        },
+        null,
+        2
+      )], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -240,6 +342,12 @@ export function ExhibitionCuration({
         if (parsed.name) setName(parsed.name);
         if (parsed.layout) setLayout(parsed.layout);
         if (parsed.cells) setCells(parsed.cells);
+        setModelScale(normalizeModelScale(parsed.modelScale));
+        setWaterfall(normalizeWaterfallConfig(parsed.waterfall));
+        setShowConnectionIndicator(normalizeShowConnectionIndicator(parsed.showConnectionIndicator));
+        setBackgroundColor(normalizeBackgroundColor(parsed.backgroundColor));
+        setTextureChangeBlink(normalizeTextureChangeBlink(parsed.textureChangeBlink));
+        setRandomTextureTiming(normalizeRandomTextureTiming(parsed.randomTextureTiming));
         setActiveConfigId(null);
         setAccessToken(null);
       } catch (err) {
@@ -313,7 +421,10 @@ export function ExhibitionCuration({
                   >
                     <div className="min-w-[140px]">
                       <p className="text-sm font-medium text-gray-900">{c.name}</p>
-                      <p className="text-xs text-gray-400">{c.cells.length} cell{c.cells.length !== 1 ? 's' : ''}</p>
+                      <p className="text-xs text-gray-400">
+                        {c.cells.length} cell{c.cells.length !== 1 ? 's' : ''}
+                        {c.waterfall.enabled && ' · waterfall'}
+                      </p>
                     </div>
                     <code className="text-xs text-gray-500 flex-1 min-w-[180px] truncate">{url}</code>
                     <div className="flex items-center gap-1 flex-shrink-0">
@@ -371,6 +482,122 @@ export function ExhibitionCuration({
             </div>
           </div>
 
+          <div className="flex flex-wrap items-end gap-x-6 gap-y-4 pt-4 border-t border-gray-100">
+            <div className="space-y-1.5">
+              <Label htmlFor="background-color">Background</Label>
+              <div className="flex items-center gap-2 h-9">
+                <input
+                  id="background-color"
+                  type="color"
+                  value={backgroundColor}
+                  onChange={(e) => setBackgroundColor(e.target.value)}
+                  className="h-8 w-10 cursor-pointer rounded border border-gray-300 bg-white p-0.5"
+                />
+                <span className="text-xs text-gray-500 tabular-nums">{backgroundColor}</span>
+              </div>
+            </div>
+            <SliderField
+              id="model-size"
+              label="Object size (all models)"
+              min={MODEL_SCALE_MIN * 100}
+              max={MODEL_SCALE_MAX * 100}
+              step={5}
+              value={Math.round(modelScale * 100)}
+              onChange={(percent) => setModelScale(percent / 100)}
+              readout={`${Math.round(modelScale * 100)}%`}
+            />
+            <div className="space-y-1.5">
+              <Label htmlFor="waterfall-enabled">Waterfall</Label>
+              <label className="flex items-center gap-2 h-9 text-sm text-gray-700">
+                <input
+                  id="waterfall-enabled"
+                  type="checkbox"
+                  checked={waterfall.enabled}
+                  onChange={(e) => setWaterfall((w) => ({ ...w, enabled: e.target.checked }))}
+                />
+                Scroll grid down in a loop
+              </label>
+            </div>
+            {waterfall.enabled && (
+              <>
+                <SliderField
+                  id="waterfall-speed"
+                  label="Waterfall speed"
+                  min={WATERFALL_SPEED_MIN}
+                  max={WATERFALL_SPEED_MAX}
+                  step={0.5}
+                  value={waterfall.speed}
+                  onChange={(speed) => setWaterfall((w) => ({ ...w, speed }))}
+                  readout={formatWaterfallLoop(waterfall)}
+                />
+                <SliderField
+                  id="waterfall-loop-gap"
+                  label="Space between loops"
+                  min={0}
+                  max={WATERFALL_LOOP_GAP_MAX}
+                  step={5}
+                  value={waterfall.loopGap}
+                  onChange={(loopGap) => setWaterfall((w) => ({ ...w, loopGap }))}
+                  readout={waterfall.loopGap === 0 ? 'none' : `${waterfall.loopGap}% of screen`}
+                />
+              </>
+            )}
+            <div className="space-y-1.5">
+              <Label htmlFor="random-texture-timing">Texture change timing</Label>
+              <label
+                className="flex items-center gap-2 h-9 text-sm text-gray-700"
+                title={`Each change waits a random ${Math.round((1 - RANDOM_TEXTURE_TIMING_SPREAD) * 100)}–${Math.round((1 + RANDOM_TEXTURE_TIMING_SPREAD) * 100)}% of the cell's own interval`}
+              >
+                <input
+                  id="random-texture-timing"
+                  type="checkbox"
+                  checked={randomTextureTiming}
+                  onChange={(e) => setRandomTextureTiming(e.target.checked)}
+                />
+                Random — objects change at different moments
+              </label>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="texture-change-blink">Blink on texture change</Label>
+              <label className="flex items-center gap-2 h-9 text-sm text-gray-700">
+                <input
+                  id="texture-change-blink"
+                  type="checkbox"
+                  checked={textureChangeBlink.enabled}
+                  onChange={(e) => setTextureChangeBlink((b) => ({ ...b, enabled: e.target.checked }))}
+                />
+                Hide object briefly when its texture changes
+              </label>
+            </div>
+            {textureChangeBlink.enabled && (
+              <SliderField
+                id="texture-change-blink-frames"
+                label="Blink length"
+                min={TEXTURE_CHANGE_BLINK_FRAMES_MIN}
+                max={TEXTURE_CHANGE_BLINK_FRAMES_MAX}
+                step={1}
+                value={textureChangeBlink.frames}
+                onChange={(frames) => setTextureChangeBlink((b) => ({ ...b, frames }))}
+                readout={formatBlinkLength(textureChangeBlink.frames)}
+              />
+            )}
+            <div className="space-y-1.5">
+              <Label htmlFor="connection-indicator">Connection indicator</Label>
+              <label
+                className="flex items-center gap-2 h-9 text-sm text-gray-700"
+                title="Small dot in the bottom-left corner of the show: green = online, everything saved for offline use; amber = still saving; red = offline, showing saved content"
+              >
+                <input
+                  id="connection-indicator"
+                  type="checkbox"
+                  checked={showConnectionIndicator}
+                  onChange={(e) => setShowConnectionIndicator(e.target.checked)}
+                />
+                Show status dot in corner
+              </label>
+            </div>
+          </div>
+
           {showUrl && (
             <div className="flex items-center gap-2 p-2.5 bg-blue-50 border border-blue-200 rounded-md text-sm">
               <code className="text-xs text-blue-800 flex-1 truncate">{showUrl}</code>
@@ -417,7 +644,11 @@ export function ExhibitionCuration({
                         <span className="text-xs font-medium text-gray-800 truncate max-w-full">{model.name}</span>
                         <span className="text-[10px] text-gray-400">{model.viewerName}</span>
                         <span className={`mt-1 text-[10px] px-1.5 py-0.5 rounded-full ${cell!.textureMode === 'original-locked' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                          {cell!.textureMode === 'original-locked' ? 'locked' : 'uploads'}
+                          {cell!.textureMode === 'original-locked'
+                            ? 'locked'
+                            : cyclingUsesInterval(cell!.cycling.strategy)
+                              ? `uploads · ${cell!.cycling.intervalSec}s`
+                              : 'uploads · newest'}
                         </span>
                       </>
                     ) : (
@@ -456,7 +687,10 @@ export function ExhibitionCuration({
           <p className="text-xs text-gray-500 mb-2">Live preview</p>
           <div className="relative w-full rounded-md overflow-hidden border border-gray-200" style={{ aspectRatio: '16 / 9' }}>
             {cells.length > 0 ? (
-              <ExhibitionGrid config={previewConfig} modelsById={modelsById} fullscreen={false} />
+              <>
+                <ExhibitionGrid config={previewConfig} modelsById={modelsById} fullscreen={false} />
+                {showConnectionIndicator && <LiveConnectionIndicator />}
+              </>
             ) : (
               <div className="w-full h-full flex items-center justify-center text-sm text-gray-400 bg-black/5">
                 Assign at least one model to preview
@@ -466,6 +700,76 @@ export function ExhibitionCuration({
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function SliderField({
+  id,
+  label,
+  min,
+  max,
+  step,
+  value,
+  onChange,
+  readout,
+}: {
+  id: string;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  onChange: (value: number) => void;
+  readout: string;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <div className="flex items-center gap-3 h-9">
+        <input
+          id={id}
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="w-44 accent-blue-600"
+        />
+        <span className="text-xs text-gray-500 tabular-nums whitespace-nowrap">{readout}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Seconds field that can be cleared and retyped: the value is only committed
+ * once it's a number ≥ 1, and snaps back to the last valid value on blur.
+ */
+function SecondsInput({ id, value, onChange }: { id: string; value: number; onChange: (seconds: number) => void }) {
+  const [draft, setDraft] = useState(String(value));
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Pick up changes made elsewhere (another cell selected, a config loaded), but not while typing.
+  useEffect(() => {
+    if (document.activeElement !== inputRef.current) setDraft(String(value));
+  }, [value]);
+
+  return (
+    <Input
+      ref={inputRef}
+      id={id}
+      type="number"
+      min={1}
+      step={1}
+      value={draft}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        const seconds = Number(e.target.value);
+        if (e.target.value.trim() !== '' && Number.isFinite(seconds) && seconds >= 1) onChange(seconds);
+      }}
+      onBlur={() => setDraft(String(value))}
+    />
   );
 }
 
@@ -573,15 +877,21 @@ function CellSettingsPanel({
                   <option value="random">Random</option>
                 </select>
               </div>
-              <div className="space-y-1.5">
-                <Label>Interval (seconds)</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={cell.cycling.intervalSec}
-                  onChange={(e) => onUpdate({ cycling: { ...cell.cycling, intervalSec: Number(e.target.value) || 1 } })}
-                />
-              </div>
+              {cyclingUsesInterval(cell.cycling.strategy) ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="cell-interval">Change texture every (seconds)</Label>
+                  <SecondsInput
+                    id="cell-interval"
+                    value={cell.cycling.intervalSec}
+                    onChange={(intervalSec) => onUpdate({ cycling: { ...cell.cycling, intervalSec } })}
+                  />
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500">
+                  Shows the newest upload and changes only when a new one arrives. To change textures every few seconds,
+                  choose “Cycle in order” or “Random”.
+                </p>
+              )}
             </>
           )}
 

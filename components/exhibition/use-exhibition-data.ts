@@ -4,6 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import type { ExhibitionCellConfig } from '@/lib/types/exhibition';
 import type { ViewerModelWithAllTextures } from '@/lib/types/viewer';
 import { getIsOnline, subscribeConnectivity } from '@/lib/connectivity-monitor';
+import { fetchWithTimeout, loadSnapshot, saveSnapshot, viewerDataSnapshotKey } from '@/lib/exhibition-offline-store';
+
+const DATA_FETCH_TIMEOUT_MS = 15_000;
+/** Re-save an unchanged viewer's offline copy at most this often. */
+const SNAPSHOT_REFRESH_MS = 12 * 60 * 60 * 1000;
 
 interface UseExhibitionDataResult {
   modelsById: Record<string, ViewerModelWithAllTextures>;
@@ -36,6 +41,11 @@ function sameModel(a: ViewerModelWithAllTextures | undefined, b: ViewerModelWith
  * 'user-uploads' cell are polled on a timer; viewers used solely by
  * 'original-locked' cells are fetched once (their texture pool doesn't need
  * to be watched for new uploads).
+ *
+ * Offline: every successful response is also saved in the browser
+ * (lib/exhibition-offline-store.ts). When a viewer can't be fetched — no
+ * connection, server down, or a request that times out — and nothing is
+ * loaded for it yet, its last saved copy is used instead.
  */
 export function useExhibitionData(
   cells: ExhibitionCellConfig[],
@@ -45,6 +55,10 @@ export function useExhibitionData(
   const [isLoading, setIsLoading] = useState(true);
   const [failedViewerIds, setFailedViewerIds] = useState<string[]>([]);
   const loadedOnceRef = useRef(false);
+  // Latest merged data, so concurrent viewer fetches can tell synchronously whether they changed anything.
+  const modelsRef = useRef<Record<string, ViewerModelWithAllTextures>>({});
+  const loadedViewerIdsRef = useRef(new Set<string>());
+  const snapshotSavedAtRef = useRef(new Map<string, number>());
 
   const viewerIds = Array.from(new Set(cells.map((c) => c.viewerId)));
   const pollableViewerIds = Array.from(
@@ -59,30 +73,50 @@ export function useExhibitionData(
 
     let cancelled = false;
 
+    /** Merges models into state; returns whether anything changed. */
+    function applyModels(models: ViewerModelWithAllTextures[]): boolean {
+      const prev = modelsRef.current;
+      const changedModels = models.filter((m) => !sameModel(prev[m.id], m));
+      // Keeping the SAME object when nothing changed avoids re-rendering the grid.
+      if (changedModels.length === 0) return false;
+      const next = { ...prev };
+      for (const m of changedModels) next[m.id] = m;
+      modelsRef.current = next;
+      setModelsById(next);
+      return true;
+    }
+
     async function fetchViewer(viewerId: string): Promise<void> {
+      const snapshotKey = viewerDataSnapshotKey(viewerId);
       try {
-        const res = await fetch(`/api/viewer-models-all-textures/${viewerId}`);
+        if (!getIsOnline()) throw new Error('offline');
+        const res = await fetchWithTimeout(`/api/viewer-models-all-textures/${viewerId}`, DATA_FETCH_TIMEOUT_MS);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (cancelled) return;
         const models = (data.models || []) as ViewerModelWithAllTextures[];
-        setModelsById((prev) => {
-          let changed = false;
-          const next = { ...prev };
-          for (const m of models) {
-            if (!sameModel(prev[m.id], m)) {
-              next[m.id] = m;
-              changed = true;
-            }
-          }
-          // Returning the SAME reference when nothing changed lets React bail
-          // out of the re-render entirely (Object.is check on state setters).
-          return changed ? next : prev;
-        });
+        const changed = applyModels(models);
+        loadedViewerIdsRef.current.add(viewerId);
+        const lastSaved = snapshotSavedAtRef.current.get(viewerId) ?? 0;
+        if (changed || Date.now() - lastSaved > SNAPSHOT_REFRESH_MS) {
+          snapshotSavedAtRef.current.set(viewerId, Date.now());
+          saveSnapshot(snapshotKey, models).catch(() => {});
+        }
         setFailedViewerIds((prev) => prev.filter((id) => id !== viewerId));
       } catch (err) {
+        if (cancelled) return;
+        if (!loadedViewerIdsRef.current.has(viewerId)) {
+          const snapshot = await loadSnapshot<ViewerModelWithAllTextures[]>(snapshotKey);
+          if (cancelled) return;
+          if (snapshot) {
+            console.warn('[Exhibition] Using saved offline copy of viewer data:', viewerId, err);
+            applyModels(snapshot.data);
+            loadedViewerIdsRef.current.add(viewerId);
+            return;
+          }
+        }
         console.error('[Exhibition] Failed to fetch viewer data:', viewerId, err);
-        if (!cancelled) setFailedViewerIds((prev) => (prev.includes(viewerId) ? prev : [...prev, viewerId]));
+        setFailedViewerIds((prev) => (prev.includes(viewerId) ? prev : [...prev, viewerId]));
       }
     }
 
@@ -99,8 +133,10 @@ export function useExhibitionData(
     fetchAll(false);
 
     const interval = pollableViewerIds.length > 0 ? setInterval(() => fetchAll(true), pollIntervalMs) : null;
+    // Back online: refresh every viewer, not just polled ones — the page may
+    // have started from offline copies.
     const unsubscribe = subscribeConnectivity((online) => {
-      if (online) fetchAll(true);
+      if (online) fetchAll(false);
     });
 
     return () => {

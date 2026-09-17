@@ -4,6 +4,25 @@ import {
   GRID_PRESETS,
   MAX_EXHIBITION_CELLS,
   createDefaultCellConfig,
+  normalizeWaterfallConfig,
+  normalizeModelScale,
+  advanceWaterfallProgress,
+  waterfallLoopPeriod,
+  DEFAULT_WATERFALL_CONFIG,
+  WATERFALL_SPEED_MIN,
+  WATERFALL_SPEED_MAX,
+  WATERFALL_LOOP_GAP_MAX,
+  MODEL_SCALE_MIN,
+  MODEL_SCALE_MAX,
+  normalizeBackgroundColor,
+  nextTextureChangeDelayMs,
+  cyclingUsesInterval,
+  normalizeRandomTextureTiming,
+  RANDOM_TEXTURE_TIMING_SPREAD,
+  normalizeTextureChangeBlink,
+  DEFAULT_TEXTURE_CHANGE_BLINK,
+  TEXTURE_CHANGE_BLINK_FRAMES_MIN,
+  TEXTURE_CHANGE_BLINK_FRAMES_MAX,
   type GridPresetKey,
 } from '../lib/types/exhibition';
 
@@ -69,5 +88,131 @@ describe('createDefaultCellConfig', () => {
     assert.equal(cell.rotation.enabled, true);
     assert.ok(cell.rotation.speed > 0);
     assert.ok(cell.cycling.intervalSec > 0);
+  });
+});
+
+describe('normalizeWaterfallConfig', () => {
+  test('rows saved before waterfall existed get the disabled default', () => {
+    assert.deepEqual(normalizeWaterfallConfig(undefined), DEFAULT_WATERFALL_CONFIG);
+    assert.deepEqual(normalizeWaterfallConfig(null), DEFAULT_WATERFALL_CONFIG);
+    assert.equal(DEFAULT_WATERFALL_CONFIG.enabled, false);
+  });
+
+  test('keeps valid settings and clamps speed and loop gap into the supported range', () => {
+    assert.deepEqual(normalizeWaterfallConfig({ enabled: true, speed: 12.5, loopGap: 30 }), { enabled: true, speed: 12.5, loopGap: 30 });
+    assert.equal(normalizeWaterfallConfig({ enabled: true, speed: 0 }).speed, WATERFALL_SPEED_MIN);
+    assert.equal(normalizeWaterfallConfig({ enabled: true, speed: 1000 }).speed, WATERFALL_SPEED_MAX);
+    assert.equal(normalizeWaterfallConfig({ enabled: true, loopGap: -10 }).loopGap, 0);
+    assert.equal(normalizeWaterfallConfig({ enabled: true, loopGap: 500 }).loopGap, WATERFALL_LOOP_GAP_MAX);
+  });
+
+  test('waterfall configs saved before loop gap existed stay seamless', () => {
+    assert.equal(normalizeWaterfallConfig({ enabled: true, speed: 5 }).loopGap, 0);
+  });
+
+  test('rejects malformed imported values', () => {
+    const cfg = normalizeWaterfallConfig({ enabled: 'yes', speed: 'fast', loopGap: 'big' } as any);
+    assert.deepEqual(cfg, DEFAULT_WATERFALL_CONFIG);
+    assert.equal(normalizeWaterfallConfig({ enabled: true, speed: Number.NaN }).speed, DEFAULT_WATERFALL_CONFIG.speed);
+  });
+});
+
+describe('advanceWaterfallProgress', () => {
+  test('speed is percent of the grid height per second', () => {
+    assert.ok(Math.abs(advanceWaterfallProgress(0, 5, 1) - 0.05) < 1e-9);
+    assert.ok(Math.abs(advanceWaterfallProgress(0.5, 10, 2) - 0.7) < 1e-9);
+  });
+
+  test('wraps around to stay within [0, 1) with no loop gap', () => {
+    const next = advanceWaterfallProgress(0.95, 10, 1);
+    assert.ok(Math.abs(next - 0.05) < 1e-9);
+    assert.equal(advanceWaterfallProgress(0.5, 50, 1), 0);
+    assert.ok(advanceWaterfallProgress(0.02, -5, 1) >= 0);
+  });
+
+  test('a loop gap lengthens the loop without changing how fast content moves', () => {
+    assert.equal(waterfallLoopPeriod(0), 1);
+    assert.equal(waterfallLoopPeriod(50), 1.5);
+    // 0.95 + 0.1 = 1.05 is still inside a 1.5-grid-height loop...
+    assert.ok(Math.abs(advanceWaterfallProgress(0.95, 10, 1, 50) - 1.05) < 1e-9);
+    // ...and wraps only past the gap.
+    assert.ok(Math.abs(advanceWaterfallProgress(1.45, 10, 1, 50) - 0.05) < 1e-9);
+  });
+
+  test('shrinking the loop gap re-wraps an offset that is now past the end', () => {
+    assert.ok(Math.abs(advanceWaterfallProgress(1.4, 5, 0, 0) - 0.4) < 1e-9);
+  });
+});
+
+describe('normalizeModelScale', () => {
+  test('defaults to 1 for rows saved before object size existed or malformed values', () => {
+    assert.equal(normalizeModelScale(undefined), 1);
+    assert.equal(normalizeModelScale('huge'), 1);
+    assert.equal(normalizeModelScale(Number.NaN), 1);
+  });
+
+  test('clamps into the supported range', () => {
+    assert.equal(normalizeModelScale(1.5), 1.5);
+    assert.equal(normalizeModelScale(0), MODEL_SCALE_MIN);
+    assert.equal(normalizeModelScale(99), MODEL_SCALE_MAX);
+  });
+});
+
+describe('normalizeBackgroundColor', () => {
+  test('keeps #rrggbb colours (lower-cased) and defaults to black', () => {
+    assert.equal(normalizeBackgroundColor('#FFAA00'), '#ffaa00');
+    assert.equal(normalizeBackgroundColor(undefined), '#000000');
+  });
+
+  test('rejects anything that is not a 6-digit hex colour', () => {
+    for (const bad of ['red', '#fff', '#12345g', 'url(x)', 123, null]) {
+      assert.equal(normalizeBackgroundColor(bad), '#000000');
+    }
+  });
+});
+
+describe('normalizeTextureChangeBlink', () => {
+  test('off by default, including for exhibitions saved before the option existed', () => {
+    assert.deepEqual(normalizeTextureChangeBlink(undefined), DEFAULT_TEXTURE_CHANGE_BLINK);
+    assert.equal(DEFAULT_TEXTURE_CHANGE_BLINK.enabled, false);
+  });
+
+  test('frame count is a whole number within the supported range', () => {
+    assert.deepEqual(normalizeTextureChangeBlink({ enabled: true, frames: 10 }), { enabled: true, frames: 10 });
+    assert.equal(normalizeTextureChangeBlink({ enabled: true, frames: 2.6 }).frames, 3);
+    assert.equal(normalizeTextureChangeBlink({ enabled: true, frames: 0 }).frames, TEXTURE_CHANGE_BLINK_FRAMES_MIN);
+    assert.equal(normalizeTextureChangeBlink({ enabled: true, frames: 999 }).frames, TEXTURE_CHANGE_BLINK_FRAMES_MAX);
+    assert.equal(normalizeTextureChangeBlink({ enabled: 'yes', frames: 'many' } as any).enabled, false);
+  });
+});
+
+describe('texture change timing', () => {
+  test('only cycle and random strategies change on a timer', () => {
+    assert.equal(cyclingUsesInterval('cycle'), true);
+    assert.equal(cyclingUsesInterval('random'), true);
+    assert.equal(cyclingUsesInterval('newest-first'), false);
+  });
+
+  test('without random timing every wait is exactly the interval (never under 1s)', () => {
+    assert.equal(nextTextureChangeDelayMs(12, false), 12_000);
+    assert.equal(nextTextureChangeDelayMs(0, false), 1_000);
+  });
+
+  test('random timing spreads each wait across the configured range around the interval', () => {
+    const low = Math.round(12_000 * (1 - RANDOM_TEXTURE_TIMING_SPREAD));
+    const high = Math.round(12_000 * (1 + RANDOM_TEXTURE_TIMING_SPREAD));
+    assert.equal(nextTextureChangeDelayMs(12, true, () => 0), low);
+    assert.equal(nextTextureChangeDelayMs(12, true, () => 0.5), 12_000);
+    assert.equal(nextTextureChangeDelayMs(12, true, () => 0.999999), high);
+
+    const waits = Array.from({ length: 200 }, () => nextTextureChangeDelayMs(12, true));
+    assert.ok(waits.every((w) => w >= low && w <= high));
+    assert.ok(new Set(waits).size > 100, 'waits differ from one change to the next');
+  });
+
+  test('random timing is off for exhibitions saved before the option existed', () => {
+    assert.equal(normalizeRandomTextureTiming(undefined), false);
+    assert.equal(normalizeRandomTextureTiming('yes'), false);
+    assert.equal(normalizeRandomTextureTiming(true), true);
   });
 });

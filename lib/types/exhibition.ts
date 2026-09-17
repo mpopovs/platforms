@@ -125,6 +125,25 @@ export function createDefaultCellConfig(cellId: string, viewerId: string, modelI
   };
 }
 
+/** 'cycle' and 'random' change texture on the cell's interval; 'newest-first' only changes when a new upload arrives. */
+export function cyclingUsesInterval(strategy: TextureCycleStrategy): boolean {
+  return strategy !== 'newest-first';
+}
+
+/** With random timing, each wait is between (1 - spread) and (1 + spread) times the cell's interval. */
+export const RANDOM_TEXTURE_TIMING_SPREAD = 0.5;
+
+/**
+ * Milliseconds until a cell's next timed texture change. With random timing
+ * every wait is picked separately, so cells sharing the same interval drift
+ * apart and change at different moments instead of all at once.
+ */
+export function nextTextureChangeDelayMs(intervalSec: number, randomTiming: boolean, random: () => number = Math.random): number {
+  const baseMs = Math.max(1, intervalSec) * 1000;
+  if (!randomTiming) return baseMs;
+  return Math.round(baseMs * (1 - RANDOM_TEXTURE_TIMING_SPREAD + 2 * RANDOM_TEXTURE_TIMING_SPREAD * random()));
+}
+
 // ─── Global tunables ─────────────────────────────────────────────────────────
 
 export interface ExhibitionTunables {
@@ -154,6 +173,102 @@ export const DEFAULT_EXHIBITION_TUNABLES: ExhibitionTunables = {
   userUploadsPollIntervalMs: 30_000,
 };
 
+// ─── Display settings (whole grid) ───────────────────────────────────────────
+
+function clampFinite(value: unknown, min: number, max: number, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+}
+
+export const MODEL_SCALE_MIN = 0.2;
+export const MODEL_SCALE_MAX = 3;
+export const DEFAULT_MODEL_SCALE = 1;
+
+/** Coerces a stored/imported/client-supplied model scale (older rows have none) into the supported range. */
+export function normalizeModelScale(value: unknown): number {
+  return clampFinite(value, MODEL_SCALE_MIN, MODEL_SCALE_MAX, DEFAULT_MODEL_SCALE);
+}
+
+export const DEFAULT_BACKGROUND_COLOR = '#000000';
+
+/** Accepts `#rrggbb` (as produced by <input type="color">); anything else falls back to black. */
+export function normalizeBackgroundColor(value: unknown): string {
+  return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : DEFAULT_BACKGROUND_COLOR;
+}
+
+export interface TextureChangeBlinkConfig {
+  /** Hide a cell's model briefly whenever it switches to a different texture. */
+  enabled: boolean;
+  /** How many rendered frames the model stays hidden (the cell shows the background meanwhile). */
+  frames: number;
+}
+
+export const TEXTURE_CHANGE_BLINK_FRAMES_MIN = 1;
+export const TEXTURE_CHANGE_BLINK_FRAMES_MAX = 120;
+
+export const DEFAULT_TEXTURE_CHANGE_BLINK: TextureChangeBlinkConfig = { enabled: false, frames: 4 };
+
+export function normalizeTextureChangeBlink(input?: Partial<TextureChangeBlinkConfig> | null): TextureChangeBlinkConfig {
+  return {
+    enabled: input?.enabled === true,
+    frames: Math.round(
+      clampFinite(input?.frames, TEXTURE_CHANGE_BLINK_FRAMES_MIN, TEXTURE_CHANGE_BLINK_FRAMES_MAX, DEFAULT_TEXTURE_CHANGE_BLINK.frames)
+    ),
+  };
+}
+
+/** Off unless explicitly turned on (older rows and imported files keep changing in step). */
+export function normalizeRandomTextureTiming(value: unknown): boolean {
+  return value === true;
+}
+
+/** Older rows and imported files without the setting show the indicator. */
+export function normalizeShowConnectionIndicator(value: unknown): boolean {
+  return value !== false;
+}
+
+export interface WaterfallConfig {
+  /** When true the whole grid scrolls downward in an endless loop. */
+  enabled: boolean;
+  /**
+   * Percent of the grid's height travelled per second (5 = one full loop
+   * every 20s with no loop gap). Relative to the grid rather than pixels so
+   * the curation page's small live preview moves exactly like the show.
+   */
+  speed: number;
+  /** Empty space between the end of one pass and the start of the next, as a percent of the grid's height (0 = seamless). */
+  loopGap: number;
+}
+
+export const WATERFALL_SPEED_MIN = 0.5;
+export const WATERFALL_SPEED_MAX = 40;
+export const WATERFALL_LOOP_GAP_MAX = 100;
+
+export const DEFAULT_WATERFALL_CONFIG: WaterfallConfig = { enabled: false, speed: 5, loopGap: 0 };
+
+/** Coerces stored/imported/client-supplied waterfall settings into a valid config (older rows have none, or no loopGap). */
+export function normalizeWaterfallConfig(input?: Partial<WaterfallConfig> | null): WaterfallConfig {
+  return {
+    enabled: input?.enabled === true,
+    speed: clampFinite(input?.speed, WATERFALL_SPEED_MIN, WATERFALL_SPEED_MAX, DEFAULT_WATERFALL_CONFIG.speed),
+    loopGap: clampFinite(input?.loopGap, 0, WATERFALL_LOOP_GAP_MAX, DEFAULT_WATERFALL_CONFIG.loopGap),
+  };
+}
+
+/** Distance one loop covers, in grid heights: the grid itself plus the gap before it repeats. */
+export function waterfallLoopPeriod(loopGap: number): number {
+  return 1 + loopGap / 100;
+}
+
+/**
+ * Advances the scroll offset (in grid heights, always in [0, loop period))
+ * by `deltaSec` at `speed` percent of the grid height per second.
+ */
+export function advanceWaterfallProgress(progress: number, speed: number, deltaSec: number, loopGap = 0): number {
+  const period = waterfallLoopPeriod(loopGap);
+  const next = (progress + (speed / 100) * deltaSec) % period;
+  return next < 0 ? next + period : next;
+}
+
 // ─── Full config ─────────────────────────────────────────────────────────────
 
 export interface ExhibitionConfig {
@@ -163,6 +278,16 @@ export interface ExhibitionConfig {
   layout: GridLayout;
   cells: ExhibitionCellConfig[];
   tunables: ExhibitionTunables;
+  /** Size multiplier applied to every cell's model on top of its automatic fit-to-cell size (1 = default). */
+  modelScale: number;
+  waterfall: WaterfallConfig;
+  /** Show the small connection-status dot in the corner of the show screen. */
+  showConnectionIndicator: boolean;
+  /** Colour behind the models and in the gaps between cells, `#rrggbb`. */
+  backgroundColor: string;
+  textureChangeBlink: TextureChangeBlinkConfig;
+  /** Randomize each cycling cell's wait around its interval so objects change textures at different moments. */
+  randomTextureTiming: boolean;
   /** The /exhibition show route's access token. Only ever surfaced to the owner (list/get-by-id APIs), never echoed back by the public get-by-token lookup. */
   accessToken: string;
   createdAt: number;
@@ -178,6 +303,13 @@ export interface ExhibitionConfigRow {
     layout: GridLayout;
     cells: ExhibitionCellConfig[];
     tunables: ExhibitionTunables;
+    /** Absent on rows saved before these display settings existed. */
+    modelScale?: number;
+    waterfall?: WaterfallConfig;
+    showConnectionIndicator?: boolean;
+    backgroundColor?: string;
+    textureChangeBlink?: TextureChangeBlinkConfig;
+    randomTextureTiming?: boolean;
   };
   access_token: string;
   created_at: string;

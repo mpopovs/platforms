@@ -5,7 +5,11 @@ import type { ExhibitionConfig, ExhibitionCellConfig } from '@/lib/types/exhibit
 import type { ViewerModelWithAllTextures } from '@/lib/types/viewer';
 import { getModel, storeModel, getTexture, storeTexture } from '@/lib/texture-cache';
 import { getIsOnline } from '@/lib/connectivity-monitor';
+import { fetchWithTimeout } from '@/lib/exhibition-offline-store';
 import { resolveCellTexture } from './use-cell-texture';
+
+/** Give up on one file after this long so a dead connection can't hold the loading screen forever. */
+const PRELOAD_FETCH_TIMEOUT_MS = 60_000;
 
 export interface ExhibitionPreloadProgress {
   loaded: number;
@@ -41,9 +45,11 @@ export function useExhibitionPreload(
   const hasCompletedOnceRef = useRef(false);
 
   useEffect(() => {
+    // Once every viewer's data has been attempted, go ahead with whatever
+    // resolved: offline with no saved copy for a viewer, its cells stay empty
+    // instead of the loading screen never finishing. Cells fill in (and this
+    // re-runs as a silent top-up) when the data arrives later.
     if (!config || dataLoading) return;
-    const allResolved = config.cells.every((c) => modelsById[c.modelId]);
-    if (!allResolved) return;
 
     let cancelled = false;
 
@@ -75,7 +81,7 @@ export function useExhibitionPreload(
         try {
           const cached = await getModel(url);
           if (!cached && getIsOnline()) {
-            const res = await fetch(url);
+            const res = await fetchWithTimeout(url, PRELOAD_FETCH_TIMEOUT_MS);
             if (res.ok) {
               const blob = await res.blob();
               await storeModel(url, blob, modelId).catch(() => {});
@@ -100,7 +106,7 @@ export function useExhibitionPreload(
 
           const cached = await getTexture(url);
           if (!cached && getIsOnline()) {
-            const res = await fetch(url);
+            const res = await fetchWithTimeout(url, PRELOAD_FETCH_TIMEOUT_MS);
             if (res.ok) {
               const blob = await res.blob();
               await storeTexture(url, blob, model.id, textureId).catch(() => {});

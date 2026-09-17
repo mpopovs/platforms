@@ -896,7 +896,13 @@ import {
   deleteExhibitionConfig,
   regenerateExhibitionAccessToken,
 } from '@/lib/exhibition';
-import type { GridLayout, ExhibitionCellConfig, ExhibitionTunables } from '@/lib/types/exhibition';
+import type {
+  GridLayout,
+  ExhibitionCellConfig,
+  ExhibitionTunables,
+  TextureChangeBlinkConfig,
+  WaterfallConfig,
+} from '@/lib/types/exhibition';
 
 /** Create a new named exhibition config. */
 export async function createExhibitionConfigAction(input: {
@@ -904,6 +910,12 @@ export async function createExhibitionConfigAction(input: {
   layout: GridLayout;
   cells: ExhibitionCellConfig[];
   tunables?: Partial<ExhibitionTunables>;
+  modelScale?: number;
+  waterfall?: Partial<WaterfallConfig>;
+  showConnectionIndicator?: boolean;
+  backgroundColor?: string;
+  textureChangeBlink?: Partial<TextureChangeBlinkConfig>;
+  randomTextureTiming?: boolean;
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -918,7 +930,15 @@ export async function createExhibitionConfigAction(input: {
       input.layout,
       input.cells,
       input.tunables,
-      supabase
+      supabase,
+      {
+        modelScale: input.modelScale,
+        waterfall: input.waterfall,
+        showConnectionIndicator: input.showConnectionIndicator,
+        backgroundColor: input.backgroundColor,
+        textureChangeBlink: input.textureChangeBlink,
+        randomTextureTiming: input.randomTextureTiming,
+      }
     );
     return { success: true, config: { ...config, accessToken } };
   } catch (error: any) {
@@ -927,7 +947,7 @@ export async function createExhibitionConfigAction(input: {
   }
 }
 
-/** Update an existing exhibition config's name/layout/cells/tunables. */
+/** Update an existing exhibition config's name/layout/cells/tunables/display settings. */
 export async function updateExhibitionConfigAction(
   id: string,
   updates: {
@@ -935,6 +955,12 @@ export async function updateExhibitionConfigAction(
     layout?: GridLayout;
     cells?: ExhibitionCellConfig[];
     tunables?: Partial<ExhibitionTunables>;
+    modelScale?: number;
+    waterfall?: Partial<WaterfallConfig>;
+    showConnectionIndicator?: boolean;
+    backgroundColor?: string;
+    textureChangeBlink?: Partial<TextureChangeBlinkConfig>;
+    randomTextureTiming?: boolean;
   }
 ) {
   const supabase = await createClient();

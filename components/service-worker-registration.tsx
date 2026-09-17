@@ -11,9 +11,21 @@ import { useEffect } from 'react';
  * (requires a user gesture), so SW updates must never force a page refresh.
  * Updates will take effect naturally on the next manual reload.
  */
-export function ServiceWorkerRegistration() {
+export function ServiceWorkerRegistration({ precacheCurrentPage = false }: { precacheCurrentPage?: boolean } = {}) {
   useEffect(() => {
     if ('serviceWorker' in navigator) {
+      if (precacheCurrentPage) {
+        // Cache this page and the same-origin scripts/styles/fonts it has loaded
+        // as soon as a SW is active, so it can reload offline after one visit.
+        navigator.serviceWorker.ready.then((registration) => {
+          const assets = performance
+            .getEntriesByType('resource')
+            .map((entry) => entry.name)
+            .filter((url) => url.startsWith(`${location.origin}/_next/static/`));
+          registration.active?.postMessage({ type: 'CACHE_URLS', urls: [location.href, ...new Set(assets)] });
+        });
+      }
+
       // Register service worker
       navigator.serviceWorker
         .register('/sw.js', { scope: '/' })
@@ -52,7 +64,7 @@ export function ServiceWorkerRegistration() {
       // Previously this handler called window.location.reload() unconditionally,
       // which refreshed the page every time a new SW activated.
     }
-  }, []);
+  }, [precacheCurrentPage]);
 
   return null;
 }

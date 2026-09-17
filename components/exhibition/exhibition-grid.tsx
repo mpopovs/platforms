@@ -1,18 +1,22 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState, type RefObject } from 'react';
+import type { Group } from 'three';
 import { Canvas } from '@react-three/fiber';
 import { View } from '@react-three/drei';
-import type { ExhibitionConfig } from '@/lib/types/exhibition';
+import type { ExhibitionCellConfig, ExhibitionConfig, GridCellRect, TextureChangeBlinkConfig } from '@/lib/types/exhibition';
 import type { ViewerModelWithAllTextures } from '@/lib/types/viewer';
 import { ExhibitionCellScene } from './exhibition-cell';
 import { FpsMonitor } from './fps-monitor';
+import { ExhibitionCellRenderer, WaterfallDriver, type WaterfallFrame } from './cell-renderer';
+import { useIsOnline } from './use-is-online';
+
+const CELL_GAP_PX = 2;
 
 interface ExhibitionGridProps {
   config: ExhibitionConfig;
   modelsById: Record<string, ViewerModelWithAllTextures>;
-  backgroundColor?: string;
-  /** Curator hotkey: freezes rotation on every cell. Default false. */
+  /** Curator hotkey: freezes rotation on every cell and the waterfall scroll. Default false. */
   paused?: boolean;
   /** Curator hotkey: bump to force every 'user-uploads' cell to its next texture. Default 0. */
   forceAdvanceSignal?: number;
@@ -33,18 +37,26 @@ interface ExhibitionGridProps {
  * (round-robin), instead of degrading everything at once. When fps recovers
  * above tunables.targetFps we step the most-degraded cell back up. This
  * keeps quality loss minimal and reversible rather than a global cliff.
+ * While offline every cell stays at the starting level: that is the only
+ * resolution saved for offline use, and any other size can't be downloaded.
+ *
+ * Cells are drawn by ExhibitionCellRenderer rather than by <View> itself —
+ * see ./cell-renderer.tsx for why, and for how waterfall mode
+ * (config.waterfall) draws cells at their scrolled positions without moving
+ * the tracked DOM elements.
  */
 export function ExhibitionGrid({
   config,
   modelsById,
-  backgroundColor = '#000000',
   paused = false,
   forceAdvanceSignal = 0,
   fullscreen = true,
 }: ExhibitionGridProps) {
-  const { layout, cells, tunables } = config;
+  const { layout, cells, tunables, modelScale, waterfall, backgroundColor, textureChangeBlink, randomTextureTiming } = config;
   const containerRef = useRef<HTMLDivElement>(null);
+  const waterfallFrameRef = useRef<WaterfallFrame>({ offset: 0, period: 1 });
   const [qualityByCell, setQualityByCell] = useState<Record<string, number>>({});
+  const online = useIsOnline();
 
   const cellConfigById = useMemo(() => {
     const map = new Map(cells.map((c) => [c.cellId, c]));
@@ -53,6 +65,7 @@ export function ExhibitionGrid({
 
   const handleFpsSample = useCallback(
     (fps: number) => {
+      if (!online) return;
       setQualityByCell((prev) => {
         const maxIdx = tunables.qualityStepDownTextureDims.length - 1;
 
@@ -75,7 +88,7 @@ export function ExhibitionGrid({
         return prev;
       });
     },
-    [cells, tunables.minFps, tunables.targetFps, tunables.qualityStepDownTextureDims.length]
+    [online, cells, tunables.minFps, tunables.targetFps, tunables.qualityStepDownTextureDims.length]
   );
 
   return (
@@ -90,7 +103,10 @@ export function ExhibitionGrid({
         display: 'grid',
         gridTemplateColumns: `repeat(${layout.columns}, 1fr)`,
         gridTemplateRows: `repeat(${layout.rows}, 1fr)`,
-        gap: '2px',
+        gap: `${CELL_GAP_PX}px`,
+        // The loop seam (bottom row → top row of the next pass) needs the same gap as between rows.
+        paddingBottom: waterfall.enabled ? `${CELL_GAP_PX}px` : undefined,
+        boxSizing: 'border-box',
         overflow: 'hidden',
       }}
     >
@@ -99,27 +115,24 @@ export function ExhibitionGrid({
         if (!cellConfig) return <div key={rect.id} />; // empty grid slot, no model assigned yet
 
         const model = modelsById[cellConfig.modelId];
-        const qualityIdx = qualityByCell[cellConfig.cellId] ?? 0;
+        const qualityIdx = online ? qualityByCell[cellConfig.cellId] ?? 0 : 0;
         const textureMaxDim = tunables.qualityStepDownTextureDims[qualityIdx] ?? tunables.defaultTextureMaxDim;
 
         return (
-          <View
+          <ExhibitionGridCell
             key={rect.id}
-            style={{
-              gridColumn: `${rect.col + 1} / span ${rect.colSpan ?? 1}`,
-              gridRow: `${rect.row + 1} / span ${rect.rowSpan ?? 1}`,
-              position: 'relative',
-            }}
-          >
-            <ExhibitionCellScene
-              cell={cellConfig}
-              model={model}
-              textureMaxDim={textureMaxDim}
-              textureQuality={tunables.textureQuality}
-              paused={paused}
-              forceAdvanceSignal={forceAdvanceSignal}
-            />
-          </View>
+            rect={rect}
+            cell={cellConfig}
+            model={model}
+            textureMaxDim={textureMaxDim}
+            textureQuality={tunables.textureQuality}
+            modelScale={modelScale}
+            textureChangeBlink={textureChangeBlink}
+            randomTextureTiming={randomTextureTiming}
+            paused={paused}
+            forceAdvanceSignal={forceAdvanceSignal}
+            waterfallFrameRef={waterfall.enabled ? waterfallFrameRef : null}
+          />
         );
       })}
 
@@ -130,7 +143,72 @@ export function ExhibitionGrid({
       >
         <View.Port />
         <FpsMonitor sampleWindowMs={tunables.fpsSampleWindowMs} onSample={handleFpsSample} />
+        {waterfall.enabled && (
+          <WaterfallDriver
+            frameRef={waterfallFrameRef}
+            speed={waterfall.speed}
+            loopGap={waterfall.loopGap}
+            paused={paused}
+          />
+        )}
       </Canvas>
     </div>
+  );
+}
+
+function ExhibitionGridCell({
+  rect,
+  cell,
+  model,
+  textureMaxDim,
+  textureQuality,
+  modelScale,
+  textureChangeBlink,
+  randomTextureTiming,
+  paused,
+  forceAdvanceSignal,
+  waterfallFrameRef,
+}: {
+  rect: GridCellRect;
+  cell: ExhibitionCellConfig;
+  model: ViewerModelWithAllTextures | undefined;
+  textureMaxDim: number;
+  textureQuality: number;
+  modelScale: number;
+  textureChangeBlink: TextureChangeBlinkConfig;
+  randomTextureTiming: boolean;
+  paused: boolean;
+  forceAdvanceSignal: number;
+  /** Set only while the waterfall is on. */
+  waterfallFrameRef: RefObject<WaterfallFrame> | null;
+}) {
+  const viewRef = useRef<HTMLElement | Group>(null);
+  const blinkFramesRef = useRef(0);
+
+  return (
+    <View
+      ref={viewRef}
+      // ExhibitionCellRenderer draws this cell instead of the View itself.
+      visible={false}
+      style={{
+        gridColumn: `${rect.col + 1} / span ${rect.colSpan ?? 1}`,
+        gridRow: `${rect.row + 1} / span ${rect.rowSpan ?? 1}`,
+        position: 'relative',
+      }}
+    >
+      <ExhibitionCellScene
+        cell={cell}
+        model={model}
+        textureMaxDim={textureMaxDim}
+        textureQuality={textureQuality}
+        modelScale={modelScale}
+        textureChangeBlink={textureChangeBlink}
+        randomTextureTiming={randomTextureTiming}
+        blinkFramesRef={blinkFramesRef}
+        paused={paused}
+        forceAdvanceSignal={forceAdvanceSignal}
+      />
+      <ExhibitionCellRenderer cellRef={viewRef} frameRef={waterfallFrameRef} blinkFramesRef={blinkFramesRef} />
+    </View>
   );
 }

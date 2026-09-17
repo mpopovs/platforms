@@ -7,7 +7,15 @@ import {
   ExhibitionCellConfig,
   ExhibitionTunables,
   DEFAULT_EXHIBITION_TUNABLES,
+  WaterfallConfig,
+  TextureChangeBlinkConfig,
   generateExhibitionConfigId,
+  normalizeBackgroundColor,
+  normalizeModelScale,
+  normalizeRandomTextureTiming,
+  normalizeShowConnectionIndicator,
+  normalizeTextureChangeBlink,
+  normalizeWaterfallConfig,
 } from './types/exhibition';
 
 // URL-safe, high-entropy token for the unauthenticated /exhibition show route.
@@ -29,6 +37,12 @@ function rowToConfig(row: ExhibitionConfigRow): ExhibitionConfig {
     layout: row.config.layout,
     cells: row.config.cells,
     tunables: { ...DEFAULT_EXHIBITION_TUNABLES, ...row.config.tunables },
+    modelScale: normalizeModelScale(row.config.modelScale),
+    waterfall: normalizeWaterfallConfig(row.config.waterfall),
+    showConnectionIndicator: normalizeShowConnectionIndicator(row.config.showConnectionIndicator),
+    backgroundColor: normalizeBackgroundColor(row.config.backgroundColor),
+    textureChangeBlink: normalizeTextureChangeBlink(row.config.textureChangeBlink),
+    randomTextureTiming: normalizeRandomTextureTiming(row.config.randomTextureTiming),
     accessToken: row.access_token,
     createdAt: new Date(row.created_at).getTime(),
     updatedAt: new Date(row.updated_at).getTime(),
@@ -47,7 +61,15 @@ export async function createExhibitionConfig(
   layout: GridLayout,
   cells: ExhibitionCellConfig[],
   tunables: Partial<ExhibitionTunables> = {},
-  supabaseClient?: any
+  supabaseClient?: any,
+  display: {
+    modelScale?: number;
+    waterfall?: Partial<WaterfallConfig>;
+    showConnectionIndicator?: boolean;
+    backgroundColor?: string;
+    textureChangeBlink?: Partial<TextureChangeBlinkConfig>;
+    randomTextureTiming?: boolean;
+  } = {}
 ): Promise<{ config: ExhibitionConfig; accessToken: string }> {
   const client = supabaseClient || supabase;
   const id = generateExhibitionConfigId();
@@ -60,7 +82,17 @@ export async function createExhibitionConfig(
       id,
       user_id: userId,
       name,
-      config: { layout, cells, tunables: mergedTunables },
+      config: {
+        layout,
+        cells,
+        tunables: mergedTunables,
+        modelScale: normalizeModelScale(display.modelScale),
+        waterfall: normalizeWaterfallConfig(display.waterfall),
+        showConnectionIndicator: normalizeShowConnectionIndicator(display.showConnectionIndicator),
+        backgroundColor: normalizeBackgroundColor(display.backgroundColor),
+        textureChangeBlink: normalizeTextureChangeBlink(display.textureChangeBlink),
+        randomTextureTiming: normalizeRandomTextureTiming(display.randomTextureTiming),
+      },
       access_token: accessToken,
     })
     .select('*')
@@ -119,7 +151,7 @@ export async function listExhibitionConfigsForUser(userId: string, supabaseClien
   return (data as ExhibitionConfigRow[]).map(rowToConfig);
 }
 
-/** Update a config's layout/cells/tunables and/or name. Ownership must be verified by the caller first. */
+/** Update a config's layout/cells/tunables/display settings and/or name. Ownership must be verified by the caller first. */
 export async function updateExhibitionConfig(
   id: string,
   updates: {
@@ -127,6 +159,12 @@ export async function updateExhibitionConfig(
     layout?: GridLayout;
     cells?: ExhibitionCellConfig[];
     tunables?: Partial<ExhibitionTunables>;
+    modelScale?: number;
+    waterfall?: Partial<WaterfallConfig>;
+    showConnectionIndicator?: boolean;
+    backgroundColor?: string;
+    textureChangeBlink?: Partial<TextureChangeBlinkConfig>;
+    randomTextureTiming?: boolean;
   },
   supabaseClient?: any
 ): Promise<ExhibitionConfig | null> {
@@ -137,11 +175,36 @@ export async function updateExhibitionConfig(
 
   const patch: Record<string, any> = {};
   if (updates.name !== undefined) patch.name = updates.name;
-  if (updates.layout || updates.cells || updates.tunables) {
+  if (
+    updates.layout ||
+    updates.cells ||
+    updates.tunables ||
+    updates.modelScale !== undefined ||
+    updates.waterfall ||
+    updates.showConnectionIndicator !== undefined ||
+    updates.backgroundColor !== undefined ||
+    updates.textureChangeBlink ||
+    updates.randomTextureTiming !== undefined
+  ) {
     patch.config = {
       layout: updates.layout ?? existing.layout,
       cells: updates.cells ?? existing.cells,
       tunables: { ...existing.tunables, ...updates.tunables },
+      modelScale: updates.modelScale !== undefined ? normalizeModelScale(updates.modelScale) : existing.modelScale,
+      waterfall: updates.waterfall ? normalizeWaterfallConfig(updates.waterfall) : existing.waterfall,
+      showConnectionIndicator:
+        updates.showConnectionIndicator !== undefined
+          ? normalizeShowConnectionIndicator(updates.showConnectionIndicator)
+          : existing.showConnectionIndicator,
+      backgroundColor:
+        updates.backgroundColor !== undefined ? normalizeBackgroundColor(updates.backgroundColor) : existing.backgroundColor,
+      textureChangeBlink: updates.textureChangeBlink
+        ? normalizeTextureChangeBlink(updates.textureChangeBlink)
+        : existing.textureChangeBlink,
+      randomTextureTiming:
+        updates.randomTextureTiming !== undefined
+          ? normalizeRandomTextureTiming(updates.randomTextureTiming)
+          : existing.randomTextureTiming,
     };
   }
 

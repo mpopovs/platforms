@@ -13,7 +13,9 @@ mode, and fully additive (it doesn't change either of those).
 3. Click a grid cell, then pick a **Viewer** and **Model** for it in the side
    panel. Repeat for every cell you want to use — you don't have to fill the
    whole grid.
-4. Configure each cell's **texture mode** and **rotation** (see below).
+4. Configure each cell's **texture mode** and **rotation** (see below), and
+   optionally adjust the **Object size** and **Waterfall** scroll for the
+   whole grid.
 5. Check the **live preview** at the bottom of the page — it renders the
    actual grid at a smaller scale.
 6. Give the exhibition a **Name** and click **Save**. A show URL appears:
@@ -41,11 +43,101 @@ Each cell independently shows one of:
   photos mid-show.
 - **User uploads** — cycles through the model's uploaded textures pool,
   refreshed live during the show. Per cell you choose:
-  - **Newest first** — jumps to the newest upload the moment it arrives.
-  - **Cycle in order** — advances through uploads on a fixed interval.
-  - **Random** — picks a random upload on a fixed interval.
+  - **Newest first** — shows the newest upload and changes only when a new
+    one arrives (no timer).
+  - **Cycle in order** — advances through uploads every
+    **Change texture every (seconds)**.
+  - **Random** — picks a random upload every
+    **Change texture every (seconds)**.
+
+  Each grid tile shows its timing, e.g. `uploads · 12s` or `uploads · newest`.
 
 A single grid can freely mix locked and user-uploads cells.
+
+### Random timing
+
+Cells with the same interval normally change texture at the same moment. Tick
+**Texture change timing → Random** to make every change wait a random 50–150%
+of that cell's own interval (e.g. 6–18 s for 12 s), so objects change at
+different moments. On average each cell still changes about as often as its
+interval says.
+
+## Object size
+
+The **Object size** slider (below the layout picker) makes every model in the
+grid bigger or smaller at once, from 20% to 300% of its normal size. At 100%
+each model is automatically fitted to its cell; above that, large models can
+be cropped at their cell's edges.
+
+## Background colour
+
+**Background** (next to Object size) sets the colour behind the models and in
+the thin gaps between cells. The default is black.
+
+## Blink on texture change
+
+Tick **Blink on texture change** to make a model disappear briefly whenever its
+cell switches to a different texture (cycling, a new upload, or the `N` hotkey),
+then reappear with the new texture. **Blink length** sets how many frames the
+cell stays empty (showing the background colour), from 1 to 120. The readout
+gives the time at 60 fps; on a faster display the same number of frames is
+shorter.
+
+Locked cells don't blink, and neither do automatic texture-quality changes
+(same texture at another resolution). With the option off, textures swap
+without any gap.
+
+## Waterfall scroll
+
+Tick **Waterfall** to make the whole grid slide downward in an endless loop:
+rows leaving the bottom of the screen come back in at the top.
+
+- **Waterfall speed** sets how fast it moves. The readout shows the time for
+  one full loop (at the default speed and no space, 20s).
+- **Space between loops** adds empty space after the last row before the grid
+  repeats, from none (seamless) up to a full screen height. Adding space
+  doesn't change how fast the models move; each loop just takes longer.
+
+Both are relative to the screen height, so the live preview moves exactly like
+the fullscreen show.
+
+Remember to click **Save** — open show pages pick up size and waterfall
+changes when they're reloaded.
+
+## Working without internet
+
+The show page saves everything it can display in the browser, so a lost
+connection doesn't interrupt the show:
+
+- While online it downloads every model and **every** texture a cell can show
+  — including all uploads a "User uploads" cell cycles through, not just the
+  one on screen — plus a copy of the exhibition settings and model lists.
+- If the connection drops, the show keeps running from those saved files.
+  Uploads made while offline appear once the connection returns (it's checked
+  every 20 seconds).
+- The page can also be **reloaded without internet**, as long as it was opened
+  on that computer while online before. (Reloading offline relies on the
+  service worker, which is only active in production builds, not `next dev`.)
+- A deleted exhibition, or a show URL whose token was regenerated, stops
+  working the next time the page loads while online.
+
+Saved content is kept for at least 7 days. The show re-confirms what it uses
+while it runs online, and only removes files it hasn't needed for 7 days (for
+example deleted uploads) — never while offline.
+
+### Connection indicator
+
+Tick **Connection indicator** on the curation page to show a small dot in the
+bottom-left corner of the show (and the live preview):
+
+| Dot   | Meaning                                                        |
+| ----- | -------------------------------------------------------------- |
+| Green | Online — everything is saved for offline use                  |
+| Amber | Online — still saving content (don't rely on offline yet)     |
+| Red   | Offline — showing saved content                                |
+
+Hover the dot for details (e.g. how many files are saved). Untick the box
+and save to hide it.
 
 ## Show-time controls (hotkeys)
 
@@ -53,7 +145,7 @@ While the fullscreen show page has focus:
 
 | Key     | Action                                              |
 | ------- | ---------------------------------------------------- |
-| `Space` | Pause / resume rotation on every cell                |
+| `Space` | Pause / resume rotation on every cell and the waterfall scroll |
 | `N`     | Force every "user uploads" cell to its next texture   |
 | `F`     | Toggle browser fullscreen                             |
 
