@@ -117,6 +117,12 @@ export function Inline3DPreview({
   const capturedOnceRef = useRef(false);
   const [webglFailed, setWebglFailed] = useState(false);
   const [textureObjUrl, setTextureObjUrl] = useState<string | null>(null);
+  // True until Model3D reports both the model and its texture are loaded
+  const [isModelLoading, setIsModelLoading] = useState(true);
+  const [loadTimedOut, setLoadTimedOut] = useState(false);
+  // Some Model3D load failures never report back, so unlock the buttons
+  // after a while instead of trapping the user on the preview.
+  const isPreviewReady = webglFailed || loadTimedOut || !isModelLoading;
 
   // Convert data URL to object URL to reduce memory pressure on mobile
   useEffect(() => {
@@ -178,8 +184,21 @@ export function Inline3DPreview({
     };
   }, []);
 
+  useEffect(() => {
+    const timeout = setTimeout(() => setLoadTimedOut(true), 30000);
+    return () => clearTimeout(timeout);
+  }, []);
+
   const handleApprove = () => {
-    onApprove(latestCaptureRef.current ?? undefined);
+    if (!isPreviewReady) return;
+    // The auto-capture may not have run yet if the user approves right after load
+    const capture = latestCaptureRef.current ?? captureFnRef.current?.() ?? null;
+    onApprove(capture ?? undefined);
+  };
+
+  const handleCancel = () => {
+    if (!isPreviewReady) return;
+    onCancel();
   };
 
   return (
@@ -280,6 +299,7 @@ export function Inline3DPreview({
             modelId="inline-preview"
             textureId="inline-preview-texture"
             disableCache={true}
+            onLoadingChange={setIsModelLoading}
           />
           
           {/* Camera controls */}
@@ -292,9 +312,13 @@ export function Inline3DPreview({
             maxDistance={20}
           />
         </Canvas>
-        ) : (
-          <div className="flex items-center justify-center h-full">
+        ) : null}
+
+        {/* Loading overlay - shown until the model and its texture are loaded */}
+        {!isPreviewReady && (
+          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-white">
             <div className="w-12 h-12 border-4 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+            <p className="mt-4 text-gray-500 text-sm">Loading 3D preview...</p>
           </div>
         )}
       </div>
@@ -304,8 +328,9 @@ export function Inline3DPreview({
         <div className="w-full max-w-3xl mx-auto flex gap-4">
           {/* Cancel button */}
           <button
-            onClick={onCancel}
-            className="flex-1 bg-red-500/90 hover:bg-red-500 active:bg-red-600 backdrop-blur-sm rounded-xl py-6 flex items-center justify-center cursor-pointer transition-colors shadow-lg"
+            onClick={handleCancel}
+            disabled={!isPreviewReady}
+            className="flex-1 bg-red-500/90 hover:bg-red-500 active:bg-red-600 backdrop-blur-sm rounded-xl py-6 flex items-center justify-center cursor-pointer transition-colors shadow-lg disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none"
           >
             <X className="h-12 w-12 text-white" strokeWidth={2} />
           </button>
@@ -313,7 +338,8 @@ export function Inline3DPreview({
           {/* Approve button */}
           <button
             onClick={handleApprove}
-            className="flex-1 bg-green-500/90 hover:bg-green-500 active:bg-green-600 backdrop-blur-sm rounded-xl py-6 flex items-center justify-center cursor-pointer transition-colors shadow-lg"
+            disabled={!isPreviewReady}
+            className="flex-1 bg-green-500/90 hover:bg-green-500 active:bg-green-600 backdrop-blur-sm rounded-xl py-6 flex items-center justify-center cursor-pointer transition-colors shadow-lg disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none"
           >
             <Check className="h-12 w-12 text-white" strokeWidth={2} />
           </button>
