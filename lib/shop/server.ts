@@ -6,7 +6,7 @@ import { customAlphabet } from 'nanoid';
 import { redis } from '@/lib/redis';
 import { normalizeStorageUrl } from '@/lib/storage';
 import { getShopConfig, type ShopConfig } from './config';
-import { firstMockupUrl, printfulFromEnv, type PrintfulClient } from './printful';
+import { printfulFromEnv, type PrintfulClient } from './printful';
 import { makePrintFile } from './print-file';
 import type { FulfilStore } from './fulfil';
 
@@ -77,20 +77,19 @@ export interface DesignRow {
   print_height: number;
   coverage: number | null;
   effective_dpi: number | null;
-  mockup_task_id: number | null;
-  mockup_status: string;
-  mockup_url: string | null;
 }
 
 /**
- * Get or create the design for a drawing: print file + mockup task.
+ * Get or create the design for a drawing: the print file. (No Printful
+ * mockup: the drawing is already previewed in 3D on the upload page, and
+ * the shirt page shows the flat print file.)
  * Only drawings of pilot models are allowed in the slice.
  */
 export async function ensureDesign(
-  ctx: { config: ShopConfig; printful: PrintfulClient; db: SupabaseClient },
+  ctx: { config: ShopConfig; db: SupabaseClient },
   textureId: string
 ): Promise<DesignRow> {
-  const { config, printful, db } = ctx;
+  const { config, db } = ctx;
 
   const existing = await db.from('designs').select('*').eq('texture_id', textureId).maybeSingle();
   if (existing.data) return existing.data as DesignRow;
@@ -115,27 +114,6 @@ export async function ensureDesign(
   const up = await db.storage.from(PRINT_BUCKET).upload(path, print.png, { contentType: 'image/png', upsert: false });
   if (up.error) throw new Error(`Could not store print file: ${up.error.message}`);
 
-  // Mockup generation is rate-limited hard on new Printful stores (2/min);
-  // if it fails the page shows our own preview instead.
-  let mockupTaskId: number | null = null;
-  let mockupStatus = 'unavailable';
-  try {
-    const variantId = config.variants.M ?? Object.values(config.variants)[0];
-    const task = await printful.createMockupTask({
-      catalogProductId: config.productId,
-      catalogVariantIds: [variantId],
-      placement: {
-        placement: 'front',
-        technique: 'dtg',
-        layers: [{ type: 'file', url: await signedPrintUrl(db, path, 60 * 60) }]
-      }
-    });
-    mockupTaskId = task.id;
-    mockupStatus = 'pending';
-  } catch (err) {
-    console.warn('[shop] mockup task failed', err);
-  }
-
   const row = {
     id: designId,
     texture_id: textureId,
@@ -145,9 +123,7 @@ export async function ensureDesign(
     print_width: print.width,
     print_height: print.height,
     coverage: print.coverage,
-    effective_dpi: print.effectiveDpi,
-    mockup_task_id: mockupTaskId,
-    mockup_status: mockupStatus
+    effective_dpi: print.effectiveDpi
   };
   const ins = await db.from('designs').insert(row).select('*').single();
   if (ins.error) {
@@ -160,27 +136,6 @@ export async function ensureDesign(
     throw new Error(`Could not save design: ${ins.error.message}`);
   }
   return ins.data as DesignRow;
-}
-
-/** Poll Printful once for a pending mockup and store the result. */
-export async function refreshMockup(
-  ctx: { printful: PrintfulClient; db: SupabaseClient },
-  design: DesignRow
-): Promise<DesignRow> {
-  if (design.mockup_status !== 'pending' || !design.mockup_task_id) return design;
-  try {
-    const task = await ctx.printful.getMockupTask(design.mockup_task_id);
-    if (!task || task.status === 'pending') return design;
-    const url = firstMockupUrl(task);
-    const update = task.status === 'completed' && url
-      ? { mockup_status: 'completed', mockup_url: url }
-      : { mockup_status: 'failed' };
-    await ctx.db.from('designs').update(update).eq('id', design.id);
-    return { ...design, ...update } as DesignRow;
-  } catch (err) {
-    console.warn('[shop] mockup poll failed', err);
-    return design;
-  }
 }
 
 /** Supabase-backed store for handleCheckoutCompleted. */

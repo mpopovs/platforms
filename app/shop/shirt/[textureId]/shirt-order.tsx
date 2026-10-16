@@ -7,8 +7,6 @@ import { Button } from '@/components/ui/button';
 type Design = {
   designId: string;
   printPreviewUrl: string;
-  mockupStatus: string;
-  mockupUrl: string | null;
   sizes: string[];
 };
 
@@ -41,7 +39,7 @@ export function ShirtOrder({
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [countries]);
 
-  // Make (or reuse) the print file and mockup
+  // Make (or reuse) the print file
   useEffect(() => {
     let alive = true;
     fetch('/api/shop/design', {
@@ -60,25 +58,6 @@ export function ShirtOrder({
       alive = false;
     };
   }, [textureId]);
-
-  // Poll the mockup while Printful renders it
-  useEffect(() => {
-    if (!design || design.mockupStatus !== 'pending') return;
-    let tries = 0;
-    const timer = setInterval(async () => {
-      tries++;
-      try {
-        const r = await fetch(`/api/shop/design/${design.designId}`);
-        const data = await r.json();
-        if (data.mockupStatus !== 'pending' || tries > 30) {
-          setDesign((d) => (d ? { ...d, mockupStatus: data.mockupStatus === 'pending' ? 'failed' : data.mockupStatus, mockupUrl: data.mockupUrl } : d));
-        }
-      } catch {
-        /* keep trying */
-      }
-    }, 4000);
-    return () => clearInterval(timer);
-  }, [design?.designId, design?.mockupStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const shippingCents = country === 'LV' ? shipping.lv : shipping.eu;
 
@@ -120,13 +99,7 @@ export function ShirtOrder({
               Preparing your drawing for printing…
             </div>
           )}
-          {design && design.mockupStatus === 'completed' && design.mockupUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={design.mockupUrl} alt="Your T-shirt" className="aspect-square w-full object-contain" />
-          )}
-          {design && !(design.mockupStatus === 'completed' && design.mockupUrl) && (
-            <ShirtPreview printUrl={design.printPreviewUrl} rendering={design.mockupStatus === 'pending'} />
-          )}
+          {design && <ShirtPreview printUrl={design.printPreviewUrl} />}
         </div>
 
         {design && (
@@ -191,8 +164,8 @@ export function ShirtOrder({
   );
 }
 
-/** Our own preview while Printful's mockup renders (or if it is unavailable). */
-function ShirtPreview({ printUrl, rendering }: { printUrl: string; rendering: boolean }) {
+/** Flat preview: the exact print file placed on the chest of a plain shirt. */
+function ShirtPreview({ printUrl }: { printUrl: string }) {
   return (
     <div className="relative aspect-square w-full bg-gray-100">
       <svg viewBox="0 0 400 400" className="absolute inset-0 h-full w-full" aria-hidden>
@@ -211,11 +184,6 @@ function ShirtPreview({ printUrl, rendering }: { printUrl: string; rendering: bo
         className="absolute object-contain object-top"
         style={{ left: '35%', top: '25%', width: '30%', height: '40%' }}
       />
-      {rendering && (
-        <span className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-white/90 px-3 py-1 text-xs text-gray-600 shadow">
-          Making a photo preview…
-        </span>
-      )}
     </div>
   );
 }

@@ -15,10 +15,6 @@ CREATE TABLE IF NOT EXISTS public.designs (
   print_height INT NOT NULL,
   coverage REAL,
   effective_dpi INT,
-  mockup_task_id BIGINT,
-  mockup_status TEXT NOT NULL DEFAULT 'none'
-    CHECK (mockup_status IN ('none', 'pending', 'completed', 'failed', 'unavailable')),
-  mockup_url TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

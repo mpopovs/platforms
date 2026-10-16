@@ -42,7 +42,7 @@ Locally: `stripe listen --forward-to localhost:3000/api/webhooks/stripe` and use
 ## 4. Test the whole path (test mode)
 
 1. Upload a drawing for the pilot model; the success screen shows **Put this on a T-shirt**.
-2. The shirt page makes the print file and a Printful mockup (new stores may only make 2 mockups a minute; the page shows its own preview meanwhile).
+2. The shirt page makes the print file and shows it on a plain shirt (no Printful mockup: the drawing is already previewed in 3D).
 3. Choose size and country, pay with card `4242 4242 4242 4242`.
 4. Check: `orders.status = printful_draft`, and a draft order with external id `ord_…` in Printful → Orders.
 5. Replay the event from the Stripe dashboard: no second Printful order appears.
@@ -54,7 +54,7 @@ Then confirm **one** real order by hand in Printful to check print quality and d
 | Step | Code |
 |---|---|
 | Print file from drawing (paper removed, 12×16 in at 150 DPI) | `lib/shop/print-file.ts` |
-| Printful API v2 (orders, mockups, 429 retry) | `lib/shop/printful.ts` |
+| Printful API v2 (orders, 429 retry; mockup calls kept for later use, e.g. order emails) | `lib/shop/printful.ts` |
 | Design + checkout + webhook glue | `lib/shop/server.ts`, `app/api/shop/*`, `app/api/webhooks/stripe` |
 | Paid → Printful order, idempotent | `lib/shop/fulfil.ts` (tested in `tests/shop-fulfil.test.ts`) |
 | Pages | `app/shop/shirt/[textureId]`, `app/shop/thanks` |

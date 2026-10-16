@@ -7,7 +7,7 @@ export const maxDuration = 60;
 
 /**
  * POST /api/shop/design { textureId }
- * Makes (or reuses) the print file and starts a Printful mockup.
+ * Makes (or reuses) the print file for a drawing.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -21,8 +21,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       designId: design.id,
       printPreviewUrl: await signedPrintUrl(shop.db, design.print_file_path, 60 * 60),
-      mockupStatus: design.mockup_status,
-      mockupUrl: design.mockup_url,
       sizes: Object.keys(shop.config.variants)
     });
   } catch (err) {

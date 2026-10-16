@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
 
     const { data: design } = await db
       .from('designs')
-      .select('id, texture_id, model_id, mockup_url')
+      .select('id, texture_id, model_id')
       .eq('id', designId)
       .maybeSingle();
     if (!design) throw new ShopError('Design not found', 404);
@@ -64,8 +64,7 @@ export async function POST(request: NextRequest) {
             currency: config.currency,
             unit_amount: config.priceCents,
             product_data: {
-              name: `T-shirt with your drawing (${size})`,
-              ...(design.mockup_url ? { images: [design.mockup_url] } : {})
+              name: `T-shirt with your drawing (${size})`
             }
           }
         }
