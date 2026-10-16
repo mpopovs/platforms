@@ -17,7 +17,7 @@ STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 
 PRINTFUL_TOKEN=...                                  # Printful private token
-PRINTFUL_STORE_ID=...                               # Manual order / API store
+# PRINTFUL_STORE_ID=...                             # only for account-level tokens
 PRINTFUL_PRODUCT_ID=71                              # check in Printful catalog
 PRINTFUL_VARIANTS=S:4011,M:4012,L:4013,XL:4014       # size:catalog_variant_id, check
 

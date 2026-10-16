@@ -35,6 +35,14 @@ describe('printful client', () => {
     assert.equal(JSON.parse(String(calls[0].init.body)).external_id, 'ord_1');
   });
 
+  test('no store header when the token is for a single store', async () => {
+    const { impl, calls } = fakeFetch([json(200, { data: { id: 1, status: 'pending' } })]);
+    const pf = createPrintfulClient({ token: 't', fetchImpl: impl });
+    await pf.getMockupTask(1);
+    const h = calls[0].init.headers as Record<string, string>;
+    assert.equal('X-PF-Store-Id' in h, false);
+  });
+
   test('addresses orders by external id with @', async () => {
     const { impl, calls } = fakeFetch([json(200, { data: { id: 7, status: 'pending' } })]);
     const pf = createPrintfulClient({ token: 't', storeId: '1', fetchImpl: impl });

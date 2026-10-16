@@ -1,7 +1,8 @@
 /**
  * Minimal Printful API v2 client for the shirt slice.
  *
- * - Auth: private token as Bearer, store chosen with X-PF-Store-Id.
+ * - Auth: private token as Bearer. X-PF-Store-Id is only sent when a store
+ *   id is set: a token created for a single store needs none.
  * - Rate limits: 429 responses are retried after `retry-after` seconds
  *   (capped), at most `maxRetries` times. Mockup generation has its own,
  *   much lower limit (2/min for new stores), so callers cache mockups.
@@ -16,7 +17,8 @@ export const PRINTFUL_API = 'https://api.printful.com';
 
 export interface PrintfulConfig {
   token: string;
-  storeId: string;
+  /** Needed only for account-level tokens that can reach several stores. */
+  storeId?: string | null;
   fetchImpl?: typeof fetch;
   maxRetries?: number;
   /** Upper bound on a single retry wait, ms. */
@@ -107,7 +109,7 @@ export function createPrintfulClient(config: PrintfulConfig) {
         method,
         headers: {
           Authorization: `Bearer ${config.token}`,
-          'X-PF-Store-Id': config.storeId,
+          ...(config.storeId ? { 'X-PF-Store-Id': config.storeId } : {}),
           ...(body !== undefined ? { 'Content-Type': 'application/json' } : {})
         },
         body: body !== undefined ? JSON.stringify(body) : undefined
@@ -197,7 +199,6 @@ export function firstMockupUrl(task: MockupTask | null): string | null {
 /** Client from env, or null when the shop is not configured. */
 export function printfulFromEnv(): PrintfulClient | null {
   const token = process.env.PRINTFUL_TOKEN;
-  const storeId = process.env.PRINTFUL_STORE_ID;
-  if (!token || !storeId) return null;
-  return createPrintfulClient({ token, storeId });
+  if (!token) return null;
+  return createPrintfulClient({ token, storeId: process.env.PRINTFUL_STORE_ID || null });
 }
