@@ -9,7 +9,7 @@ import { Model3D, Model3DHandle } from './model-3d';
 import { preloadTexture } from './model-3d';
 import { prefetchTextures } from '@/lib/texture-cache';
 import { getIsOnline, subscribeConnectivity } from '@/lib/connectivity-monitor';
-import { TEXTURE_POLL_INTERVAL_MS } from '@/lib/viewer-runtime-config';
+import { TEXTURE_POLL_INTERVAL_MS, TEXTURE_PREFETCH_GAP_MS, TEXTURE_PREFETCH_START_DELAY_MS } from '@/lib/viewer-runtime-config';
 
 interface ModelCarouselProps {
   models: ViewerModelWithTexture[];
@@ -61,7 +61,14 @@ export function ModelCarousel({
   const mouseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const model3DRef = useRef<Model3DHandle>(null);
   const prefetchAbortRef = useRef<AbortController | null>(null);
-  
+  // Read by the background prefetch without restarting it on every change
+  const currentIndexRef = useRef(0);
+  currentIndexRef.current = currentIndex;
+  const isModelLoadingRef = useRef(true);
+  isModelLoadingRef.current = isModelLoading;
+  const firstItemShownRef = useRef(false);
+  if (!isModelLoading) firstItemShownRef.current = true;
+
   // Animation state
   const [modelHasAnimations, setModelHasAnimations] = useState(false);;
   const [modelIsPlaying, setModelIsPlaying] = useState(false);
@@ -214,13 +221,13 @@ export function ModelCarousel({
     }
   }, [allModelsWithTextures, settings.textureCycling.priorityTimeWindow, settings.textureCycling.priorityRepeatCount, settings.textureCycling.enabled]);
 
-  // Background-prefetch all textures into IndexedDB so Samsung Frame TV loads them instantly.
-  // Runs whenever the display queue changes. Uses low concurrency (2) to stay responsive.
+  // Background-prefetch all textures into IndexedDB so Samsung Frame TV loads them instantly
+  // (and keeps working offline). Runs whenever the display queue changes, but only starts
+  // once the first item is on screen plus a delay, downloads one texture at a time in
+  // display order starting from the current position, and pauses while the display is
+  // loading — so it never slows down what's actually being shown.
   useEffect(() => {
     if (!settings.textureCycling.enabled || displayQueue.length === 0) return;
-    // Don't attempt prefetching while offline — there's nothing to fetch and
-    // it would just generate failed network requests.
-    if (!getIsOnline()) return;
 
     // Abort any previous prefetch run
     if (prefetchAbortRef.current) {
@@ -229,37 +236,62 @@ export function ModelCarousel({
     const controller = new AbortController();
     prefetchAbortRef.current = controller;
 
-    // Collect unique texture URLs (skip placeholders and duplicates)
-    const seen = new Set<string>();
-    const toFetch: Array<{ url: string; modelId: string; textureId: string }> = [];
-    for (const pair of displayQueue) {
-      if (!pair.texture) continue;
-      const url = pair.texture.corrected_texture_url && !pair.texture.corrected_texture_url.startsWith('local://')
-        ? pair.texture.corrected_texture_url
-        : pair.texture.original_photo_url;
-      if (!url || seen.has(url)) continue;
-      seen.add(url);
-      toFetch.push({ url, modelId: pair.model.id, textureId: pair.texture.id });
-    }
+    const startPrefetch = () => {
+      if (controller.signal.aborted) return;
+      // Don't attempt prefetching while offline — there's nothing to fetch and
+      // it would just generate failed network requests.
+      if (!getIsOnline()) return;
 
-    if (toFetch.length > 0) {
-      console.log(`[Carousel] Background prefetch: ${toFetch.length} unique textures`);
-      prefetchTextures(toFetch, controller.signal).catch(err => {
-        if ((err as Error)?.name !== 'AbortError') {
-          console.warn('[Carousel] Prefetch failed:', err);
-        }
-      });
-    }
+      // Collect unique texture URLs (skip placeholders and duplicates), upcoming items first
+      const seen = new Set<string>();
+      const toFetch: Array<{ url: string; modelId: string; textureId: string }> = [];
+      const start = currentIndexRef.current % displayQueue.length;
+      for (let offset = 0; offset < displayQueue.length; offset++) {
+        const pair = displayQueue[(start + offset) % displayQueue.length];
+        if (!pair.texture) continue;
+        const url = pair.texture.corrected_texture_url && !pair.texture.corrected_texture_url.startsWith('local://')
+          ? pair.texture.corrected_texture_url
+          : pair.texture.original_photo_url;
+        if (!url || seen.has(url)) continue;
+        seen.add(url);
+        toFetch.push({ url, modelId: pair.model.id, textureId: pair.texture.id });
+      }
+
+      if (toFetch.length > 0) {
+        console.log(`[Carousel] Background prefetch: ${toFetch.length} unique textures`);
+        prefetchTextures(toFetch, controller.signal, {
+          gapMs: TEXTURE_PREFETCH_GAP_MS,
+          isBusy: () => isModelLoadingRef.current,
+        }).catch(err => {
+          if ((err as Error)?.name !== 'AbortError') {
+            console.warn('[Carousel] Prefetch failed:', err);
+          }
+        });
+      }
+    };
+
+    // Wait for the first item to appear, then the start delay. Later queue changes
+    // (new uploads) still wait a little so they don't disturb the next transition.
+    const delay = firstItemShownRef.current ? TEXTURE_PREFETCH_GAP_MS * 4 : TEXTURE_PREFETCH_START_DELAY_MS;
+    let startTimer: ReturnType<typeof setTimeout> | null = null;
+    const waitForFirstItem = setInterval(() => {
+      if (!firstItemShownRef.current) return;
+      clearInterval(waitForFirstItem);
+      startTimer = setTimeout(startPrefetch, delay);
+    }, 500);
 
     return () => {
+      clearInterval(waitForFirstItem);
+      if (startTimer) clearTimeout(startTimer);
       controller.abort();
     };
   }, [displayQueue, settings.textureCycling.enabled]);
 
   // Look-ahead: pre-decode the next texture while the current one is on screen.
   // When the carousel advances, Model3D picks it from the preload cache instantly.
+  // Waits until the current item has finished loading so it gets the TV's full attention.
   useEffect(() => {
-    if (!displayQueue.length) return;
+    if (!displayQueue.length || isModelLoading) return;
     // Preload the next 2 items in the queue
     for (let ahead = 1; ahead <= 2; ahead++) {
       const nextPair = displayQueue[(currentIndex + ahead) % displayQueue.length];
@@ -269,7 +301,7 @@ export function ModelCarousel({
         : nextPair.texture.original_photo_url;
       if (url) preloadTexture(url).catch(() => {}); // fire-and-forget
     }
-  }, [currentIndex, displayQueue]);
+  }, [currentIndex, displayQueue, isModelLoading]);
 
   // Sort models by texture upload time (newest first) and jump to newest when updated
   useEffect(() => {

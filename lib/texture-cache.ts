@@ -323,52 +323,87 @@ export async function deleteStaleCachedAssets(modelIds: string[], keepUrls: Set<
 }
 
 /**
- * Background-prefetch a list of textures into IndexedDB.
- * Already-cached URLs are skipped. Downloads are throttled to
- * CONCURRENCY=2 to avoid overwhelming Samsung Frame TV memory/network.
+ * Returns which of `urls` are already cached, in a single transaction.
+ * Uses count() so only keys are checked — the blobs themselves are never read
+ * (reading hundreds of full image blobs just to test existence was a major
+ * startup cost on Tizen TVs).
+ */
+export async function getCachedTextureUrls(urls: string[]): Promise<Set<string>> {
+  const db = await openDB();
+
+  return new Promise((resolve, reject) => {
+    const cached = new Set<string>();
+    const transaction = db.transaction([TEXTURE_STORE], 'readonly');
+    const store = transaction.objectStore(TEXTURE_STORE);
+
+    for (const url of urls) {
+      const request = store.count(url);
+      request.onsuccess = () => {
+        if (request.result > 0) cached.add(url);
+      };
+    }
+
+    transaction.oncomplete = () => {
+      db.close();
+      resolve(cached);
+    };
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+/**
+ * Background-prefetch a list of textures into IndexedDB, in the given order.
+ * Already-cached URLs are skipped. Downloads run one at a time with `gapMs`
+ * between them, and wait while `isBusy()` returns true (e.g. while the display
+ * is loading the texture on screen), so the prefetch never competes with what
+ * the viewer is actually showing. A single busy wait is capped at
+ * `maxBusyWaitMs` so a stuck loading flag can't stall the prefetch forever.
  */
 export async function prefetchTextures(
   textures: Array<{ url: string; modelId: string; textureId: string }>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options: { gapMs?: number; isBusy?: () => boolean; maxBusyWaitMs?: number } = {}
 ): Promise<void> {
-  const CONCURRENCY = 2;
+  const { gapMs = 500, isBusy, maxBusyWaitMs = 30_000 } = options;
 
-  // Filter to only URLs not yet in cache
-  const uncached: Array<{ url: string; modelId: string; textureId: string }> = [];
-  for (const item of textures) {
-    if (signal?.aborted) return;
-    try {
-      const blob = await getTexture(item.url);
-      if (!blob) uncached.push(item);
-    } catch {
-      uncached.push(item); // treat error as uncached
-    }
+  let cached: Set<string>;
+  try {
+    cached = await getCachedTextureUrls(textures.map(t => t.url));
+  } catch {
+    cached = new Set(); // treat error as uncached
   }
+  if (signal?.aborted) return;
 
-  console.log(`[Prefetch] ${textures.length - uncached.length}/${textures.length} already cached, warming ${uncached.length}`);
+  const uncached = textures.filter(t => !cached.has(t.url));
+  console.log(`[Prefetch] ${cached.size}/${textures.length} already cached, warming ${uncached.length}`);
 
-  for (let i = 0; i < uncached.length; i += CONCURRENCY) {
+  for (let i = 0; i < uncached.length; i++) {
     if (signal?.aborted) return;
-    const batch = uncached.slice(i, i + CONCURRENCY);
-    await Promise.all(batch.map(async ({ url, modelId, textureId }) => {
-      if (signal?.aborted) return;
-      try {
-        const response = await fetch(url, { signal });
-        if (!response.ok) return;
+
+    const waitStart = Date.now();
+    while (isBusy?.() && !signal?.aborted && Date.now() - waitStart < maxBusyWaitMs) {
+      await sleep(1000);
+    }
+    if (signal?.aborted) return;
+
+    const { url, modelId, textureId } = uncached[i];
+    try {
+      const response = await fetch(url, { signal });
+      if (response.ok) {
         const blob = await response.blob();
         if (signal?.aborted) return;
         await storeTexture(url, blob, modelId, textureId);
         console.log(`[Prefetch] Cached texture ${i + 1}/${uncached.length}:`, url.split('/').pop());
-      } catch (err: unknown) {
-        if ((err as Error)?.name !== 'AbortError') {
-          console.warn('[Prefetch] Failed to cache texture:', url, err);
-        }
       }
-    }));
-    // Small pause between batches — keeps Samsung TV responsive
-    if (!signal?.aborted) {
-      await new Promise<void>(resolve => setTimeout(resolve, 150));
+    } catch (err: unknown) {
+      if ((err as Error)?.name === 'AbortError') return;
+      console.warn('[Prefetch] Failed to cache texture:', url, err);
     }
+
+    // Pause between downloads — keeps Samsung TV responsive
+    if (!signal?.aborted) await sleep(gapMs);
   }
 }
 

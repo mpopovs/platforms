@@ -39,6 +39,19 @@ export const MODEL_POLL_INTERVAL_MS = 30_000;
 export const TEXTURE_POLL_INTERVAL_MS = 30_000;
 
 // ---------------------------------------------------------------------------
+// Background texture prefetch (offline cache warm-up)
+// ---------------------------------------------------------------------------
+// Warming the IndexedDB cache with every texture used to start immediately on
+// page load and competed with the first visible texture for network, disk and
+// CPU — on Tizen TVs that made startup very slow once there were many textures.
+// The prefetch now waits until the first texture is on screen plus this delay,
+// then downloads one texture at a time (upcoming ones first), pausing whenever
+// the display itself is loading something.
+export const TEXTURE_PREFETCH_START_DELAY_MS = 15_000;
+// Pause between consecutive prefetch downloads, so the TV stays responsive.
+export const TEXTURE_PREFETCH_GAP_MS = 500;
+
+// ---------------------------------------------------------------------------
 // Connectivity probing
 // ---------------------------------------------------------------------------
 // navigator.onLine is unreliable on Tizen/Smart TV browsers (it usually only
