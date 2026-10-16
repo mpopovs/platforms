@@ -9,6 +9,9 @@ export async function addCustomDomainAction(
   prevState: any,
   formData: FormData
 ) {
+  if (!(await getAdminUser(await createClient()))) {
+    return { success: false, error: 'Not allowed' };
+  }
   const domain = formData.get('domain') as string;
 
   if (!domain) {
@@ -52,6 +55,9 @@ export async function deleteCustomDomainAction(
   prevState: any,
   formData: FormData
 ) {
+  if (!(await getAdminUser(await createClient()))) {
+    return { success: false, error: 'Not allowed' };
+  }
   const domain = formData.get('domain');
   await redis.del(`domain:${domain}`);
   revalidatePath('/admin');
@@ -62,6 +68,9 @@ export async function verifyCustomDomainAction(
   prevState: any,
   formData: FormData
 ) {
+  if (!(await getAdminUser(await createClient()))) {
+    return { success: false, error: 'Not allowed' };
+  }
   const domain = formData.get('domain') as string;
   
   // Here you would typically check DNS records
@@ -112,6 +121,7 @@ import {
 } from '@/lib/viewers';
 import { generateShortCode, createShortUploadUrl } from '@/lib/short-links';
 import { createClient } from '@/lib/supabase/server';
+import { getAdminUser } from '@/lib/auth/server';
 
 /**
  * Create a new viewer
@@ -121,7 +131,7 @@ export async function createViewerAction(
   formData: FormData
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   
   if (!user) {
     return { success: false, error: 'You must be logged in to create a viewer' };
@@ -179,7 +189,7 @@ export async function updateViewerAction(
   formData: FormData
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   
   if (!user) {
     return { success: false, error: 'You must be logged in' };
@@ -229,7 +239,7 @@ export async function updateViewerSettingsAction(
   formData: FormData
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   
   if (!user) {
     return { success: false, error: 'You must be logged in' };
@@ -306,7 +316,7 @@ export async function deleteViewerAction(
   formData: FormData
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   
   if (!user) {
     return { success: false, error: 'You must be logged in' };
@@ -338,7 +348,7 @@ export async function generateNewPinAction(
   formData: FormData
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   
   if (!user) {
     return { success: false, error: 'You must be logged in' };
@@ -389,7 +399,7 @@ export async function generateNewPinAction(
  */
 export async function getCurrentPinAction(viewerId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   
   if (!user) {
     return { success: false, error: 'You must be logged in' };
@@ -427,7 +437,7 @@ export async function getCurrentPinAction(viewerId: string) {
  */
 export async function getAllViewersAction() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   
   if (!user) {
     return [];
@@ -453,7 +463,7 @@ export async function generateEmbedTokenAction(
   formData: FormData
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   
   if (!user) {
     return { success: false, error: 'You must be logged in' };
@@ -518,7 +528,7 @@ export async function upload3DModelAction(
   formData: FormData
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   
   if (!user) {
     return { success: false, error: 'You must be logged in' };
@@ -613,7 +623,7 @@ export async function delete3DModelAction(
   formData: FormData
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   
   if (!user) {
     return { success: false, error: 'You must be logged in' };
@@ -664,7 +674,7 @@ export async function updateModelNameAction(
   formData: FormData
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   
   if (!user) {
     return { success: false, error: 'You must be logged in' };
@@ -710,7 +720,7 @@ export async function updateModelFileAction(
   formData: FormData
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   
   if (!user) {
     return { success: false, error: 'You must be logged in' };
@@ -768,7 +778,7 @@ export async function reorderModelsAction(
   formData: FormData
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   
   if (!user) {
     return { success: false, error: 'You must be logged in' };
@@ -804,7 +814,7 @@ export async function reorderModelsAction(
  */
 export async function getViewerModelsAction(viewerId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   
   if (!user) {
     return [];
@@ -846,7 +856,7 @@ export async function deleteTextureAction(
   formData: FormData
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   
   if (!user) {
     return { success: false, error: 'You must be logged in' };
@@ -918,7 +928,7 @@ export async function createExhibitionConfigAction(input: {
   randomTextureTiming?: boolean;
 }) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   if (!user) return { success: false, error: 'You must be logged in' };
 
   if (!input.name?.trim()) return { success: false, error: 'Name is required' };
@@ -964,7 +974,7 @@ export async function updateExhibitionConfigAction(
   }
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   if (!user) return { success: false, error: 'You must be logged in' };
 
   try {
@@ -984,7 +994,7 @@ export async function updateExhibitionConfigAction(
 /** Delete an exhibition config. */
 export async function deleteExhibitionConfigAction(id: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   if (!user) return { success: false, error: 'You must be logged in' };
 
   try {
@@ -1004,7 +1014,7 @@ export async function deleteExhibitionConfigAction(id: string) {
 /** Issue a new access token for the show route, invalidating the old show URL. */
 export async function regenerateExhibitionTokenAction(id: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAdminUser(supabase);
   if (!user) return { success: false, error: 'You must be logged in' };
 
   try {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import type { TextureCyclingSettings } from '@/lib/types/viewer';
+import { getAdminUser } from '@/lib/auth/server';
 
 /**
  * POST /api/update-viewer-settings
@@ -11,9 +12,9 @@ export async function POST(request: NextRequest) {
     const supabase = await createClient();
     
     // Check authentication
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const user = await getAdminUser(supabase);
     
-    if (authError || !user) {
+    if (!user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }

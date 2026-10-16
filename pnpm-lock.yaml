@@ -130,6 +130,12 @@ importers:
         specifier: ^5.8.3
         version: 5.8.3
 
+  packages/scene-engine:
+    dependencies:
+      three:
+        specifier: '>=0.181.0'
+        version: 0.181.1
+
 packages:
 
   '@alloc/quick-lru@5.2.0':
