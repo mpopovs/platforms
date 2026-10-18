@@ -15,15 +15,28 @@ export default async function ShirtPage({
   searchParams: Promise<{ cancelled?: string }>;
 }) {
   const config = getShopConfig();
-  if (!config.enabled || !process.env.SUPABASE_SERVICE_ROLE_KEY) notFound();
-
   const { textureId } = await params;
-  const { data: tex } = await shopDb()
+
+  // The page is hidden (404) unless everything lines up; log why on the
+  // server so setup problems are easy to spot in the terminal.
+  const hide = (reason: string): never => {
+    console.warn(`[shop] /shop/shirt/${textureId} hidden: ${reason}`);
+    notFound();
+  };
+
+  if (!config.enabled) hide('SHOP_ENABLED is not "true"');
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) hide('SUPABASE_SERVICE_ROLE_KEY is missing');
+
+  const { data: tex, error } = await shopDb()
     .from('model_textures')
     .select('id, model_id')
     .eq('id', textureId)
     .maybeSingle();
-  if (!tex || !config.pilotModelIds.includes(tex.model_id)) notFound();
+  if (error) hide(`database error: ${error.message}`);
+  if (!tex) hide('no model_textures row with this id in the database NEXT_PUBLIC_SUPABASE_URL points to');
+  if (!config.pilotModelIds.includes(tex!.model_id)) {
+    hide(`model ${tex!.model_id} is not in NEXT_PUBLIC_SHOP_PILOT_MODEL_IDS (${config.pilotModelIds.join(',') || 'empty'})`);
+  }
 
   return (
     <ShirtOrder
