@@ -5,7 +5,8 @@ import { NavBarSupabase } from '@/components/navbar-supabase';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isFullPage = pathname?.includes('/worksheet-builder');
+  const isFullPage =
+    pathname?.includes('/worksheet-builder') || /^\/admin\/scenes\/[^/]+$/.test(pathname ?? '');
 
   if (isFullPage) {
     return <>{children}</>;

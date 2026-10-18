@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ['puppeteer'],
+  transpilePackages: ['@claypixels/scene-engine'],
   compiler: {
     removeConsole: false,
   },
