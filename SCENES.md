@@ -94,6 +94,34 @@ pnpm tsx scripts/import-scene.ts \
 
 Files with the same content are stored once, so re-running only uploads what changed.
 
+## Different scenes and stories
+
+A scene is any environment plus a cast plus an optional story. Pick a
+starting point when you create it:
+
+| Template | What you get |
+|---|---|
+| Fashion show | Lit catwalk, four models, and a story: each walks out, poses for a close shot, walks back; captions; loops |
+| Empty stage | A lit stage with no cast, for any story |
+| From a world folder | Nothing yet; upload a Marble / hot spring world folder |
+
+**Environment** (`scene.json`): a Marble splat or the 2.5D image backdrop (as
+before), `"environment": "stage"` (procedural stage, settings under `"stage"`),
+or a GLB room (`"files": { "environment": "env/room.glb" }`).
+
+**Cast tab** (`cast.json`): any rigged GLB with animations. *Add character
+(GLB)*, then set its height and walk speed, which clip is idle / walk / pose /
+swim, and the **outfit mesh**: the mesh that wears the child's drawing (its
+UVs must match the worksheet). *Try a drawing* previews any image on it.
+Scenes without cast.json still get the eight capybaras.
+
+**Story tab** (`story.json`): steps played in order like a short film:
+camera shot (frame it in Free view, *Use current view*, optional follow),
+walk (route or spot), place, animation, caption, wait, show / hide, outfit
+(the child's drawing or an image), music, and free (back to their own
+behaviour). *Start next step together* lets two things happen at once.
+*Plays by itself* starts it in the player; *Loop* repeats it.
+
 ## How it fits together
 
 - The engine is `packages/scene-engine` (three.js r186, WebGPU with WebGL

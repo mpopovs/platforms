@@ -26,6 +26,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Nav, KIND, CELL, polyContains, polyCentroid } from './nav.js';
 import { loadDepthBackdrop } from './backdrop.js';
 import { createUi } from './ui.js';
+import { buildStage } from './stage.js';
+import { createStoryRunner } from './story.js';
 
 /**
  * Mount the scene into `container`. Returns { ready, destroy }.
@@ -46,12 +48,19 @@ const IS_PHONE = matchMedia('(pointer: coarse)').matches && Math.min(innerWidth,
 const statusEl = ui.status;
 const say = t => { statusEl.textContent = t; };
 
-const TAGS = ['baby', 'explorer_boy', 'four_legged', 'girl_child', 'mother', 'sporty_boy', 'teen_girl_be', 'teen_girl_ho'];
+// Default cast when a scene has no cast.json: the eight capybaras.
+const LEGACY_TAGS = ['baby', 'explorer_boy', 'four_legged', 'girl_child', 'mother', 'sporty_boy', 'teen_girl_be', 'teen_girl_ho'];
+const LEGACY_NAMES = { baby: 'Baby', explorer_boy: 'Explorer boy', four_legged: 'Four-legged', girl_child: 'Girl child', mother: 'Mother', sporty_boy: 'Sporty boy', teen_girl_be: 'Teen girl (beanie)', teen_girl_ho: 'Teen girl (hoodie)' };
 const SURPRISE = {
   baby: 'surprise_popcorn', explorer_boy: 'surprise_lookout', four_legged: 'surprise_chill_flop',
   girl_child: 'surprise_pirouette', mother: 'surprise_piggyback_offer', sporty_boy: 'surprise_backflip',
   teen_girl_be: 'surprise_runway_strut', teen_girl_ho: 'surprise_dance'
 };
+const legacyCast = () => LEGACY_TAGS.map(tag => ({ id: tag, name: LEGACY_NAMES[tag], file: `capys/${tag}/${tag}_capy_v2.glb`, clips: { pose: SURPRISE[tag] }, sizeFactor: tag === 'baby' ? 0.72 : 1 }));
+// cast.json: { characters: [{ id, name, file, height?, speed?, clips?: { idle, walk, swim, pose, ... }, outfit?: { mesh: name | [names] }, enabled? }] }
+let cast = [];
+let TAGS = [];
+const castUrl = ch => ch.file?.startsWith('capys/') && opts.capysBase ? `${CAPYS}/${ch.file.slice(6)}` : `${WORLD}/${ch.file}`;
 
 // ---------------------------------------------------------------- layout (look + camera)
 const DEFAULT_LAYOUT = {
@@ -93,6 +102,7 @@ on(window, 'resize', () => {
 on(window, 'pointermove', e => hero.aim.set((e.clientX / innerWidth) * 2 - 1, (e.clientY / innerHeight) * 2 - 1));
 on(window, 'deviceorientation', e => { if (e.gamma != null) hero.aim.set(THREE.MathUtils.clamp(e.gamma / 25, -1, 1), THREE.MathUtils.clamp((e.beta - 45) / 25, -1, 1)); });
 let backdropMeta = null; // set when the 2.5D image backdrop is used
+let envMode = 'splat';
 function setupHero() {
   // the generation camera sits at the splat's own origin; the image backdrop has its own camera
   let fov = L.camera.fov, pitchDeg = L.camera.pitch, yawDeg = L.camera.yaw;
@@ -103,6 +113,10 @@ function setupHero() {
     const imgV = THREE.MathUtils.degToRad(c.vfov), imgH = 2 * Math.atan(Math.tan(imgV / 2) * backdropMeta.width / backdropMeta.height);
     const margin = 0.9;
     fov = THREE.MathUtils.radToDeg(Math.min(imgV * margin, 2 * Math.atan(Math.tan(imgH / 2) * margin / camera.aspect)));
+  } else if (envMode === 'stage' || envMode === 'glb') {
+    hero.base.fromArray(L.camera.pos);
+    const d = new THREE.Vector3().fromArray(L.camera.target).sub(hero.base).normalize();
+    pitchDeg = THREE.MathUtils.radToDeg(Math.asin(d.y)); yawDeg = THREE.MathUtils.radToDeg(Math.atan2(-d.x, -d.z));
   } else hero.base.copy(splatRoot.position);
   hero.fov = fov; hero.pitch = pitchDeg; hero.yaw = yawDeg;
   const pitch = THREE.MathUtils.degToRad(pitchDeg), yaw = THREE.MathUtils.degToRad(yawDeg);
@@ -120,6 +134,26 @@ function updateHero(dt, t) {
   camera.position.set(hero.base.x + ox, hero.base.y + oy, hero.base.z);
   _look.copy(hero.base).addScaledVector(hero.dir, 9);
   camera.lookAt(_look);
+}
+const storyCam = { from: new THREE.Vector3(), fromT: new THREE.Vector3(), to: new THREE.Vector3(), toT: new THREE.Vector3(), target: new THREE.Vector3(), t: 1, dur: 0, fov: 42, fromFov: 42, follow: null, done: null };
+function cameraTo(shot, seconds = 0, follow = null) {
+  if (shot === 'hero') { storyCam.follow = null; setView('hero'); return Promise.resolve(); }
+  if (view !== 'story') { storyCam.target.copy(camera.position).add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(5)); }
+  view = 'story'; controls.enabled = false;
+  storyCam.from.copy(camera.position); storyCam.fromT.copy(storyCam.target); storyCam.fromFov = camera.fov;
+  storyCam.to.fromArray(shot.pos); storyCam.toT.fromArray(shot.target); storyCam.fov = shot.fov || camera.fov;
+  storyCam.t = 0; storyCam.dur = Math.max(0, seconds); storyCam.follow = follow;
+  return new Promise(res => { storyCam.done = res; });
+}
+function updateStoryCam(dt) {
+  storyCam.t = storyCam.dur > 0 ? Math.min(1, storyCam.t + dt / storyCam.dur) : 1;
+  const e = storyCam.t * storyCam.t * (3 - 2 * storyCam.t);
+  camera.position.lerpVectors(storyCam.from, storyCam.to, e);
+  storyCam.target.lerpVectors(storyCam.fromT, storyCam.toT, e);
+  if (storyCam.follow) { const p = storyCam.follow.root.position; storyCam.target.lerp(_look.set(p.x, p.y + storyCam.follow.h * 0.6, p.z), storyCam.t < 1 ? e : Math.min(1, dt * 4)); }
+  camera.fov += (storyCam.fov - camera.fov) * (storyCam.t < 1 ? e : 1); camera.updateProjectionMatrix();
+  camera.lookAt(storyCam.target);
+  if (storyCam.t >= 1 && storyCam.done) { const d = storyCam.done; storyCam.done = null; d(); }
 }
 function setView(v) {
   view = v;
@@ -469,12 +503,13 @@ function capyMarker() {
   const m = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.5, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicNodeMaterial({ color: 0xffe066, transparent: true, depthTest: false, depthWrite: false, toneMapped: false, fog: false }));
   m.renderOrder = 104; m.visible = false; return m;
 }
-async function loadCapy(tag, i) {
-  const gltf = await loader.loadAsync(`${CAPYS}/${tag}/${tag}_capy_v2.glb`);
+async function loadCapy(ch, i) {
+  const tag = ch.id;
+  const gltf = await loader.loadAsync(castUrl(ch));
   const model = gltf.scene;
   model.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
   const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3());
-  const h0 = L.capy.height * (tag === 'baby' ? 0.72 : 1), k = h0 / size.y;
+  const h0 = ch.height || L.capy.height * (ch.sizeFactor ?? 1), k = h0 / size.y;
   const inner = new THREE.Group(); inner.add(model);
   model.scale.setScalar(k); model.position.y = -box.min.y * k;
   inner.rotation.y = THREE.MathUtils.degToRad(L.capy.facing);
@@ -486,8 +521,14 @@ async function loadCapy(tag, i) {
   proxy.position.y = h0 * 0.5; proxy.userData.capyIndex = i; root.add(proxy);
   const marker = capyMarker(); marker.scale.setScalar(h0 * 1.4); root.add(marker);
   const mixer = new THREE.AnimationMixer(model);
-  const clip = n => THREE.AnimationClip.findByName(gltf.animations, n);
-  const c = { tag, root, inner, blob, proxy, marker, mixer, clip, h0, h: h0, enabled: true, cur: null, state: 'idle', timer: 0.5 + Math.random() * 2, swimming: false, rippleT: 0, blinkT: 2 + Math.random() * 3, path: null };
+  const clip = n => THREE.AnimationClip.findByName(gltf.animations, ch.clips?.[n] || n);
+  // meshes that wear the drawing (cast.json outfit.mesh: mesh or material names)
+  const outfitNames = [].concat(ch.outfit?.mesh || []);
+  const outfit = [];
+  model.traverse(o => { if (o.isMesh && (outfitNames.includes(o.name) || outfitNames.includes(o.material?.name))) outfit.push({ mesh: o, original: o.material }); });
+  const meshNames = []; model.traverse(o => { if (o.isMesh) meshNames.push(o.name || o.material?.name || ''); });
+  const c = { tag, ch, outfit, meshNames, clipNames: gltf.animations.map(a => a.name), root, inner, blob, proxy, marker, mixer, clip, h0, h: h0, enabled: true, cur: null, state: 'idle', timer: 0.5 + Math.random() * 2, swimming: false, rippleT: 0, blinkT: 2 + Math.random() * 3, path: null };
+  proxy.userData.capy = c;
   scene.add(root); capys.push(c); play(c, 'idle');
   placeAtStart(c);
 }
@@ -500,6 +541,28 @@ function placeAtStart(c) {
   c.root.rotation.y = Math.random() * Math.PI * 2;
   c.path = null; c.goal = null; c.state = 'idle'; c.timer = 0.3 + Math.random();
 }
+const texLoader = new THREE.TextureLoader();
+async function setOutfit(c, url) {
+  if (!c?.outfit.length) return false;
+  if (!url) { for (const o of c.outfit) o.mesh.material = o.original; return true; }
+  const t = await texLoader.loadAsync(url);
+  t.colorSpace = THREE.SRGBColorSpace; t.flipY = false; t.anisotropy = 8;
+  for (const o of c.outfit) {
+    const m = o.original.clone(); m.map = t; if (m.color) m.color.set(0xffffff); m.needsUpdate = true;
+    o.mesh.material = m;
+  }
+  return true;
+}
+async function loadCast(list) {
+  for (const c of capys.splice(0)) { scene.remove(c.root); c.mixer.stopAllAction(); }
+  cast = list; TAGS = cast.map(ch => ch.id);
+  const use = cast.filter(ch => ch.enabled !== false && ch.file);
+  const limit = cast === legacyList ? Math.min(L.capy.count, use.length) : use.length;
+  for (let i = 0; i < limit; i++) await loadCapy(use[i], i).catch(e => console.warn('character', use[i].id, e));
+  applyCapyConfig();
+  if (EDIT) editorHandle?.refresh?.();
+}
+let legacyList = null;
 function applyCapyConfig() {
   for (const c of capys) {
     const cfg = capCfg(c);
@@ -542,7 +605,7 @@ function decide(c) {
   if (a === 'surprise') { surprise(c); return; }
   rest(c);
 }
-function surprise(c) { c.state = 'act'; c.timer = play(c, SURPRISE[c.tag], { once: true }) + 0.2; face(c, 'expr_happy'); }
+function surprise(c) { c.state = 'act'; c.timer = play(c, 'pose', { once: true }) + 0.2; face(c, 'expr_happy'); }
 
 let paused = false;
 const _v = new THREE.Vector3();
@@ -575,7 +638,7 @@ function updateCapy(c, dt) {
       const yaw = Math.atan2(_v.x, _v.z);
       let dy = yaw - c.root.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
       c.root.rotation.y += dy * Math.min(1, dt * 5);
-      const speed = (c.swimming ? 0.8 : 1) * 0.33 * c.h * L.capy.speed * (capCfg(c).speed || 1) * (block ? 0.35 : 1);
+      const speed = (c.swimming ? 0.8 : 1) * (c.ch.speed ? c.ch.speed : 0.33 * c.h) * L.capy.speed * (capCfg(c).speed || 1) * (block ? 0.35 : 1);
       const nx = pos.x + Math.sin(c.root.rotation.y) * speed * dt, nz = pos.z + Math.cos(c.root.rotation.y) * speed * dt;
       if (nav.kind(nx, nz)) { pos.x = nx; pos.z = nz; c.stuck = Math.max(0, c.stuck - dt); }
       else { // steering pushed us off the grid: step straight along the path instead
@@ -592,7 +655,7 @@ function updateCapy(c, dt) {
     else if (c.timer <= 0) c.state = 'idle';
   } else if (c.state === 'dry') { c.state = 'act'; c.timer = play(c, 'shake_dry', { once: true }); }
   else c.timer -= dt;
-  if (c.state === 'idle' || (c.state === 'act' && c.timer <= 0)) decide(c);
+  if (!c.story && (c.state === 'idle' || (c.state === 'act' && c.timer <= 0))) decide(c);
 
   // land <-> water
   const wasWet = c.swimming;
@@ -611,11 +674,12 @@ function capyAt(e) {
   pointer.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
   picker.setFromCamera(pointer, camera);
   const hit = picker.intersectObjects(active().map(c => c.proxy), false)[0];
-  return hit ? capys[hit.object.userData.capyIndex] : null;
+  return hit ? hit.object.userData.capy : null;
 }
 renderer.domElement.addEventListener('pointerup', e => {
   if (EDIT || e.button !== 0) return;
   const c = capyAt(e);
+  if (c && c.story) return;
   if (c && !c.swimming) surprise(c); else if (c) face(c, 'expr_happy');
 });
 
@@ -682,11 +746,47 @@ async function reloadSky() {
 
 // ---------------------------------------------------------------- boot
 const timer = new THREE.Timer();
+let story = { autoplay: true, loop: true, startDelay: 1, steps: [] };
+let storyStepListener = null;
+const findChar = id => capys.find(c => c.tag === id);
+const storyRunner = createStoryRunner({
+  char: findChar,
+  allChars: () => capys,
+  claim: c => { c.story = true; if (c.state !== 'move') { c.path = null; c.state = 'act'; c.timer = 1e9; } },
+  release: c => { if (c.story) { c.story = false; c.state = 'idle'; } },
+  play: (c, name, o) => play(c, name, o),
+  walk: (c, s) => {
+    const p = c.root.position;
+    let pts = null;
+    if (s.route) { const r = (zones.routes || []).find(r => r.name === s.route); if (r?.points?.length) pts = r.loop ? [...r.points, r.points[0]] : r.points.slice(); }
+    else if (s.spot != null && zones.spots?.[s.spot]) pts = [[zones.spots[s.spot].x, zones.spots[s.spot].z]];
+    else if (Array.isArray(s.to)) pts = [s.to];
+    if (!pts) return false;
+    let x = p.x, z = p.z; const full = [[x, z]];
+    for (const [px, pz] of pts) { const leg = nav.path(x, z, px, pz) || [[x, z], [px, pz]]; full.push(...leg.slice(1)); x = px; z = pz; }
+    return startMove(c, full, pts[pts.length - 1], 'story');
+  },
+  place: (c, s) => {
+    const sp = s.spot != null ? zones.spots?.[s.spot] : null;
+    const at = sp ? [sp.x, sp.z] : Array.isArray(s.at) ? s.at : null;
+    if (at) c.root.position.set(at[0], nav.height(at[0], at[1]), at[1]);
+    if (s.turn != null) c.root.rotation.y = THREE.MathUtils.degToRad(s.turn);
+    c.path = null; c.state = 'act'; c.timer = 1e9; play(c, 'idle');
+  },
+  setVisible: (c, on) => { c.enabled = on; c.root.visible = on; },
+  outfit: (c, image) => setOutfit(c, image === 'drawing' ? opts.drawingUrl?.(c.tag) : image ? `${WORLD}/${image}` : null),
+  caption: t => ui.caption(t),
+  cameraTo,
+  url: name => `${WORLD}/${name}`,
+  reset: () => {},
+  onStep: i => storyStepListener?.(i)
+});
 let editorHandle = null;
 async function boot() {
   await renderer.init();
   if (destroyed) return;
   const sceneInfo = await (await fetch(`${WORLD}/scene.json`)).json(); sceneInfoRef = sceneInfo;
+  sceneInfo.files = sceneInfo.files || {};
   try { const r = await fetch(`${WORLD}/layout.json`); if (r.ok) L = deepMerge(L, await r.json()); } catch { }
   const msf = sceneInfo.metric_scale_factor || 1;
   if (!L._scaled) { // Marble API worlds: OpenCV axes (y down), metric scale, ground offset
@@ -713,7 +813,16 @@ async function boot() {
   applyLayout();
 
   say('Loading the hot spring…');
-  const mode = Q.get('backdrop') || (sceneInfo.files.backdrop ? 'depth' : 'splat');
+  const mode = Q.get('backdrop') || (sceneInfo.environment === 'stage' ? 'stage' : sceneInfo.files.environment ? 'glb' : sceneInfo.files.backdrop ? 'depth' : 'splat');
+  envMode = mode;
+  if (mode === 'stage') {
+    const st = buildStage(sceneInfo.stage); scene.add(st.group);
+    scene.background = new THREE.Color(st.background); scene.environment = sky;
+    hf = buildHeightField(st.group);
+  } else if (mode === 'glb') {
+    const g = await loader.loadAsync(`${WORLD}/${sceneInfo.files.environment}`);
+    scene.add(g.scene); hf = buildHeightField(g.scene);
+  }
   let splatPromise = Promise.resolve(0);
   if (mode === 'depth') {
     const bd = await loadDepthBackdrop(`${WORLD}/${sceneInfo.files.backdrop}`, { phone: IS_PHONE });
@@ -723,12 +832,12 @@ async function boot() {
   }
   setupHero();
   setView(Q.get('camera') === 'orbit' || L.camera.mode === 'orbit' ? 'free' : 'hero');
-  if (mode !== 'depth') {
+  if (mode === 'splat') {
     const set = pickSplatSet(sceneInfo.files);
     if (sceneInfo.files.splats?.['100k'] && !set.includes(sceneInfo.files.splats['100k'])) await loadSplats([sceneInfo.files.splats['100k']]);
     splatPromise = loadSplats(set);
   }
-  if (mode !== 'depth' && sceneInfo.files.collider) {
+  if (mode === 'splat' && sceneInfo.files.collider) {
     try {
       const g = await loader.loadAsync(`${WORLD}/${sceneInfo.files.collider}`);
       g.scene.visible = false; splatRoot.add(g.scene); hf = buildHeightField(g.scene);
@@ -736,17 +845,34 @@ async function boot() {
   }
   buildNav(); buildSnow();
   say('Waking the capybaras…');
-  for (let i = 0; i < Math.min(L.capy.count, TAGS.length); i++) await loadCapy(TAGS[i], i).catch(e => console.warn('capybara', TAGS[i], e));
-  applyCapyConfig();
+  let castList = null;
+  try { const r = await fetch(`${WORLD}/cast.json`); if (r.ok) castList = (await r.json()).characters; } catch { }
+  if (!Array.isArray(castList)) { castList = legacyList = legacyCast(); }
+  await loadCast(castList);
+  try { const r = await fetch(`${WORLD}/story.json`); if (r.ok) story = { ...story, ...(await r.json()) }; } catch { }
   const n = await splatPromise;
   console.log(`[hotspring] ${renderer.backend.isWebGLBackend ? 'WebGL fallback' : 'WebGPU'} · backdrop ${mode}${mode === 'splat' ? ` (${n} splats, ${splats.length} layers)` : ''} · ${active().length} capybaras · nav ${nav.land.length} land / ${nav.water.length} water cells`);
   ui.loader.classList.add('done');
+  if (!EDIT && story.autoplay && story.steps?.length) { ui.hint.remove(); setTimeout(() => storyRunner.play(story), (story.startDelay ?? 1) * 1000); }
   if (EDIT) {
     ui.hint.remove();
     const { initEditor } = await import('./editor.js');
     if (destroyed) return;
     editorHandle = initEditor({
-      scene, camera, renderer, controls, world: WORLD, groundY, backdrop: mode, tags: TAGS,
+      scene, camera, renderer, controls, world: WORLD, groundY, backdrop: mode, get tags() { return TAGS; },
+      // cast + story
+      castInfo: () => capys.map(c => ({ id: c.tag, name: c.ch.name || c.tag, clips: c.clipNames, meshes: c.meshNames, outfit: c.outfit.length })),
+      getCast: () => structuredClone(cast),
+      setCast: list => { legacyList = null; return loadCast(structuredClone(list)); },
+      castName: id => cast.find(ch => ch.id === id)?.name || id,
+      tryOutfit: (id, url) => setOutfit(capys.find(c => c.tag === id), url),
+      getStory: () => structuredClone(story),
+      setStory: st => { story = structuredClone(st); },
+      playStory: from => storyRunner.play(story, { from }),
+      stopStory: () => { storyRunner.stop(); setView('free'); },
+      storyRunning: () => storyRunner.running,
+      onStoryStep: fn => { storyStepListener = fn; },
+      currentShot: () => ({ pos: camera.position.toArray().map(v => +v.toFixed(3)), target: (view === 'free' || view === 'top' ? controls.target : storyCam.target).toArray().map(v => +v.toFixed(3)), fov: +camera.fov.toFixed(1) }),
       navHeight: (x, z) => nav.height(x, z),
       getZones: () => structuredClone(zones), setZones,
       layout: () => L,
@@ -787,7 +913,9 @@ async function boot() {
         const a = await putJSON('zones.json', zones);
         if (view === 'free') { L.camera.pos = camera.position.toArray(); L.camera.target = controls.target.toArray(); }
         await putJSON('layout.json', L);
-        return `Saved zones.json and layout.json at ${a}`;
+        await putJSON('story.json', story);
+        await putJSON('cast.json', { characters: cast.map(({ sizeFactor, ...ch }) => ({ ...ch, ...(sizeFactor && sizeFactor !== 1 && !ch.height ? { height: +(L.capy.height * sizeFactor).toFixed(3) } : {}) })) });
+        return `Saved the scene at ${a}`;
       }
     });
   }
@@ -800,7 +928,7 @@ function frame() {
   const dt = Math.min(timer.getDelta(), 0.05), t = timer.getElapsed();
   for (const c of capys) updateCapy(c, dt);
   updateSteam(dt); updateSnow(dt, t); updateRipples(dt); updatePathViz();
-  if (view === 'hero') updateHero(dt, t); else controls.update();
+  if (view === 'hero') updateHero(dt, t); else if (view === 'story') updateStoryCam(dt); else controls.update();
   renderer.render(scene, camera);
 }
 
@@ -812,6 +940,7 @@ function destroy() {
   if (destroyed) return;
   destroyed = true;
   renderer.setAnimationLoop(null);
+  storyRunner.stop();
   editorHandle?.dispose?.();
   for (const d of disposers.splice(0)) { try { d(); } catch { } }
   controls.dispose();
@@ -822,5 +951,10 @@ function destroy() {
   if (globalThis.__scene?.renderer === renderer) delete globalThis.__scene;
 }
 
-return { ready, destroy };
+return {
+  ready, destroy,
+  playStory: () => storyRunner.play(story),
+  stopStory: () => storyRunner.stop(),
+  setOutfit: (id, url) => setOutfit(findChar(id), url)
+};
 }

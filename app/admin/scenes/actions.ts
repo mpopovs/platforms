@@ -6,7 +6,6 @@ import { z } from 'zod';
 import {
   INLINE_JSON_MAX_BYTES,
   contentTypeFor,
-  emptyManifest,
   isValidFileName,
   missingEssentials,
   parseManifest
@@ -14,6 +13,7 @@ import {
 import { requireRole } from '@/lib/auth/server';
 import { applyPatch } from '@/lib/scenes/access';
 import { getScene, newPreviewToken, newSceneId, scenesDb } from '@/lib/scenes/server';
+import { templateManifest } from '@/lib/scenes/templates';
 import { MAX_ASSET_BYTES, assetKey, keyBelongsToScene, sceneStorage, type UploadTarget } from '@/lib/scenes/storage';
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
@@ -30,12 +30,13 @@ async function admin() {
 export async function createSceneAction(formData: FormData) {
   const { user, db } = await admin();
   const name = String(formData.get('name') ?? '').trim().slice(0, 120) || 'Untitled scene';
+  const template = String(formData.get('template') ?? 'fashion-show');
   const sceneId = newSceneId();
   const { error } = await db.from('scenes').insert({
     id: sceneId,
     name,
     brand_id: 'magicforms',
-    draft: emptyManifest(),
+    draft: parseManifest(templateManifest(template)),
     preview_token: newPreviewToken(),
     created_by: user.id
   });

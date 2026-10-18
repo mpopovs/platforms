@@ -9,6 +9,7 @@
 import * as THREE from 'three/webgpu';
 import { polyContains, polyCentroid } from './nav.js';
 import { encodeGray16, decodePNG } from './png16.js';
+import { STEP_TYPES } from './story.js';
 
 const COLORS = { water: 0x38c8ff, walk: 0x5dff86, terrace: 0xffc94a, blocked: 0xff4f5e, start: 0xffffff, rest: 0xffe066, entry: 0x38c8ff, route: 0xff6fd8, prop: 0xff9a3c, capy: 0xffe066 };
 const BEHAVIOUR = [['walk', 'Walk around'], ['swim', 'Swim'], ['soak', 'Soak (sit in water)'], ['rest', 'Rest / graze'], ['nap', 'Nap'], ['surprise', 'Surprise move'], ['route', 'Walk a route']];
@@ -29,12 +30,13 @@ export function initEditor(ctx) {
   let tab = 'draw', tool = 'select', drawKind = null, spotType = null, propType = null;
   let draft = [], sel = null, drag = null, capySel = null;
   const undo = [];
-  const snapshot = () => { undo.push(JSON.stringify({ zones, look: L })); if (undo.length > 80) undo.shift(); };
+  let story = ctx.getStory();
+  const snapshot = () => { undo.push(JSON.stringify({ zones, look: L, story })); if (undo.length > 80) undo.shift(); };
 
   // ============================================================ panel
   const css = document.createElement('style');
   css.textContent = `
-  #ed{position:fixed;left:12px;top:12px;width:300px;max-height:calc(100vh - 24px);display:flex;flex-direction:column;background:rgba(20,26,34,.92);color:#e8eef5;
+  #ed{position:fixed;left:12px;top:12px;width:330px;max-height:calc(100vh - 24px);display:flex;flex-direction:column;background:rgba(20,26,34,.92);color:#e8eef5;
       font:12.5px/1.35 system-ui,sans-serif;border-radius:12px;z-index:20;box-shadow:0 6px 24px rgba(0,0,0,.3)}
   #ed .tabs{display:flex;gap:2px;padding:8px 8px 0}
   #ed .tabs button{flex:1;background:transparent;border:0;border-bottom:2px solid transparent;border-radius:0;padding:6px 2px;color:#9fb2c6;font-weight:600}
@@ -52,7 +54,7 @@ export function initEditor(ctx) {
   #ed .ctl.c2{grid-template-columns:110px 1fr}
   #ed .ctl span.v{text-align:right;color:#b8c6d4;font-variant-numeric:tabular-nums}
   #ed input[type=range]{width:100%;accent-color:#5b8fc0}
-  #ed input[type=text],#ed select{width:100%;box-sizing:border-box;background:#1b222c;color:#e8eef5;border:1px solid #3c4a5c;border-radius:6px;padding:3px 5px;font:inherit}
+  #ed input[type=text],#ed input[type=number],#ed select{width:100%;box-sizing:border-box;background:#1b222c;color:#e8eef5;border:1px solid #3c4a5c;border-radius:6px;padding:3px 5px;font:inherit}
   #ed input[type=color]{width:100%;height:24px;background:none;border:1px solid #3c4a5c;border-radius:6px;padding:0}
   #ed .list{display:flex;flex-direction:column;gap:3px}
   #ed .item{display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:6px;background:#222b37;cursor:pointer}
@@ -62,7 +64,7 @@ export function initEditor(ctx) {
   document.head.appendChild(css);
   const disposers = [() => css.remove()];
   const el = document.createElement('div'); el.id = 'ed';
-  el.innerHTML = `<div class="tabs">${[['draw', 'Draw'], ['water', 'Water'], ['capys', 'Capys'], ['routes', 'Routes'], ['look', 'Look'], ['files', 'Files']].map(([k, t]) => `<button data-tab="${k}">${t}</button>`).join('')}</div>
+  el.innerHTML = `<div class="tabs">${[['draw', 'Draw'], ['water', 'Water'], ['capys', 'Cast'], ['routes', 'Routes'], ['story', 'Story'], ['look', 'Look'], ['files', 'Files']].map(([k, t]) => `<button data-tab="${k}">${t}</button>`).join('')}</div>
     <div class="body"></div>
     <div class="foot"><div class="hint"></div><div class="row"><button data-a="undo">Undo</button><button data-a="save" class="save">Save scene</button></div><div class="msg"></div></div>`;
   (ctx.container || document.body).appendChild(el);
@@ -117,7 +119,7 @@ export function initEditor(ctx) {
     el.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
     el.querySelector('.hint').textContent = HINT[tool] || '';
     body.innerHTML = '';
-    ({ draw: tabDraw, water: tabWater, capys: tabCapys, routes: tabRoutes, look: tabLook, files: tabFiles })[tab]();
+    ({ draw: tabDraw, water: tabWater, capys: tabCapys, routes: tabRoutes, story: tabStory, look: tabLook, files: tabFiles })[tab]();
   }
   el.querySelector('.tabs').addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (b) { tab = b.dataset.tab; refresh(); } });
   el.querySelector('[data-a=undo]').onclick = doUndo;
@@ -210,15 +212,15 @@ export function initEditor(ctx) {
       const cb = h('input', { type: 'checkbox' }); cb.checked = cfg.enabled !== false;
       cb.addEventListener('click', e => e.stopPropagation());
       cb.addEventListener('change', () => { snapshot(); cfg.enabled = cb.checked; apply('capys'); });
-      list.append(h('div', { class: 'item' + (capySel === c.tag ? ' on' : ''), onclick: () => selectCapy(c.tag) }, cb, h('span', { class: 'grow' }, NICE[c.tag] || c.tag), h('span', { class: 'muted' }, c.swimming ? 'swimming' : c.state)));
+      list.append(h('div', { class: 'item' + (capySel === c.tag ? ' on' : ''), onclick: () => selectCapy(c.tag) }, cb, h('span', { class: 'grow' }, ctx.castName(c.tag)), h('span', { class: 'muted' }, c.swimming ? 'swimming' : c.state)));
     }
-    body.append(heading('Capybaras'), list);
+    body.append(heading('Characters'), list, castAdder());
     if (capySel) {
       const cfg = capyCfg(capySel);
       const starts = (zones.spots || []).map((s, i) => [i, s]).filter(([, s]) => s.type === 'start').map(([i]) => [i, `Start spot ${i + 1}`]);
       const routes = (zones.routes || []).map(r => [r.name, r.name]);
       const card = h('div', { class: 'card' },
-        h('b', {}, NICE[capySel] || capySel),
+        h('b', {}, ctx.castName(capySel)),
         slider('Size', () => cfg.scale ?? 1, v => { cfg.scale = v; }, 0.5, 2, 0.01, 'capys'),
         slider('Speed', () => cfg.speed ?? 1, v => { cfg.speed = v; }, 0.2, 3, 0.05, 'capys'),
         selectCtl('Start at', [['', 'Any start spot'], ...starts], () => cfg.start ?? '', v => { cfg.start = v === '' ? null : +v; }, 'capys'),
@@ -230,7 +232,7 @@ export function initEditor(ctx) {
         btn('Walk a route', () => ctx.doCapy(capySel, 'route')),
         btn('Nap', () => ctx.doCapy(capySel, 'nap')),
         btn('Send to…', () => setTool('send'), { on: tool === 'send' })));
-      body.append(card);
+      body.append(card, castCard(capySel));
     }
     body.append(heading('Everyone'),
       slider('Walk speed', () => L.capy.speed, v => { L.capy.speed = v; }, 0.3, 3, 0.05, 'look'),
@@ -242,6 +244,174 @@ export function initEditor(ctx) {
   }
   const capyCfg = tag => { zones.capys = zones.capys || {}; return (zones.capys[tag] = zones.capys[tag] || {}); };
   function selectCapy(tag) { capySel = tag; sel = tag ? { kind: 'capy', tag } : null; ctx.selectCapy(tag); refresh(); }
+
+  // ------------------------------------------------------------ cast (cast.json)
+  const slug = t => t.toLowerCase().replace(/\.glb$/, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'character';
+  function fileInput(label, accept, onFile) {
+    const i = h('input', { type: 'file', accept, style: 'display:none' });
+    i.addEventListener('change', () => { const f = i.files?.[0]; i.value = ''; if (f) onFile(f); });
+    const b = h('button', {}, label); b.onclick = () => i.click();
+    return h('span', { style: 'display:contents' }, b, i);
+  }
+  function numberCtl(label, get, set, min, max, step) {
+    const i = h('input', { type: 'number', min, max, step, value: get() ?? '' });
+    i.style.width = '100%';
+    i.addEventListener('change', () => set(i.value === '' ? null : +i.value));
+    return h('div', { class: 'ctl c2' }, h('span', {}, label), i);
+  }
+  function castAdder() {
+    return h('div', { class: 'card' },
+      h('div', { class: 'muted' }, 'Add any rigged GLB with its animations (a runway model, an animal…). Then pick which clip is idle, walk and pose, and which mesh wears the drawing.'),
+      row(fileInput('Add character (GLB)', '.glb,model/gltf-binary', f => busy('Uploading ' + f.name, async () => {
+        const cast = ctx.getCast(); let id = slug(f.name), n = 2;
+        while (cast.some(c => c.id === id)) id = `${slug(f.name)}_${n++}`;
+        const file = `cast/${id}.glb`;
+        await ctx.put(file, f, 'model/gltf-binary');
+        cast.push({ id, name: f.name.replace(/\.glb$/i, ''), file, height: 1.7, clips: {} });
+        await ctx.setCast(cast); selectCapy(id);
+        return `Added ${id}. Save to keep it.`;
+      }))));
+  }
+  function castCard(id) {
+    const cast = ctx.getCast(), ch = cast.find(c => c.id === id), info = ctx.castInfo().find(c => c.id === id);
+    if (!ch) return h('div');
+    const update = (fn, label = 'Updating') => busy(label, async () => { fn(ch); await ctx.setCast(cast); return 'Updated. Save to keep it.'; });
+    const clipOpts = [['', '(same name)'], ...(info?.clips || []).map(n => [n, n])];
+    const clipSel = (role, label) => {
+      const sel = h('select', {}, clipOpts.map(([v, t]) => { const o = h('option', { value: v }, t); if ((ch.clips?.[role] || '') === v) o.selected = true; return o; }));
+      sel.addEventListener('change', () => update(c => { c.clips = { ...(c.clips || {}) }; if (sel.value) c.clips[role] = sel.value; else delete c.clips[role]; }));
+      return h('div', { class: 'ctl c2' }, h('span', {}, label), sel);
+    };
+    const meshes = [...new Set((info?.meshes || []).filter(Boolean))];
+    const outSel = h('select', {}, [['', 'None'], ...meshes.map(m => [m, m])].map(([v, t]) => { const o = h('option', { value: v }, t); if ([].concat(ch.outfit?.mesh || [])[0] === v || (!ch.outfit && v === '')) o.selected = true; return o; }));
+    outSel.addEventListener('change', () => update(c => { if (outSel.value) c.outfit = { mesh: outSel.value }; else delete c.outfit; }));
+    const nameIn = h('input', { type: 'text', value: ch.name || '' });
+    nameIn.addEventListener('change', () => update(c => { c.name = nameIn.value; }));
+    return h('div', { class: 'card' },
+      h('b', {}, 'Character setup'),
+      h('div', { class: 'ctl c2' }, h('span', {}, 'Name'), nameIn),
+      numberCtl('Height (m)', () => ch.height ?? '', v => update(c => { if (v) c.height = v; else delete c.height; }), 0.1, 4, 0.01),
+      numberCtl('Walk speed (m/s)', () => ch.speed ?? '', v => update(c => { if (v) c.speed = v; else delete c.speed; }), 0.1, 3, 0.05),
+      clipSel('idle', 'Idle clip'), clipSel('walk', 'Walk clip'), clipSel('pose', 'Pose clip'), clipSel('swim', 'Swim clip'),
+      h('div', { class: 'ctl c2' }, h('span', {}, 'Outfit mesh'), outSel),
+      h('div', { class: 'muted' }, info?.outfit ? 'The drawing goes on this mesh (its UVs must match the worksheet).' : 'Pick the mesh that should wear the child’s drawing.'),
+      row(fileInput('Try a drawing', 'image/*', f => busy('Dressing', async () => (await ctx.tryOutfit(id, URL.createObjectURL(f))) ? 'Outfit shown (not saved)' : 'Pick an outfit mesh first')),
+        btn('Clear', () => ctx.tryOutfit(id, null)),
+        btn('Remove character', () => { if (confirm('Remove ' + (ch.name || id) + '?')) busy('Removing', async () => { await ctx.setCast(cast.filter(c => c.id !== id)); selectCapy(null); return 'Removed. Save to keep it.'; }); }, { cls: 'warn' })));
+  }
+
+  // ------------------------------------------------------------ story (story.json)
+  const STEP_NAMES = { camera: 'Camera shot', walk: 'Walk', place: 'Place', anim: 'Animation', say: 'Caption', wait: 'Wait', show: 'Show', hide: 'Hide', outfit: 'Outfit', music: 'Music', free: 'Free (own behaviour)' };
+  let stepSel = null, playingStep = -1, newStepType = 'walk';
+  ctx.onStoryStep(i => { playingStep = i; if (tab === 'story') refresh(); });
+  const storyChanged = () => { ctx.setStory(story); msg('Unsaved changes'); };
+  const who = () => ctx.castInfo().map(c => [c.id, ctx.castName(c.id)]);
+  function stepSummary(st) {
+    const n = st.who ? ctx.castName(st.who) : '';
+    switch (st.do) {
+      case 'camera': return st.shot === 'hero' ? 'Camera: hero view' : `Camera shot${st.follow ? ' following ' + ctx.castName(st.follow) : ''}${st.seconds ? ` (${st.seconds}s move)` : ''}`;
+      case 'walk': return `${n} walks ${st.route ? 'route “' + st.route + '”' : st.spot != null ? 'to spot ' + (st.spot + 1) : 'to a point'}${st.wait === false ? ' (with next)' : ''}`;
+      case 'place': return `${n} placed${st.spot != null ? ' at spot ' + (st.spot + 1) : ''}${st.turn != null ? `, facing ${st.turn}°` : ''}`;
+      case 'anim': return `${n} plays ${st.clip || 'pose'}${st.loop ? ' (loop)' : ''}`;
+      case 'say': return `“${(st.text || '').slice(0, 40)}” (${st.seconds ?? 3}s)`;
+      case 'wait': return `Wait ${st.seconds ?? 1}s`;
+      case 'outfit': return `${n} wears ${st.image === 'drawing' ? 'the child’s drawing' : st.image || '—'}`;
+      case 'music': return st.stop ? 'Stop music' : `Music ${st.file || '—'}`;
+      case 'free': return `${st.who === 'all' ? 'Everyone' : n} back to own behaviour`;
+      default: return `${STEP_NAMES[st.do] || st.do} ${n}`;
+    }
+  }
+  function defaultStep(type) {
+    const first = ctx.castInfo()[0]?.id;
+    return ({
+      camera: { do: 'camera', shot: ctx.currentShot(), seconds: 1.5 },
+      walk: { do: 'walk', who: first, route: zones.routes?.[0]?.name },
+      place: { do: 'place', who: first, spot: (zones.spots || []).findIndex(s => s.type === 'start') >= 0 ? (zones.spots || []).findIndex(s => s.type === 'start') : null, turn: 0 },
+      anim: { do: 'anim', who: first, clip: 'pose' },
+      say: { do: 'say', text: 'Hello!', seconds: 3 },
+      wait: { do: 'wait', seconds: 1 },
+      show: { do: 'show', who: first }, hide: { do: 'hide', who: first },
+      outfit: { do: 'outfit', who: first, image: 'drawing' },
+      music: { do: 'music', file: '', volume: 0.6 },
+      free: { do: 'free', who: 'all' }
+    })[type];
+  }
+  function stepFields(st) {
+    const set = fn => v => { snapshot(); fn(v); storyChanged(); refresh(); };
+    const sel = (label, opts, get, fn) => {
+      const s2 = h('select', {}, opts.map(([v, t]) => { const o = h('option', { value: v }, t); if (String(get() ?? '') === String(v)) o.selected = true; return o; }));
+      s2.addEventListener('change', () => set(fn)(s2.value)); return h('div', { class: 'ctl c2' }, h('span', {}, label), s2);
+    };
+    const num = (label, get, fn, min, max, step) => {
+      const i = h('input', { type: 'number', min, max, step, value: get() ?? '' }); i.style.width = '100%';
+      i.addEventListener('change', () => set(fn)(i.value === '' ? null : +i.value)); return h('div', { class: 'ctl c2' }, h('span', {}, label), i);
+    };
+    const text = (label, get, fn) => { const i = h('input', { type: 'text', value: get() ?? '' }); i.addEventListener('change', () => set(fn)(i.value)); return h('div', { class: 'ctl c2' }, h('span', {}, label), i); };
+    const chk = (label, get, fn) => { const i = h('input', { type: 'checkbox' }); i.checked = !!get(); i.addEventListener('change', () => set(fn)(i.checked)); return h('label', { class: 'ctl c2' }, h('span', {}, label), h('span', {}, i)); };
+    const whoSel = (all = false) => sel('Who', [...(all ? [['all', 'Everyone']] : []), ...who()], () => st.who, v => { st.who = v; });
+    const spotOpts = [['', '—'], ...(zones.spots || []).map((s, i) => [i, `Spot ${i + 1} (${s.type})`])];
+    const withNext = () => chk('Start next step together', () => st.wait === false, v => { if (v) st.wait = false; else delete st.wait; });
+    const upload = (label, accept, folder, fn) => fileInput(label, accept, f => busy('Uploading ' + f.name, async () => {
+      const name = `${folder}/${slug(f.name.replace(/\.[^.]+$/, ''))}.${(f.name.split('.').pop() || 'bin').toLowerCase()}`;
+      await ctx.put(name, f, f.type || 'application/octet-stream'); snapshot(); fn(name); storyChanged(); refresh(); return `Uploaded ${name}`;
+    }));
+    switch (st.do) {
+      case 'camera': return [
+        row(btn('Use current view', () => { snapshot(); st.shot = ctx.currentShot(); storyChanged(); }), btn('Hero view', () => { snapshot(); st.shot = 'hero'; storyChanged(); })),
+        h('div', { class: 'muted' }, 'Frame the shot in Free view (right-drag to orbit), then “Use current view”.'),
+        num('Move time (s)', () => st.seconds, v => { st.seconds = v ?? 0; }, 0, 10, 0.1),
+        sel('Follow', [['', 'Nobody'], ...who()], () => st.follow, v => { if (v) st.follow = v; else delete st.follow; })];
+      case 'walk': return [whoSel(),
+        sel('Route', [['', '—'], ...(zones.routes || []).map(r => [r.name, r.name])], () => st.route, v => { if (v) { st.route = v; delete st.spot; } else delete st.route; }),
+        sel('or to spot', spotOpts, () => st.spot, v => { if (v !== '') { st.spot = +v; delete st.route; } else delete st.spot; }),
+        withNext()];
+      case 'place': return [whoSel(), sel('Spot', spotOpts, () => st.spot, v => { st.spot = v === '' ? null : +v; }),
+        num('Facing (°)', () => st.turn, v => { st.turn = v; }, -180, 180, 5)];
+      case 'anim': {
+        const clips = ctx.castInfo().find(c => c.id === st.who)?.clips || [];
+        return [whoSel(), sel('Clip', [['pose', 'pose (role)'], ['idle', 'idle (role)'], ['walk', 'walk (role)'], ...clips.map(c => [c, c])], () => st.clip, v => { st.clip = v; }),
+          chk('Loop', () => st.loop, v => { st.loop = v || undefined; }), withNext()];
+      }
+      case 'say': return [text('Text', () => st.text, v => { st.text = v; }), num('Seconds', () => st.seconds, v => { st.seconds = v ?? 3; }, 0.5, 30, 0.5), withNext()];
+      case 'wait': return [num('Seconds', () => st.seconds, v => { st.seconds = v ?? 1; }, 0.1, 60, 0.1)];
+      case 'show': case 'hide': return [whoSel()];
+      case 'outfit': return [whoSel(),
+        sel('Wear', [['drawing', 'The child’s drawing'], ...(st.image && st.image !== 'drawing' ? [[st.image, st.image]] : [])], () => st.image, v => { st.image = v; }),
+        row(upload('Use an image…', 'image/*', 'story', n => { st.image = n; }))];
+      case 'music': return [chk('Stop music', () => st.stop, v => { st.stop = v || undefined; }),
+        h('div', { class: 'muted' }, st.file || 'No file yet'), row(upload('Choose audio…', 'audio/*', 'audio', n => { st.file = n; })),
+        num('Volume', () => st.volume, v => { st.volume = v ?? 0.6; }, 0, 1, 0.05)];
+      case 'free': return [whoSel(true)];
+      default: return [];
+    }
+  }
+  function tabStory() {
+    const steps = story.steps = story.steps || [];
+    const running = ctx.storyRunning();
+    body.append(...viewRow(),
+      heading('Play'),
+      row(btn(running ? 'Stop' : 'Play story', () => { if (running) ctx.stopStory(); else ctx.playStory(0); }, { on: running }),
+        btn('Play from selected', () => ctx.playStory(stepSel ?? 0))),
+      h('label', { class: 'ctl c2' }, h('span', {}, 'Plays by itself'), h('span', {}, (() => { const i = h('input', { type: 'checkbox' }); i.checked = story.autoplay !== false; i.onchange = () => { snapshot(); story.autoplay = i.checked; storyChanged(); }; return i; })())),
+      h('label', { class: 'ctl c2' }, h('span', {}, 'Loop'), h('span', {}, (() => { const i = h('input', { type: 'checkbox' }); i.checked = story.loop !== false; i.onchange = () => { snapshot(); story.loop = i.checked; storyChanged(); }; return i; })())),
+      heading(`Steps (${steps.length})`));
+    const list = h('div', { class: 'list' });
+    steps.forEach((st, i) => list.append(h('div', { class: 'item' + (stepSel === i ? ' on' : ''), onclick: () => { stepSel = i; refresh(); } },
+      h('span', { class: 'muted' }, String(i + 1)), h('span', { class: 'grow' }, stepSummary(st)), playingStep === i ? h('span', {}, '▶') : '')));
+    if (!steps.length) list.append(h('div', { class: 'muted' }, 'No steps yet. Add a camera shot, then make characters walk, pose and talk.'));
+    const typeSel = h('select', {}, STEP_TYPES.map(t => { const o = h('option', { value: t }, STEP_NAMES[t] || t); if (t === newStepType) o.selected = true; return o; }));
+    typeSel.onchange = () => { newStepType = typeSel.value; };
+    body.append(list, h('div', { class: 'ctl c2' }, typeSel, btn('Add step', () => {
+      snapshot(); const at = stepSel != null ? stepSel + 1 : steps.length;
+      steps.splice(at, 0, defaultStep(newStepType)); stepSel = at; storyChanged();
+    })));
+    const st = steps[stepSel];
+    if (st) body.append(h('div', { class: 'card' }, h('b', {}, `${stepSel + 1}. ${STEP_NAMES[st.do] || st.do}`), ...stepFields(st),
+      row(btn('↑', () => { if (stepSel > 0) { snapshot(); [steps[stepSel - 1], steps[stepSel]] = [steps[stepSel], steps[stepSel - 1]]; stepSel--; storyChanged(); } }, { cls: 'mini' }),
+        btn('↓', () => { if (stepSel < steps.length - 1) { snapshot(); [steps[stepSel + 1], steps[stepSel]] = [steps[stepSel], steps[stepSel + 1]]; stepSel++; storyChanged(); } }, { cls: 'mini' }),
+        btn('Duplicate', () => { snapshot(); steps.splice(stepSel + 1, 0, structuredClone(st)); stepSel++; storyChanged(); }),
+        btn('Delete', () => { snapshot(); steps.splice(stepSel, 1); stepSel = null; storyChanged(); }, { cls: 'warn' }))));
+  }
 
   function routeCtls(r) {
     return [textCtl('Name', () => r.name, v => { const old = r.name; r.name = v; for (const c of Object.values(zones.capys || {})) if (c.route === old) c.route = v; }),
@@ -276,7 +446,12 @@ export function initEditor(ctx) {
     body.append(...viewRow(), heading('Hero camera'),
       slider('Parallax (m)', () => c.parallax, v => { c.parallax = v; }, 0, ctx.backdrop === 'depth' ? 0.3 : 0.8, 0.01, 'look'),
       slider('Drift (m)', () => c.drift, v => { c.drift = v; }, 0, 0.2, 0.005, 'look'));
-    if (ctx.backdrop !== 'depth') body.append(
+    const builtEnv = ctx.backdrop === 'stage' || ctx.backdrop === 'glb';
+    if (builtEnv) body.append(
+      row(btn('Use current view as hero camera', () => { snapshot(); const s = ctx.currentShot(); c.pos = s.pos; c.target = s.target; c.fov = s.fov; apply('camera'); ctx.setView('hero'); })),
+      h('div', { class: 'muted' }, 'Frame it in Free view first (right-drag to orbit, wheel to zoom).'),
+      slider('Field of view', () => c.fov, v => { c.fov = v; }, 20, 75, 0.5, 'camera'));
+    else if (ctx.backdrop !== 'depth') body.append(
       slider('Field of view', () => c.fov, v => { c.fov = v; }, 20, 75, 0.5, 'camera'),
       slider('Tilt', () => c.pitch, v => { c.pitch = v; }, -35, 10, 0.5, 'camera'),
       slider('Turn', () => c.yaw, v => { c.yaw = v; }, -60, 60, 0.5, 'camera'));
@@ -293,7 +468,7 @@ export function initEditor(ctx) {
       colorCtl('Colour', () => k.fog, v => { k.fog = v; }, 'look'),
       slider('Starts at (m)', () => k.fogNear, v => { k.fogNear = v; }, 0, 60, 0.5, 'look'),
       slider('Full at (m)', () => k.fogFar, v => { k.fogFar = v; }, 5, 150, 1, 'look'));
-    if (ctx.backdrop !== 'depth') body.append(heading('Splat colour'),
+    if (ctx.backdrop === 'splat') body.append(heading('Splat colour'),
       slider('Saturation', () => L.splat.saturation, v => { L.splat.saturation = v; }, 0, 1.6, 0.01, 'look'),
       slider('Brightness', () => L.splat.brightness, v => { L.splat.brightness = v; }, 0.5, 1.6, 0.01, 'look'),
       colorCtl('Tint', () => L.splat.tint, v => { L.splat.tint = v; }, 'look'));
@@ -599,7 +774,7 @@ export function initEditor(ctx) {
   }
   function doUndo() {
     const s = undo.pop(); if (!s) { msg('Nothing to undo.'); return; }
-    const o = JSON.parse(s); zones = o.zones; Object.assign(L, o.look);
+    const o = JSON.parse(s); zones = o.zones; Object.assign(L, o.look); if (o.story) { story = o.story; ctx.setStory(story); }
     sel = null; ctx.setZones(structuredClone(zones), 'all'); ctx.applyLook('snow'); ctx.applyLook('camera'); redraw(); refresh(); msg('Undone');
   }
   async function save() {
