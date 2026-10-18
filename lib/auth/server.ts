@@ -2,7 +2,8 @@ import 'server-only';
 
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
-import { getRoleClaims, hasRole, type Role } from './roles';
+import { hasRole, type Role } from './roles';
+import { resolveClaims } from './claims';
 
 export class AuthorizationError extends Error {
   constructor(
@@ -32,7 +33,7 @@ export async function getUserWithRole(
     data: { user }
   } = await supabase.auth.getUser();
   if (!user) return null;
-  return hasRole(getRoleClaims(user), allowed) ? user : null;
+  return hasRole(await resolveClaims(user), allowed) ? user : null;
 }
 
 /** Shorthand for the full-admin check used by the existing admin tools. */
@@ -53,7 +54,7 @@ export async function requireRole(
     data: { user }
   } = await client.auth.getUser();
   if (!user) throw new AuthorizationError('Not signed in', 401);
-  if (!hasRole(getRoleClaims(user), allowed)) {
+  if (!hasRole(await resolveClaims(user), allowed)) {
     throw new AuthorizationError('Not allowed', 403);
   }
   return { user, supabase: client };
