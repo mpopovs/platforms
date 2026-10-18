@@ -4,7 +4,7 @@ import { TEMPLATES, templateManifest } from '../lib/scenes/templates';
 import { parseManifest } from '../packages/scene-engine/src/manifest';
 import { STEP_TYPES } from '../packages/scene-engine/src/engine/story.js';
 
-type Step = { do: string; who?: string; spot?: number; route?: string; follow?: string };
+type Step = { do: string; who?: string; spot?: number; route?: string; follow?: string; mode?: string };
 
 describe('scene templates', () => {
   for (const t of TEMPLATES) {
@@ -27,6 +27,8 @@ describe('scene templates', () => {
       if (s.follow) assert.ok(ids.has(s.follow), `cast has ${s.follow}`);
       if (s.spot != null) assert.ok(s.spot >= 0 && s.spot < spots, `spot ${s.spot} exists`);
       if (s.route) assert.ok(routes.has(s.route), `route ${s.route} exists`);
+      if (s.do === 'camera') assert.ok(['fixed', 'look', 'follow', 'orbit'].includes(s.mode ?? 'fixed'), `camera mode ${s.mode}`);
+      if (s.do === 'camera' && s.mode && s.mode !== 'fixed') assert.ok(s.who && ids.has(s.who), 'camera mode has a character');
     }
     // characters stand still unless the story moves them
     const b = j['zones.json'].behaviour;

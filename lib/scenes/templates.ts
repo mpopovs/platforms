@@ -41,29 +41,30 @@ function fashionShow(): Record<string, unknown> {
     { type: 'rest', x: 0, z: FRONT_Z }
   ];
   const poseSpot = spots.length - 1;
-  const closeShot = { pos: [1.5, 1.0, 2.0], target: [0, 0.55, FRONT_Z], fov: 34 };
   const hero = { pos: [0, 1.5, 4.2], target: [0, 0.7, -4], fov: 40 };
 
   const steps: Record<string, unknown>[] = [
     ...models.map((m, i) => ({ do: 'place', who: m.id, spot: i, turn: 0 })),
     ...models.map((m) => ({ do: 'outfit', who: m.id, image: 'drawing' })),
-    { do: 'camera', shot: hero, seconds: 0 },
+    { do: 'camera', mode: 'fixed', shot: hero, seconds: 0 },
     { do: 'say', text: 'Welcome to the Magic Forms fashion show!', seconds: 3 }
   ];
   models.forEach((m, i) => {
     steps.push(
-      { do: 'camera', shot: hero, seconds: 1.2, follow: m.id, wait: false },
+      // tracking shot: the camera rides in front of the model down the catwalk
+      { do: 'camera', mode: 'follow', who: m.id, offset: [0.35, 0.45, 1.5], frame: 'world', seconds: 1.5, wait: false },
       { do: 'walk', who: m.id, spot: poseSpot },
-      { do: 'camera', shot: closeShot, seconds: 1.2, wait: false },
+      // circle the model while it poses
+      { do: 'camera', mode: 'orbit', who: m.id, radius: 1.3, height: 0.45, speed: 35, seconds: 1, wait: false },
       { do: 'say', text: `${m.name}!`, seconds: 2, wait: false },
       { do: 'anim', who: m.id, clip: 'pose' },
       { do: 'place', who: m.id, turn: 180 },
+      { do: 'camera', mode: 'fixed', shot: hero, seconds: 1.2, wait: false },
       { do: 'walk', who: m.id, spot: i, wait: false },
       { do: 'wait', seconds: 1.5 }
     );
   });
   steps.push(
-    { do: 'camera', shot: hero, seconds: 1.5 },
     { do: 'wait', seconds: 3 },
     { do: 'say', text: 'Thank you for watching!', seconds: 3 }
   );

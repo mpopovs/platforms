@@ -135,23 +135,65 @@ function updateHero(dt, t) {
   _look.copy(hero.base).addScaledVector(hero.dir, 9);
   camera.lookAt(_look);
 }
-const storyCam = { from: new THREE.Vector3(), fromT: new THREE.Vector3(), to: new THREE.Vector3(), toT: new THREE.Vector3(), target: new THREE.Vector3(), t: 1, dur: 0, fov: 42, fromFov: 42, follow: null, done: null };
-function cameraTo(shot, seconds = 0, follow = null) {
-  if (shot === 'hero') { storyCam.follow = null; setView('hero'); return Promise.resolve(); }
-  if (view !== 'story') { storyCam.target.copy(camera.position).add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(5)); }
+// Story camera. Modes (camera step "mode"):
+//   fixed   go to shot { pos, target, fov }
+//   look    stay at shot.pos (or where it is) and keep aiming at a character
+//   follow  move with a character, keeping `offset` from it (world axes, or
+//           the character's own when frame = "character"): a tracking shot
+//   orbit   circle a character at `radius` / `height`, `speed` degrees per second
+// Every change blends from the current view over `seconds`.
+const storyCam = { mode: 'fixed', c: null, shot: null, offset: new THREE.Vector3(0, 1, 2.5), frame: 'world',
+  radius: 2.5, height: 1.2, speed: 20, angle: 0, fov: 42,
+  fromPos: new THREE.Vector3(), fromT: new THREE.Vector3(), fromFov: 42, t: 1, dur: 0, done: null,
+  target: new THREE.Vector3() };
+const _cp = new THREE.Vector3(), _ct = new THREE.Vector3(), _off = new THREE.Vector3();
+const charAim = (c, out) => out.set(c.root.position.x, c.root.position.y + c.h * 0.55, c.root.position.z);
+function desiredCam(dt, pos, target) {
+  const m = storyCam.mode, c = storyCam.c;
+  if (m === 'fixed' || !c) { pos.fromArray(storyCam.shot?.pos || camera.position.toArray()); target.fromArray(storyCam.shot?.target || storyCam.target.toArray()); return; }
+  charAim(c, target);
+  if (m === 'look') { pos.fromArray(storyCam.shot?.pos || storyCam.fromPos.toArray()); return; }
+  if (m === 'follow') {
+    _off.copy(storyCam.offset);
+    if (storyCam.frame === 'character') _off.applyAxisAngle(THREE.Object3D.DEFAULT_UP, c.root.rotation.y);
+    pos.copy(c.root.position).add(_off); return;
+  }
+  if (m === 'orbit') {
+    storyCam.angle += THREE.MathUtils.degToRad(storyCam.speed) * dt;
+    pos.set(c.root.position.x + Math.sin(storyCam.angle) * storyCam.radius, c.root.position.y + storyCam.height, c.root.position.z + Math.cos(storyCam.angle) * storyCam.radius);
+  }
+}
+function cameraTo(step = {}) {
+  const shot = step.shot ?? 'hero';
+  const mode = step.mode || (step.follow ? 'look' : 'fixed');
+  const who = step.who || step.follow;
+  if (mode === 'fixed' && shot === 'hero') { storyCam.c = null; setView('hero'); return Promise.resolve(); }
+  if (view !== 'story') storyCam.target.copy(camera.position).add(camera.getWorldDirection(_ct).multiplyScalar(5));
   view = 'story'; controls.enabled = false;
-  storyCam.from.copy(camera.position); storyCam.fromT.copy(storyCam.target); storyCam.fromFov = camera.fov;
-  storyCam.to.fromArray(shot.pos); storyCam.toT.fromArray(shot.target); storyCam.fov = shot.fov || camera.fov;
-  storyCam.t = 0; storyCam.dur = Math.max(0, seconds); storyCam.follow = follow;
+  storyCam.mode = mode; storyCam.c = who ? findChar(who) || null : null;
+  storyCam.shot = shot && shot !== 'hero' ? shot : null;
+  if (Array.isArray(step.offset)) storyCam.offset.fromArray(step.offset);
+  storyCam.frame = step.frame === 'character' ? 'character' : 'world';
+  storyCam.radius = step.radius ?? 2.5; storyCam.height = step.height ?? 1.2; storyCam.speed = step.speed ?? 20;
+  if (mode === 'orbit' && storyCam.c) { const p = storyCam.c.root.position; storyCam.angle = Math.atan2(camera.position.x - p.x, camera.position.z - p.z); }
+  storyCam.fov = step.fov ?? storyCam.shot?.fov ?? camera.fov;
+  storyCam.fromPos.copy(camera.position); storyCam.fromT.copy(storyCam.target); storyCam.fromFov = camera.fov;
+  storyCam.t = 0; storyCam.dur = Math.max(0, step.seconds ?? 0);
   return new Promise(res => { storyCam.done = res; });
 }
 function updateStoryCam(dt) {
   storyCam.t = storyCam.dur > 0 ? Math.min(1, storyCam.t + dt / storyCam.dur) : 1;
   const e = storyCam.t * storyCam.t * (3 - 2 * storyCam.t);
-  camera.position.lerpVectors(storyCam.from, storyCam.to, e);
-  storyCam.target.lerpVectors(storyCam.fromT, storyCam.toT, e);
-  if (storyCam.follow) { const p = storyCam.follow.root.position; storyCam.target.lerp(_look.set(p.x, p.y + storyCam.follow.h * 0.6, p.z), storyCam.t < 1 ? e : Math.min(1, dt * 4)); }
-  camera.fov += (storyCam.fov - camera.fov) * (storyCam.t < 1 ? e : 1); camera.updateProjectionMatrix();
+  desiredCam(dt, _cp, _ct);
+  if (storyCam.t < 1) {
+    camera.position.lerpVectors(storyCam.fromPos, _cp, e);
+    storyCam.target.lerpVectors(storyCam.fromT, _ct, e);
+    camera.fov = storyCam.fromFov + (storyCam.fov - storyCam.fromFov) * e;
+  } else {
+    const k = storyCam.mode === 'fixed' ? 1 : Math.min(1, dt * 6); // smooth tracking
+    camera.position.lerp(_cp, k); storyCam.target.lerp(_ct, k); camera.fov = storyCam.fov;
+  }
+  camera.updateProjectionMatrix();
   camera.lookAt(storyCam.target);
   if (storyCam.t >= 1 && storyCam.done) { const d = storyCam.done; storyCam.done = null; d(); }
 }
@@ -506,22 +548,19 @@ function capyMarker() {
 // Stand-in figure for characters whose GLB is missing: body, head and an
 // "Outfit" mesh with UVs (so the drawing can be shown), plus idle/walk/pose clips.
 function placeholderCharacter() {
+  // a plain capsule; the whole capsule is the "Outfit" and takes the drawing
   const model = new THREE.Group(); model.name = 'placeholder';
-  const skin = new THREE.MeshStandardNodeMaterial({ color: 0xe8d5c4, roughness: 0.7 });
-  const hips = new THREE.Group(); hips.name = 'hips'; model.add(hips);
-  const legs = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.55, 4, 12), skin); legs.position.y = 0.37; hips.add(legs);
-  const torso = new THREE.Group(); torso.name = 'torso'; torso.position.y = 0.95; hips.add(torso);
-  const outfit = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.26, 0.62, 24, 1, true), new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.8, side: THREE.DoubleSide }));
-  outfit.name = 'Outfit'; outfit.material.name = 'Outfit'; torso.add(outfit);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.14, 20, 14), skin); head.name = 'head'; head.position.y = 0.48; torso.add(head);
-  const t = [0, 0.3, 0.6];
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.25, 0.9, 8, 24), new THREE.MeshStandardNodeMaterial({ color: 0xf4f1ec, roughness: 0.6 }));
+  body.name = 'Outfit'; body.material.name = 'Outfit'; body.position.y = 0.7;
+  model.add(body);
+  const q = (deg) => new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(deg)).toArray();
   const clips = [
-    new THREE.AnimationClip('idle', 2, [new THREE.VectorKeyframeTrack('torso.position', [0, 1, 2], [0, 0.95, 0, 0, 0.965, 0, 0, 0.95, 0])]),
-    new THREE.AnimationClip('walk', 0.6, [
-      new THREE.VectorKeyframeTrack('hips.position', t, [0, 0, 0, 0, 0.04, 0, 0, 0, 0]),
-      new THREE.QuaternionKeyframeTrack('torso.quaternion', t, [0, -0.06, 0, 0.998, 0, 0.06, 0, 0.998, 0, -0.06, 0, 0.998])
+    new THREE.AnimationClip('idle', 2, [new THREE.VectorKeyframeTrack('Outfit.scale', [0, 1, 2], [1, 1, 1, 1.02, 0.985, 1.02, 1, 1, 1])]),
+    new THREE.AnimationClip('walk', 0.5, [
+      new THREE.VectorKeyframeTrack('Outfit.position', [0, 0.25, 0.5], [0, 0.7, 0, 0, 0.76, 0, 0, 0.7, 0]),
+      new THREE.QuaternionKeyframeTrack('Outfit.quaternion', [0, 0.25, 0.5], [...q(-6), ...q(6), ...q(-6)])
     ]),
-    new THREE.AnimationClip('pose', 1.6, [new THREE.QuaternionKeyframeTrack('hips.quaternion', [0, 0.8, 1.6], [0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, -1])])
+    new THREE.AnimationClip('pose', 1.4, [new THREE.QuaternionKeyframeTrack('Outfit.quaternion', [0, 0.7, 1.4], [...q(0), ...q(180), ...q(360)])])
   ];
   return { scene: model, animations: clips };
 }
@@ -805,7 +844,7 @@ const storyRunner = createStoryRunner({
   setVisible: (c, on) => { c.enabled = on; c.root.visible = on; },
   outfit: (c, image) => setOutfit(c, image === 'drawing' ? opts.drawingUrl?.(c.tag) : image ? `${WORLD}/${image}` : null),
   caption: t => ui.caption(t),
-  cameraTo,
+  cameraTo: step => cameraTo(step),
   url: name => `${WORLD}/${name}`,
   reset: () => {},
   onStep: i => storyStepListener?.(i)
@@ -901,6 +940,8 @@ async function boot() {
       stopStory: () => { storyRunner.stop(); setView('free'); },
       storyRunning: () => storyRunner.running,
       onStoryStep: fn => { storyStepListener = fn; },
+      previewCamera: step => cameraTo(step),
+      charPos: id => findChar(id)?.root.position.toArray() ?? null,
       currentShot: () => ({ pos: camera.position.toArray().map(v => +v.toFixed(3)), target: (view === 'free' || view === 'top' ? controls.target : storyCam.target).toArray().map(v => +v.toFixed(3)), fov: +camera.fov.toFixed(1) }),
       navHeight: (x, z) => nav.height(x, z),
       getZones: () => structuredClone(zones), setZones,

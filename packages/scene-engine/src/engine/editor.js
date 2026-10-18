@@ -309,7 +309,11 @@ export function initEditor(ctx) {
   function stepSummary(st) {
     const n = st.who ? ctx.castName(st.who) : '';
     switch (st.do) {
-      case 'camera': return st.shot === 'hero' ? 'Camera: hero view' : `Camera shot${st.follow ? ' following ' + ctx.castName(st.follow) : ''}${st.seconds ? ` (${st.seconds}s move)` : ''}`;
+      case 'camera': {
+        const m = st.mode || (st.follow ? 'look' : 'fixed'), w = ctx.castName(st.who || st.follow || '');
+        const what = m === 'follow' ? `Camera follows ${w}` : m === 'orbit' ? `Camera circles ${w}` : m === 'look' ? `Camera watches ${w}` : st.shot === 'hero' ? 'Camera: hero view' : 'Camera shot';
+        return `${what}${st.seconds ? ` (${st.seconds}s move)` : ''}${st.wait === false ? ' (with next)' : ''}`;
+      }
       case 'walk': return `${n} walks ${st.route ? 'route “' + st.route + '”' : st.spot != null ? 'to spot ' + (st.spot + 1) : 'to a point'}${st.wait === false ? ' (with next)' : ''}`;
       case 'place': return `${n} placed${st.spot != null ? ' at spot ' + (st.spot + 1) : ''}${st.turn != null ? `, facing ${st.turn}°` : ''}`;
       case 'anim': return `${n} plays ${st.clip || 'pose'}${st.loop ? ' (loop)' : ''}`;
@@ -324,7 +328,7 @@ export function initEditor(ctx) {
   function defaultStep(type) {
     const first = ctx.castInfo()[0]?.id;
     return ({
-      camera: { do: 'camera', shot: ctx.currentShot(), seconds: 1.5 },
+      camera: { do: 'camera', mode: 'fixed', shot: ctx.currentShot(), seconds: 1.5 },
       walk: { do: 'walk', who: first, route: zones.routes?.[0]?.name },
       place: { do: 'place', who: first, spot: (zones.spots || []).findIndex(s => s.type === 'start') >= 0 ? (zones.spots || []).findIndex(s => s.type === 'start') : null, turn: 0 },
       anim: { do: 'anim', who: first, clip: 'pose' },
@@ -356,11 +360,37 @@ export function initEditor(ctx) {
       await ctx.put(name, f, f.type || 'application/octet-stream'); snapshot(); fn(name); storyChanged(); refresh(); return `Uploaded ${name}`;
     }));
     switch (st.do) {
-      case 'camera': return [
-        row(btn('Use current view', () => { snapshot(); st.shot = ctx.currentShot(); storyChanged(); }), btn('Hero view', () => { snapshot(); st.shot = 'hero'; storyChanged(); })),
-        h('div', { class: 'muted' }, 'Frame the shot in Free view (right-drag to orbit), then “Use current view”.'),
-        num('Move time (s)', () => st.seconds, v => { st.seconds = v ?? 0; }, 0, 10, 0.1),
-        sel('Follow', [['', 'Nobody'], ...who()], () => st.follow, v => { if (v) st.follow = v; else delete st.follow; })];
+      case 'camera': {
+        const mode = st.mode || (st.follow ? 'look' : 'fixed');
+        if (st.follow && !st.who) { st.who = st.follow; }
+        const setMode = v => { st.mode = v; delete st.follow; if (v !== 'fixed' && !st.who) st.who = who()[0]?.[0]; if (v === 'follow' && !st.offset) st.offset = [0, 0.9, 2.2]; };
+        const preset = (label, off, frame) => btn(label, () => { snapshot(); st.offset = off; st.frame = frame; storyChanged(); ctx.previewCamera({ ...st, seconds: 0.8 }); });
+        const fields = [
+          sel('Camera', [['fixed', 'Fixed shot'], ['look', 'Look at a character'], ['follow', 'Follow a character'], ['orbit', 'Circle a character']], () => mode, setMode)];
+        if (mode !== 'fixed') fields.push(sel('Character', who(), () => st.who, v => { st.who = v; }));
+        if (mode === 'fixed' || mode === 'look') fields.push(
+          row(btn('Use current view', () => { snapshot(); st.shot = ctx.currentShot(); storyChanged(); }),
+            ...(mode === 'fixed' ? [btn('Hero view', () => { snapshot(); st.shot = 'hero'; storyChanged(); })] : [])),
+          h('div', { class: 'muted' }, 'Frame it in Free view (right-drag to orbit, wheel to zoom), then “Use current view”.'));
+        if (mode === 'follow') fields.push(
+          h('div', { class: 'muted' }, 'Where the camera rides, relative to the character:'),
+          row(preset('In front', [0, 0.9, 2.2], 'character'), preset('Behind', [0, 1.1, -2.4], 'character'), preset('Side', [2.2, 0.9, 0], 'character')),
+          row(btn('Use current view', () => {
+            const p = ctx.charPos(st.who), c = ctx.currentShot(); if (!p) return;
+            snapshot(); st.offset = [c.pos[0] - p[0], c.pos[1] - p[1], c.pos[2] - p[2]].map(v => +v.toFixed(2)); st.frame = 'world'; storyChanged();
+          })),
+          chk('Turn with them', () => st.frame === 'character', v => { st.frame = v ? 'character' : 'world'; }));
+        if (mode === 'orbit') fields.push(
+          num('Distance (m)', () => st.radius ?? 2.5, v => { st.radius = v ?? 2.5; }, 0.3, 20, 0.1),
+          num('Height (m)', () => st.height ?? 1.2, v => { st.height = v ?? 1.2; }, -2, 10, 0.1),
+          num('Speed (°/s)', () => st.speed ?? 20, v => { st.speed = v ?? 20; }, -180, 180, 5));
+        fields.push(
+          num('Move time (s)', () => st.seconds, v => { st.seconds = v ?? 0; }, 0, 10, 0.1),
+          num('Field of view', () => st.fov ?? '', v => { if (v) st.fov = v; else delete st.fov; }, 15, 90, 1),
+          withNext(),
+          row(btn('Preview camera', () => ctx.previewCamera(st))));
+        return fields;
+      }
       case 'walk': return [whoSel(),
         sel('Route', [['', '—'], ...(zones.routes || []).map(r => [r.name, r.name])], () => st.route, v => { if (v) { st.route = v; delete st.spot; } else delete st.route; }),
         sel('or to spot', spotOpts, () => st.spot, v => { if (v !== '') { st.spot = +v; delete st.route; } else delete st.spot; }),

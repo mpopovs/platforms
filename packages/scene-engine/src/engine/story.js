@@ -4,7 +4,10 @@
 // Every step has "do" and, for timed steps, "wait" (default true). With
 // "wait": false the next step starts at once, so two models can walk together.
 //
-//   { "do": "camera", "shot": "hero" | { "pos": [x,y,z], "target": [x,y,z], "fov": 40 }, "seconds": 1.5, "follow": "<who>" }
+//   { "do": "camera", "mode": "fixed", "shot": "hero" | { "pos": [x,y,z], "target": [x,y,z], "fov": 40 }, "seconds": 1.5 }
+//   { "do": "camera", "mode": "look",   "who": "<id>", "shot": {…} }              stay put, keep aiming at them
+//   { "do": "camera", "mode": "follow", "who": "<id>", "offset": [x,y,z], "frame": "world" | "character" }
+//   { "do": "camera", "mode": "orbit",  "who": "<id>", "radius": 2.5, "height": 1.2, "speed": 20 }
 //   { "do": "walk",   "who": "<id>", "route": "<route name>" | "spot": 3 | "to": [x, z] }
 //   { "do": "place",  "who": "<id>", "spot": 3 | "at": [x, z], "turn": 180 }
 //   { "do": "anim",   "who": "<id>", "clip": "pose", "loop": false }
@@ -30,7 +33,7 @@ export function createStoryRunner(api) {
     const wait = s.wait !== false;
     switch (s.do) {
       case 'camera': {
-        const p = api.cameraTo(s.shot ?? 'hero', s.seconds ?? 0, s.follow ? api.char(s.follow) : null);
+        const p = api.cameraTo(s);
         if (wait) await Promise.race([p, until(() => false, r, (s.seconds ?? 0) * 1000 + 50)]);
         break;
       }
