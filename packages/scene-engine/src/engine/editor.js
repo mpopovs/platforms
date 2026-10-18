@@ -16,7 +16,7 @@ const BEHAVIOUR = [['walk', 'Walk around'], ['swim', 'Swim'], ['soak', 'Soak (si
 const NICE = { baby: 'Baby', explorer_boy: 'Explorer boy', four_legged: 'Four-legged', girl_child: 'Girl child', mother: 'Mother', sporty_boy: 'Sporty boy', teen_girl_be: 'Teen girl (beanie)', teen_girl_ho: 'Teen girl (hoodie)' };
 const HINT = {
   select: 'Click to select. Drag dots to move them, small dots add a corner, Option-click deletes one. Drag models to move them.',
-  draw: 'Click on the ground to add corners. Enter or double-click finishes, Esc cancels.',
+  draw: 'Click corners on the ground. Finish with the button above (or Enter / double-click). Esc cancels.',
   route: 'Click on the ground to add route points in walking order. Enter or double-click finishes, Esc cancels.',
   spot: 'Click on the ground to place the spot.',
   prop: 'Click on the ground to place it. Drag it later in Select mode.',
@@ -60,6 +60,11 @@ export function initEditor(ctx) {
   #ed .item{display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:6px;background:#222b37;cursor:pointer}
   #ed .item.on{background:#33506e} #ed .item .grow{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #ed .muted{color:#8a9bb0} #ed .hint{color:#9fb2c6;font-size:11.5px} #ed .msg{color:#8fe3a8;min-height:1.2em}
+  #ed-banner{position:fixed;left:50%;top:14px;transform:translateX(-50%);display:none;align-items:center;gap:10px;padding:8px 10px 8px 16px;border-radius:12px;
+      background:rgba(20,26,34,.94);color:#fff;font:13px/1.35 system-ui,sans-serif;z-index:25;box-shadow:0 6px 24px rgba(0,0,0,.35);max-width:min(760px,calc(100vw - 380px))}
+  #ed-banner.on{display:flex} #ed-banner b{color:#8fe3a8} #ed-banner .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+  #ed-banner button{background:#2b3644;color:#e8eef5;border:1px solid #3c4a5c;border-radius:7px;padding:5px 10px;font:inherit;cursor:pointer;white-space:nowrap}
+  #ed-banner button.go{background:#2f7d4f;border-color:#3f9a64;font-weight:600} #ed-banner button:disabled{opacity:.45;cursor:default}
   #ed .card{background:#1a2230;border:1px solid #2f3b4a;border-radius:8px;padding:8px;margin-top:6px}`;
   document.head.appendChild(css);
   const disposers = [() => css.remove()];
@@ -68,6 +73,11 @@ export function initEditor(ctx) {
     <div class="body"></div>
     <div class="foot"><div class="hint"></div><div class="row"><button data-a="undo">Undo</button><button data-a="save" class="save">Save scene</button></div><div class="msg"></div></div>`;
   (ctx.container || document.body).appendChild(el);
+  // step-by-step bar over the scene while drawing or placing something
+  const banner = document.createElement('div'); banner.id = 'ed-banner';
+  (ctx.container || document.body).appendChild(banner);
+  disposers.push(() => banner.remove());
+  ['pointerdown', 'pointerup', 'dblclick'].forEach(ev => banner.addEventListener(ev, e => e.stopPropagation()));
   disposers.push(() => el.remove());
   const body = el.querySelector('.body');
   const msg = t => { el.querySelector('.msg').textContent = t; };
@@ -114,8 +124,31 @@ export function initEditor(ctx) {
     redraw(); msg('Unsaved changes');
   }
 
+  function updateBanner() {
+    const active = ['draw', 'route', 'spot', 'prop', 'send'].includes(tool);
+    banner.classList.toggle('on', active);
+    if (!active) return;
+    banner.innerHTML = '';
+    const area = AREA_TYPES.find(a => a[0] === drawKind);
+    let title = '', needed = 0;
+    if (tool === 'draw') { title = `${redrawTarget ? 'Redrawing' : 'Drawing'} ${area ? area[1].toLowerCase() : 'area'}: click on the ground to add corners (${draft.length} so far).`; needed = 3; }
+    else if (tool === 'route') { title = `Drawing a route: click points in walking order (${draft.length} so far).`; needed = 2; }
+    else if (tool === 'spot') title = `Click on the ground to place the ${(SPOT_TYPES.find(s => s[0] === spotType)?.[1] || 'spot').toLowerCase()}.`;
+    else if (tool === 'prop') title = 'Click on the ground to place it.';
+    else if (tool === 'send') title = 'Click on the ground: the selected model walks there.';
+    const color = tool === 'draw' ? area?.[2] : tool === 'route' ? COLORS.route : tool === 'spot' ? COLORS[spotType] : null;
+    banner.append(h('span', {}, color != null ? h('span', { class: 'dot', style: `background:${hex(color)}` }) : '', title));
+    if (needed) {
+      const fin = h('button', { class: 'go' }, 'Finish'); fin.disabled = draft.length < needed; fin.onclick = finishDraw;
+      const un = h('button', {}, 'Undo corner'); un.disabled = !draft.length; un.onclick = undoCorner;
+      banner.append(un, fin);
+    }
+    const cancel = h('button', {}, 'Cancel'); cancel.onclick = cancelTool; banner.append(cancel);
+  }
+
   // ============================================================ tabs
   function refresh() {
+    updateBanner();
     el.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
     el.querySelector('.hint').textContent = HINT[tool] || '';
     body.innerHTML = '';
@@ -124,43 +157,111 @@ export function initEditor(ctx) {
   el.querySelector('.tabs').addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (b) { tab = b.dataset.tab; refresh(); } });
   el.querySelector('[data-a=undo]').onclick = doUndo;
   el.querySelector('[data-a=save]').onclick = save;
-  const setTool = (t, extra = {}) => { tool = t; draft = []; Object.assign(toolOpts, extra); drawKind = extra.drawKind ?? drawKind; spotType = extra.spotType ?? spotType; propType = extra.propType ?? propType; redraw(); };
+  let redrawTarget = null; // an existing area being redrawn
+  const setTool = (t, extra = {}) => {
+    tool = t; draft = []; Object.assign(toolOpts, extra); redrawTarget = extra.redrawTarget ?? null;
+    drawKind = extra.drawKind ?? drawKind; spotType = extra.spotType ?? spotType; propType = extra.propType ?? propType;
+    if ((t === 'draw' || t === 'route') && ctx.view() === 'hero') ctx.setView('top'); // drawing is easiest from above
+    redraw(); refresh();
+  };
+  const cancelTool = () => { draft = []; tool = 'select'; redrawTarget = null; redraw(); refresh(); };
+  const undoCorner = () => { draft.pop(); redraw(); updateBanner(); };
   const toolOpts = {};
   const viewRow = () => [heading('View'), row(...[['hero', 'Hero'], ['top', 'Top'], ['free', 'Free']].map(([v, t]) => btn(t, () => { ctx.setView(v); redraw(); }, { on: ctx.view() === v })))];
 
+  const AREA_TYPES = [
+    ['walk', 'Walk area', COLORS.walk, 'Models may walk here.'],
+    ['terrace', 'Raised area', COLORS.terrace, 'A floor at a fixed height (stage, deck, steps).'],
+    ['blocked', 'No-go area', COLORS.blocked, 'Models never walk here (furniture, holes, walls).'],
+    ['water', 'Water', COLORS.water, 'Models swim here. One per scene.']
+  ];
+  const SPOT_TYPES = [['start', 'Start spot', COLORS.start], ['rest', 'Rest spot', COLORS.rest], ['entry', 'Water entry', COLORS.entry]];
+  const hex = c => `#${c.toString(16).padStart(6, '0')}`;
+  let addMenu = null; // 'area' | 'spot' | null
+  const areaKind = it => (it.y != null ? 'terrace' : 'walk');
+  function areaRows() {
+    const rows = [];
+    if (zones.water?.polygon?.length) rows.push({ s: { kind: 'water' }, name: 'Water', kind: 'water', extra: `${zones.water.polygon.length} corners` });
+    (zones.walk || []).forEach((w, i) => rows.push({ s: { kind: 'walk', list: 'walk', i }, name: w.name || `Walk area ${i + 1}`, kind: areaKind(w), extra: w.y != null ? `${w.y.toFixed(2)} m high` : '' }));
+    (zones.blocked || []).forEach((w, i) => rows.push({ s: { kind: 'blocked', list: 'blocked', i }, name: w.name || `No-go area ${i + 1}`, kind: 'blocked', extra: '' }));
+    return rows;
+  }
+  const isSel = s => sel && sel.kind === s.kind && sel.i === s.i && sel.list === s.list;
+  function layerRow({ s, name, kind, extra }, onDelete) {
+    const t = AREA_TYPES.find(a => a[0] === kind) || SPOT_TYPES.find(a => a[0] === kind);
+    const del = h('button', { class: 'mini', title: 'Delete' }, '✕');
+    del.onclick = ev => { ev.stopPropagation(); onDelete(); };
+    return h('div', { class: 'item' + (isSel(s) ? ' on' : ''), onclick: () => { sel = s; tool = 'select'; refresh(); redraw(); } },
+      h('span', { class: 'dot', style: `background:${hex(t?.[2] ?? 0xffffff)}` }), h('span', { class: 'grow' }, name),
+      h('span', { class: 'muted' }, extra || t?.[1] || ''), del);
+  }
+  function removeArea(s) {
+    snapshot();
+    if (s.kind === 'water') zones.water.polygon = [];
+    else zones[s.list].splice(s.i, 1);
+    if (isSel(s)) sel = null;
+    apply('nav'); refresh();
+  }
   function tabDraw() {
-    body.append(...viewRow(),
-      heading('Draw areas'),
-      row(btn('Walk area', () => setTool('draw', { drawKind: 'walk' }), { on: tool === 'draw' && drawKind === 'walk', dot: COLORS.walk }),
-        btn('Terrace', () => setTool('draw', { drawKind: 'terrace' }), { on: tool === 'draw' && drawKind === 'terrace', dot: COLORS.terrace }),
-        btn('Blocked', () => setTool('draw', { drawKind: 'blocked' }), { on: tool === 'draw' && drawKind === 'blocked', dot: COLORS.blocked })),
-      heading('Spots'),
-      row(btn('Start', () => setTool('spot', { spotType: 'start' }), { on: tool === 'spot' && spotType === 'start', dot: COLORS.start }),
-        btn('Rest', () => setTool('spot', { spotType: 'rest' }), { on: tool === 'spot' && spotType === 'rest', dot: COLORS.rest }),
-        btn('Water entry', () => setTool('spot', { spotType: 'entry' }), { on: tool === 'spot' && spotType === 'entry', dot: COLORS.entry })),
-      heading('Edit'),
-      row(btn('Select / move', () => setTool('select'), { on: tool === 'select' }), btn('Delete selected', deleteSel, { cls: 'warn' })),
-      propsCard(),
-      heading('Layers'), layersList(),
-      heading('Show'),
-      row(...[['grid', 'Nav grid'], ['paths', 'Model paths'], ['pause', 'Pause models']].map(([k, t]) => btn(t, () => { shows[k] = !shows[k]; ctx.setShow(k, shows[k]); }, { on: shows[k] }))));
+    body.append(...viewRow(), h('div', { class: 'muted' }, 'Tip: Top view is easiest for drawing.'));
+
+    // ---- areas
+    const areas = areaRows();
+    body.append(h('div', { class: 'row', style: 'align-items:center;margin-top:12px' }, h('h3', { style: 'margin:0;flex:1' }, `Areas (${areas.length})`),
+      btn(addMenu === 'area' ? 'Close' : '+ New area', () => { addMenu = addMenu === 'area' ? null : 'area'; }, { cls: 'mini' })));
+    if (addMenu === 'area') body.append(h('div', { class: 'card' }, h('div', { class: 'muted' }, 'What kind of area?'),
+      ...AREA_TYPES.map(([k, label, color, note]) => h('div', { class: 'item', onclick: () => {
+        if (k === 'water' && zones.water?.polygon?.length && !confirm('Replace the existing water with a new shape?')) return;
+        addMenu = null; setTool('draw', { drawKind: k });
+      } }, h('span', { class: 'dot', style: `background:${hex(color)}` }), h('span', { class: 'grow' }, h('b', {}, label), h('br'), h('span', { class: 'muted' }, note))))));
+    const list = h('div', { class: 'list' });
+    for (const r of areas) list.append(layerRow(r, () => removeArea(r.s)));
+    if (!areas.length) list.append(h('div', { class: 'muted' }, 'No areas yet. Without areas, models walk on any flat ground in view. Click “+ New area” to draw where they may (or may not) go.'));
+    body.append(list);
+
+    const it = selItem();
+    if (it && (sel.kind === 'walk' || sel.kind === 'blocked' || sel.kind === 'water')) {
+      const kind = sel.kind === 'water' ? 'water' : sel.kind === 'blocked' ? 'blocked' : areaKind(it);
+      const card = h('div', { class: 'card' });
+      if (kind !== 'water') {
+        card.append(textCtl('Name', () => it.name, v => { it.name = v; }),
+          selectCtl('Type', AREA_TYPES.filter(a => a[0] !== 'water').map(a => [a[0], a[1]]), () => kind, v => {
+            if (v === kind) return;
+            const item = zones[sel.list].splice(sel.i, 1)[0];
+            if (v === 'blocked') { delete item.y; zones.blocked = zones.blocked || []; zones.blocked.push(item); sel = { kind: 'blocked', list: 'blocked', i: zones.blocked.length - 1 }; }
+            else { if (v === 'terrace') item.y = +avgGround(item.polygon).toFixed(2); else delete item.y; zones.walk = zones.walk || []; zones.walk.push(item); sel = { kind: 'walk', list: 'walk', i: zones.walk.length - 1 }; }
+          }, 'nav'));
+        if (kind === 'terrace') card.append(slider('Height (m)', () => it.y, v => { it.y = v; }, -1, 3, 0.01, 'nav'));
+      } else card.append(h('div', { class: 'muted' }, 'Water look and level are in the Water tab.'));
+      card.append(h('div', { class: 'muted' }, 'Reshape: drag the corner dots. Add a corner: drag a small middle dot. Remove a corner: Alt/Option-click it.'),
+        row(btn('Redraw shape', () => setTool('draw', { drawKind: kind, redrawTarget: { ...sel } })),
+          btn('Delete area', () => removeArea({ ...sel }), { cls: 'warn' })));
+      body.append(card);
+    }
+
+    // ---- spots
+    const spotsList = zones.spots || [];
+    body.append(h('div', { class: 'row', style: 'align-items:center;margin-top:12px' }, h('h3', { style: 'margin:0;flex:1' }, `Spots (${spotsList.length})`),
+      btn(addMenu === 'spot' ? 'Close' : '+ Add spot', () => { addMenu = addMenu === 'spot' ? null : 'spot'; }, { cls: 'mini' })));
+    if (addMenu === 'spot') body.append(h('div', { class: 'card' }, h('div', { class: 'muted' }, 'Spots are places models start at, rest at, or enter the water. Stories walk models to spots.'),
+      row(...SPOT_TYPES.map(([k, label, color]) => btn(label, () => { addMenu = null; setTool('spot', { spotType: k }); }, { dot: color })))));
+    const sl = h('div', { class: 'list' });
+    const counts = {};
+    spotsList.forEach((sp, i) => {
+      counts[sp.type] = (counts[sp.type] || 0) + 1;
+      const label = (SPOT_TYPES.find(t => t[0] === sp.type)?.[1] || sp.type);
+      sl.append(layerRow({ s: { kind: 'spot', i }, name: `${i + 1}. ${label}`, kind: sp.type, extra: '' }, () => { snapshot(); zones.spots.splice(i, 1); if (sel?.kind === 'spot') sel = null; apply('nav'); refresh(); }));
+    });
+    if (!spotsList.length) sl.append(h('div', { class: 'muted' }, 'No spots yet.'));
+    body.append(sl);
+    if (sel?.kind === 'spot' && it) body.append(h('div', { class: 'card' },
+      selectCtl('Type', SPOT_TYPES.map(t => [t[0], t[1]]), () => it.type, v => { it.type = v; }, 'nav'),
+      h('div', { class: 'muted' }, 'Move it: drag the dot in the scene.')));
+
+    body.append(heading('Show'),
+      row(...[['grid', 'Walkable grid'], ['paths', 'Model paths'], ['pause', 'Pause models']].map(([k, t]) => btn(t, () => { shows[k] = !shows[k]; ctx.setShow(k, shows[k]); }, { on: shows[k] }))));
   }
   const shows = { grid: false, paths: false, pause: false };
-  function layersList() {
-    const list = h('div', { class: 'list' });
-    const add = (label, color, s, extra = '') => {
-      const on = sel && sel.kind === s.kind && sel.i === s.i && sel.list === s.list;
-      list.append(h('div', { class: 'item' + (on ? ' on' : ''), onclick: () => { sel = s; tool = 'select'; refresh(); redraw(); } }, h('span', { class: 'dot', style: `background:#${color.toString(16).padStart(6, '0')}` }), h('span', { class: 'grow' }, label), h('span', { class: 'muted' }, extra)));
-    };
-    if (zones.water?.polygon?.length) add('Water edge', COLORS.water, { kind: 'water' }, `${zones.water.polygon.length} pts`);
-    (zones.walk || []).forEach((w, i) => add(w.name || `walk ${i + 1}`, w.y != null ? COLORS.terrace : COLORS.walk, { kind: 'walk', list: 'walk', i }, w.y != null ? `${w.y.toFixed(2)} m` : 'ground'));
-    (zones.blocked || []).forEach((w, i) => add(w.name || `blocked ${i + 1}`, COLORS.blocked, { kind: 'blocked', list: 'blocked', i }));
-    (zones.spots || []).forEach((s, i) => add(`${s.type} spot ${i + 1}`, COLORS[s.type] ?? 0xffffff, { kind: 'spot', i }));
-    (zones.routes || []).forEach((r, i) => add(r.name || `route ${i + 1}`, COLORS.route, { kind: 'route', list: 'routes', i }, `${r.points.length} pts`));
-    (zones.props || []).forEach((p, i) => add(`${p.type} ${i + 1}`, COLORS.prop, { kind: 'prop', list: 'props', i }));
-    if (!list.children.length) list.append(h('div', { class: 'muted' }, 'Nothing drawn yet.'));
-    return list;
-  }
   // properties of the selected shape / spot / route / prop
   function propsCard() {
     const it = selItem(); if (!it || sel.kind === 'capy') return '';
@@ -262,14 +363,21 @@ export function initEditor(ctx) {
   function castAdder() {
     return h('div', { class: 'card' },
       h('div', { class: 'muted' }, 'Add any rigged GLB model with its animations (a runway model, an animal, a capybara…). Then pick which clip is idle, walk and pose, and which mesh wears the drawing.'),
-      row(fileInput('Add model (GLB)', '.glb,model/gltf-binary', f => busy('Uploading ' + f.name, async () => {
-        const cast = ctx.getCast(); let id = slug(f.name), n = 2;
-        while (cast.some(c => c.id === id)) id = `${slug(f.name)}_${n++}`;
+      row(btn('Add stand-in', () => busy('Adding', async () => {
+        const cast = ctx.getCast(); let n = cast.length + 1;
+        while (cast.some(c => c.id === `model_${n}`)) n++;
+        cast.push({ id: `model_${n}`, name: `Model ${n}`, height: 1.6 });
+        await ctx.setCast(cast); selectCapy(`model_${n}`);
+        return `Added Model ${n} (a capsule until you give it a GLB in Files). Save to keep it.`;
+      })), fileInput('Add model (GLB)', '.glb,model/gltf-binary', f => busy('Uploading ' + f.name, async () => {
+        const cast = ctx.getCast(); let n = cast.length + 1;
+        while (cast.some(c => c.id === `model_${n}`)) n++;
+        const id = `model_${n}`;
         const file = `cast/${id}.glb`;
         await ctx.put(file, f, 'model/gltf-binary');
-        cast.push({ id, name: f.name.replace(/\.glb$/i, ''), file, height: 1.7, clips: {} });
+        cast.push({ id, name: `Model ${n}`, file, height: 1.7, clips: {} });
         await ctx.setCast(cast); selectCapy(id);
-        return `Added model ${id}. Save to keep it.`;
+        return `Added Model ${n} (${f.name}). Rename it in Model setup; Save to keep it.`;
       }))));
   }
   function castCard(id) {
@@ -810,7 +918,7 @@ export function initEditor(ctx) {
       const g = groundPick(e); if (!g) return;
       const last = draft[draft.length - 1];
       if (last && Math.hypot(last[0] - g[0], last[1] - g[1]) < 0.05) return; // 2nd click of a double-click
-      draft.push(g); redraw();
+      draft.push(g); redraw(); updateBanner();
     } else if (tool === 'spot') {
       const g = groundPick(e); if (!g) return;
       snapshot(); zones.spots = zones.spots || []; zones.spots.push({ type: spotType, x: g[0], z: g[1] });
@@ -843,7 +951,7 @@ export function initEditor(ctx) {
   const onKey = e => {
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
     if (e.key === 'Enter' && (tool === 'draw' || tool === 'route')) finishDraw();
-    if (e.key === 'Escape') { draft = []; tool = 'select'; refresh(); redraw(); }
+    if (e.key === 'Escape') cancelTool();
     if ((e.key === 'Backspace' || e.key === 'Delete') && sel) { e.preventDefault(); deleteSel(); }
     if (e.key === 'z' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); doUndo(); }
     if (e.key === 's' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(); }
@@ -854,20 +962,24 @@ export function initEditor(ctx) {
     if (tool === 'route') {
       if (draft.length < 2) { msg('A route needs at least 2 points.'); return; }
       snapshot(); zones.routes = zones.routes || [];
-      zones.routes.push({ name: `route ${zones.routes.length + 1}`, points: draft, loop: false, reverse: true });
+      zones.routes.push({ name: `Route ${zones.routes.length + 1}`, points: draft, loop: false, reverse: true });
       sel = { kind: 'route', list: 'routes', i: zones.routes.length - 1 }; draft = []; tool = 'select'; apply('data'); refresh(); return;
     }
     if (draft.length < 3) { msg('A shape needs at least 3 corners.'); return; }
     snapshot();
     if (drawKind === 'water') { zones.water.polygon = draft; sel = { kind: 'water' }; }
-    else {
+    else if (redrawTarget && zones[redrawTarget.list]?.[redrawTarget.i]) {
+      zones[redrawTarget.list][redrawTarget.i].polygon = draft; sel = redrawTarget;
+    } else {
       const list = drawKind === 'blocked' ? 'blocked' : 'walk';
       zones[list] = zones[list] || [];
-      const it = { name: `${drawKind} ${zones[list].length + 1}`, polygon: draft };
+      const base = { walk: 'Walk area', terrace: 'Raised area', blocked: 'No-go area' }[drawKind] || 'Area';
+      const n = zones[list].filter(x => (x.name || '').startsWith(base)).length + 1;
+      const it = { name: `${base} ${n}`, polygon: draft };
       if (drawKind === 'terrace') it.y = +avgGround(draft).toFixed(2);
       zones[list].push(it); sel = { kind: list === 'walk' ? 'walk' : 'blocked', list, i: zones[list].length - 1 };
     }
-    draft = []; tool = 'select'; apply('nav'); refresh();
+    draft = []; tool = 'select'; redrawTarget = null; apply('nav'); refresh();
   }
   function deleteSel() {
     if (!sel || sel.kind === 'capy') return; snapshot();

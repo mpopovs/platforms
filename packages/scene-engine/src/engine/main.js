@@ -56,7 +56,7 @@ const SURPRISE = {
   girl_child: 'surprise_pirouette', mother: 'surprise_piggyback_offer', sporty_boy: 'surprise_backflip',
   teen_girl_be: 'surprise_runway_strut', teen_girl_ho: 'surprise_dance'
 };
-const legacyCast = () => LEGACY_TAGS.map(tag => ({ id: tag, name: LEGACY_NAMES[tag], file: `capys/${tag}/${tag}_capy_v2.glb`, clips: { pose: SURPRISE[tag] }, sizeFactor: tag === 'baby' ? 0.72 : 1 }));
+const legacyCast = () => LEGACY_TAGS.map((tag, i) => ({ id: tag, name: `Model ${i + 1}`, file: `capys/${tag}/${tag}_capy_v2.glb`, clips: { pose: SURPRISE[tag] }, sizeFactor: tag === 'baby' ? 0.72 : 1 }));
 // cast.json: { characters: [{ id, name, file, height?, speed?, clips?: { idle, walk, swim, pose, ... }, outfit?: { mesh: name | [names] }, enabled? }] }
 let cast = [];
 let TAGS = [];

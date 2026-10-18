@@ -2,9 +2,9 @@
  * Starting points for new scenes. Each returns the inline JSON of a draft
  * manifest; files (GLBs, images) are added later in the editor.
  *
- * - fashion-show: a lit catwalk (procedural stage), four capybara models and
- *   a story: each walks the catwalk, poses for a close shot, walks back.
- *   Upload the capybaras folder (or add your own runway models in Cast).
+ * - fashion-show: a lit catwalk (procedural stage), Model 1-4 (capsules until
+ *   they get GLBs) and a story: each walks the catwalk with the camera
+ *   following, poses while the camera circles, and walks back.
  * - stage: an empty lit stage for any story.
  * - hot-spring: nothing; upload the world folder.
  */
@@ -23,18 +23,14 @@ const BACK_Z = RUNWAY.front - RUNWAY.length + 0.6; // backstage end of the catwa
 const FRONT_Z = 0.2; // posing spot
 
 const stageLook = {
-  capy: { height: 0.55, speed: 1, facing: 0, count: 8, personal: 0.6 },
+  capy: { height: 1.6, speed: 1, facing: 0, count: 8, personal: 0.6 },
   look: { exposure: 1.05, fog: '#121319', fogNear: 18, fogFar: 45, snow: 0, steam: 0, warmLight: [0, 3, -9], warmIntensity: 0, ambient: 0.55, sun: 0.35 },
   camera: { pos: [0, 1.5, 4.2], target: [0, 0.7, -4], fov: 40, parallax: 0.08, drift: 0.015, mode: 'hero' }
 };
 
 function fashionShow(): Record<string, unknown> {
-  const models = [
-    { id: 'teen_girl_be', name: 'Teen girl (beanie)', pose: 'surprise_runway_strut' },
-    { id: 'girl_child', name: 'Girl child', pose: 'surprise_pirouette' },
-    { id: 'teen_girl_ho', name: 'Teen girl (hoodie)', pose: 'surprise_dance' },
-    { id: 'sporty_boy', name: 'Sporty boy', pose: 'surprise_backflip' }
-  ];
+  // Model 1-4 start as stand-in capsules; give them GLBs in Files or Models
+  const models = [1, 2, 3, 4].map((n) => ({ id: `model_${n}`, name: `Model ${n}` }));
   const xs = [-0.75, -0.25, 0.25, 0.75];
   const spots = [
     ...xs.map((x) => ({ type: 'start', x, z: BACK_Z })),
@@ -52,10 +48,10 @@ function fashionShow(): Record<string, unknown> {
   models.forEach((m, i) => {
     steps.push(
       // tracking shot: the camera rides in front of the model down the catwalk
-      { do: 'camera', mode: 'follow', who: m.id, offset: [0.35, 0.45, 1.5], frame: 'world', seconds: 1.5, wait: false },
+      { do: 'camera', mode: 'follow', who: m.id, offset: [0.7, 1.3, 3.0], frame: 'world', seconds: 1.5, wait: false },
       { do: 'walk', who: m.id, spot: poseSpot },
       // circle the model while it poses
-      { do: 'camera', mode: 'orbit', who: m.id, radius: 1.3, height: 0.45, speed: 35, seconds: 1, wait: false },
+      { do: 'camera', mode: 'orbit', who: m.id, radius: 2.4, height: 1.0, speed: 35, seconds: 1, wait: false },
       { do: 'say', text: `${m.name}!`, seconds: 2, wait: false },
       { do: 'anim', who: m.id, clip: 'pose' },
       { do: 'place', who: m.id, turn: 180 },
@@ -84,10 +80,7 @@ function fashionShow(): Record<string, unknown> {
       behaviour: { walk: 0, swim: 0, soak: 0, rest: 1, nap: 0, surprise: 0, route: 0 }
     },
     'cast.json': {
-      characters: models.map((m) => ({
-        id: m.id, name: m.name, file: `capys/${m.id}/${m.id}_capy_v2.glb`,
-        height: 0.55, speed: 0.55, clips: { pose: m.pose }
-      }))
+      characters: models.map((m) => ({ id: m.id, name: m.name, height: 1.6, speed: 0.9 }))
     },
     'story.json': { autoplay: true, loop: true, startDelay: 1, steps }
   };
