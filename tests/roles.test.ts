@@ -74,3 +74,29 @@ describe('hasRole / isStaffRole', () => {
     assert.equal(isStaffRole(null), false);
   });
 });
+
+describe('adminEmails / resolveClaims', () => {
+  test('ADMIN_EMAILS parsing', async () => {
+    const { adminEmails } = await import('../lib/auth/claims');
+    assert.deepEqual(adminEmails({ ADMIN_EMAILS: ' A@x.eu, b@y.eu ,,' }), ['a@x.eu', 'b@y.eu']);
+    assert.deepEqual(adminEmails({}), []);
+  });
+
+  test('allow-listed email is admin without any database', async () => {
+    const { resolveClaims } = await import('../lib/auth/claims');
+    const prev = { ...process.env };
+    process.env.ADMIN_EMAILS = 'boss@claypixels.eu';
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    try {
+      const c = await resolveClaims({ id: 'u1', email: 'Boss@Claypixels.eu', app_metadata: {} });
+      assert.equal(c.role, 'admin');
+      assert.equal(c.source, 'admin-emails');
+      const d = await resolveClaims({ id: 'u2', email: 'other@x.eu', app_metadata: { role: 'parent' } });
+      assert.equal(d.role, 'parent');
+      const e = await resolveClaims({ id: 'u3', email: 'other@x.eu', app_metadata: {} });
+      assert.equal(e.role, null);
+    } finally {
+      process.env = prev;
+    }
+  });
+});
