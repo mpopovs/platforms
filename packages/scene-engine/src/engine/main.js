@@ -849,6 +849,16 @@ const storyRunner = createStoryRunner({
   reset: () => {},
   onStep: i => storyStepListener?.(i)
 });
+let envGroup = null;
+// GLB environments come in any units/orientation: scale, turn and lift them
+function applyEnvTransform(t = {}) {
+  if (!envGroup || envMode !== 'glb') return;
+  envGroup.scale.setScalar(t.scale || 1);
+  envGroup.rotation.y = THREE.MathUtils.degToRad(t.rotY || 0);
+  envGroup.position.set(t.x || 0, t.y || 0, t.z || 0);
+  envGroup.updateMatrixWorld(true);
+  hf = buildHeightField(envGroup);
+}
 let editorHandle = null;
 async function boot() {
   await renderer.init();
@@ -880,16 +890,17 @@ async function boot() {
   scene.background = sky; scene.environment = sky;
   applyLayout();
 
-  say('Loading the hot spring…');
+  say('Loading the scene…');
   const mode = Q.get('backdrop') || (sceneInfo.environment === 'stage' ? 'stage' : sceneInfo.files.environment ? 'glb' : sceneInfo.files.backdrop ? 'depth' : 'splat');
   envMode = mode;
   if (mode === 'stage') {
-    const st = buildStage(sceneInfo.stage); scene.add(st.group);
+    const st = buildStage(sceneInfo.stage); scene.add(st.group); envGroup = st.group;
     scene.background = new THREE.Color(st.background); scene.environment = sky;
     hf = buildHeightField(st.group);
   } else if (mode === 'glb') {
     const g = await loader.loadAsync(`${WORLD}/${sceneInfo.files.environment}`);
-    scene.add(g.scene); hf = buildHeightField(g.scene);
+    envGroup = new THREE.Group(); envGroup.name = 'environment'; envGroup.add(g.scene); scene.add(envGroup);
+    applyEnvTransform(sceneInfo.environmentTransform);
   }
   let splatPromise = Promise.resolve(0);
   if (mode === 'depth') {
@@ -912,14 +923,14 @@ async function boot() {
     } catch (e) { console.warn('collider', e); }
   }
   buildNav(); buildSnow();
-  say('Waking the capybaras…');
+  say('Bringing in the models…');
   let castList = null;
   try { const r = await fetch(`${WORLD}/cast.json`); if (r.ok) castList = (await r.json()).characters; } catch { }
   if (!Array.isArray(castList)) { castList = legacyList = legacyCast(); }
   await loadCast(castList);
   try { const r = await fetch(`${WORLD}/story.json`); if (r.ok) story = { ...story, ...(await r.json()) }; } catch { }
   const n = await splatPromise;
-  console.log(`[hotspring] ${renderer.backend.isWebGLBackend ? 'WebGL fallback' : 'WebGPU'} · backdrop ${mode}${mode === 'splat' ? ` (${n} splats, ${splats.length} layers)` : ''} · ${active().length} capybaras · nav ${nav.land.length} land / ${nav.water.length} water cells`);
+  console.log(`[hotspring] ${renderer.backend.isWebGLBackend ? 'WebGL fallback' : 'WebGPU'} · backdrop ${mode}${mode === 'splat' ? ` (${n} splats, ${splats.length} layers)` : ''} · ${active().length} models · nav ${nav.land.length} land / ${nav.water.length} water cells`);
   ui.loader.classList.add('done');
   if (!EDIT && story.autoplay && story.steps?.length) { ui.hint.remove(); setTimeout(() => storyRunner.play(story), (story.startDelay ?? 1) * 1000); }
   if (EDIT) {
@@ -941,6 +952,18 @@ async function boot() {
       storyRunning: () => storyRunner.running,
       onStoryStep: fn => { storyStepListener = fn; },
       previewCamera: step => cameraTo(step),
+      envInfo: () => ({ mode: envMode, file: sceneInfoRef.files?.environment || null, transform: { scale: 1, rotY: 0, x: 0, y: 0, z: 0, ...(sceneInfoRef.environmentTransform || {}) } }),
+      setEnvTransform: t => { sceneInfoRef.environmentTransform = { ...(sceneInfoRef.environmentTransform || {}), ...t }; applyEnvTransform(sceneInfoRef.environmentTransform); buildNav(); for (const c of capys) placeAtStart(c); },
+      // switch environment: save everything, then reload so the new one loads cleanly
+      setEnvironment: async kind => {
+        const info = structuredClone(sceneInfoRef);
+        info.files = info.files || {};
+        if (kind.glb) { info.files.environment = kind.glb; delete info.environment; delete info.files.backdrop; delete info.files.splats; info.environmentTransform = info.environmentTransform || { scale: 1, rotY: 0, y: 0 }; }
+        else if (kind.stage) { delete info.files.environment; info.environment = 'stage'; info.stage = info.stage || {}; }
+        await editorHandle.saveAll();
+        await putJSON('scene.json', info);
+        location.reload();
+      },
       charPos: id => findChar(id)?.root.position.toArray() ?? null,
       currentShot: () => ({ pos: camera.position.toArray().map(v => +v.toFixed(3)), target: (view === 'free' || view === 'top' ? controls.target : storyCam.target).toArray().map(v => +v.toFixed(3)), fov: +camera.fov.toFixed(1) }),
       navHeight: (x, z) => nav.height(x, z),
@@ -981,7 +1004,8 @@ async function boot() {
       container,
       save: async () => {
         const a = await putJSON('zones.json', zones);
-        if (view === 'free') { L.camera.pos = camera.position.toArray(); L.camera.target = controls.target.toArray(); }
+        if (view === 'free' && (envMode === 'splat' || envMode === 'depth')) { L.camera.pos = camera.position.toArray(); L.camera.target = controls.target.toArray(); }
+        if (envMode === 'glb' || envMode === 'stage') await putJSON('scene.json', sceneInfoRef);
         await putJSON('layout.json', L);
         await putJSON('story.json', story);
         await putJSON('cast.json', { characters: cast.map(({ sizeFactor, ...ch }) => ({ ...ch, ...(sizeFactor && sizeFactor !== 1 && !ch.height ? { height: +(L.capy.height * sizeFactor).toFixed(3) } : {}) })) });

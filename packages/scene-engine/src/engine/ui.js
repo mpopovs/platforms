@@ -20,7 +20,7 @@ export function createUi(container) {
   loader.append(status);
   const hint = document.createElement('div');
   hint.className = 'sc-hint';
-  hint.textContent = 'Tap a capybara';
+  hint.textContent = 'Tap a model';
   const captionEl = document.createElement('div');
   captionEl.className = 'sc-caption';
   container.append(loader, hint, captionEl);

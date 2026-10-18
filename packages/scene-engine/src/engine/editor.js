@@ -15,12 +15,12 @@ const COLORS = { water: 0x38c8ff, walk: 0x5dff86, terrace: 0xffc94a, blocked: 0x
 const BEHAVIOUR = [['walk', 'Walk around'], ['swim', 'Swim'], ['soak', 'Soak (sit in water)'], ['rest', 'Rest / graze'], ['nap', 'Nap'], ['surprise', 'Surprise move'], ['route', 'Walk a route']];
 const NICE = { baby: 'Baby', explorer_boy: 'Explorer boy', four_legged: 'Four-legged', girl_child: 'Girl child', mother: 'Mother', sporty_boy: 'Sporty boy', teen_girl_be: 'Teen girl (beanie)', teen_girl_ho: 'Teen girl (hoodie)' };
 const HINT = {
-  select: 'Click to select. Drag dots to move them, small dots add a corner, Option-click deletes one. Drag capybaras to move them.',
+  select: 'Click to select. Drag dots to move them, small dots add a corner, Option-click deletes one. Drag models to move them.',
   draw: 'Click on the ground to add corners. Enter or double-click finishes, Esc cancels.',
   route: 'Click on the ground to add route points in walking order. Enter or double-click finishes, Esc cancels.',
   spot: 'Click on the ground to place the spot.',
   prop: 'Click on the ground to place it. Drag it later in Select mode.',
-  send: 'Click on the ground: the selected capybara walks (or swims) there.'
+  send: 'Click on the ground: the selected model walks (or swims) there.'
 };
 
 export function initEditor(ctx) {
@@ -64,7 +64,7 @@ export function initEditor(ctx) {
   document.head.appendChild(css);
   const disposers = [() => css.remove()];
   const el = document.createElement('div'); el.id = 'ed';
-  el.innerHTML = `<div class="tabs">${[['draw', 'Draw'], ['water', 'Water'], ['capys', 'Cast'], ['routes', 'Routes'], ['story', 'Story'], ['look', 'Look'], ['files', 'Files']].map(([k, t]) => `<button data-tab="${k}">${t}</button>`).join('')}</div>
+  el.innerHTML = `<div class="tabs">${[['draw', 'Draw'], ['water', 'Water'], ['capys', 'Models'], ['routes', 'Routes'], ['story', 'Story'], ['look', 'Look'], ['files', 'Files']].map(([k, t]) => `<button data-tab="${k}">${t}</button>`).join('')}</div>
     <div class="body"></div>
     <div class="foot"><div class="hint"></div><div class="row"><button data-a="undo">Undo</button><button data-a="save" class="save">Save scene</button></div><div class="msg"></div></div>`;
   (ctx.container || document.body).appendChild(el);
@@ -143,7 +143,7 @@ export function initEditor(ctx) {
       propsCard(),
       heading('Layers'), layersList(),
       heading('Show'),
-      row(...[['grid', 'Nav grid'], ['paths', 'Capy paths'], ['pause', 'Pause capys']].map(([k, t]) => btn(t, () => { shows[k] = !shows[k]; ctx.setShow(k, shows[k]); }, { on: shows[k] }))));
+      row(...[['grid', 'Nav grid'], ['paths', 'Model paths'], ['pause', 'Pause models']].map(([k, t]) => btn(t, () => { shows[k] = !shows[k]; ctx.setShow(k, shows[k]); }, { on: shows[k] }))));
   }
   const shows = { grid: false, paths: false, pause: false };
   function layersList() {
@@ -201,7 +201,7 @@ export function initEditor(ctx) {
       slider('Opacity', () => w.steam.opacity, v => { w.steam.opacity = v; }, 0, 0.5, 0.01, 'water'),
       heading('Swimming'),
       slider('Swim depth', () => w.swimDepth, v => { w.swimDepth = v; }, 0.2, 0.95, 0.01, 'water', v => `${Math.round(v * 100)}%`),
-      h('div', { class: 'muted' }, 'How much of a capybara is under water while swimming.'));
+      h('div', { class: 'muted' }, 'How much of a model is under water while swimming.'));
   }
 
   function tabCapys() {
@@ -214,7 +214,7 @@ export function initEditor(ctx) {
       cb.addEventListener('change', () => { snapshot(); cfg.enabled = cb.checked; apply('capys'); });
       list.append(h('div', { class: 'item' + (capySel === c.tag ? ' on' : ''), onclick: () => selectCapy(c.tag) }, cb, h('span', { class: 'grow' }, ctx.castName(c.tag)), h('span', { class: 'muted' }, c.swimming ? 'swimming' : c.state)));
     }
-    body.append(heading('Characters'), list, castAdder());
+    body.append(heading('Models'), list, castAdder());
     if (capySel) {
       const cfg = capyCfg(capySel);
       const starts = (zones.spots || []).map((s, i) => [i, s]).filter(([, s]) => s.type === 'start').map(([i]) => [i, `Start spot ${i + 1}`]);
@@ -261,15 +261,15 @@ export function initEditor(ctx) {
   }
   function castAdder() {
     return h('div', { class: 'card' },
-      h('div', { class: 'muted' }, 'Add any rigged GLB with its animations (a runway model, an animal…). Then pick which clip is idle, walk and pose, and which mesh wears the drawing.'),
-      row(fileInput('Add character (GLB)', '.glb,model/gltf-binary', f => busy('Uploading ' + f.name, async () => {
+      h('div', { class: 'muted' }, 'Add any rigged GLB model with its animations (a runway model, an animal, a capybara…). Then pick which clip is idle, walk and pose, and which mesh wears the drawing.'),
+      row(fileInput('Add model (GLB)', '.glb,model/gltf-binary', f => busy('Uploading ' + f.name, async () => {
         const cast = ctx.getCast(); let id = slug(f.name), n = 2;
         while (cast.some(c => c.id === id)) id = `${slug(f.name)}_${n++}`;
         const file = `cast/${id}.glb`;
         await ctx.put(file, f, 'model/gltf-binary');
         cast.push({ id, name: f.name.replace(/\.glb$/i, ''), file, height: 1.7, clips: {} });
         await ctx.setCast(cast); selectCapy(id);
-        return `Added ${id}. Save to keep it.`;
+        return `Added model ${id}. Save to keep it.`;
       }))));
   }
   function castCard(id) {
@@ -288,16 +288,16 @@ export function initEditor(ctx) {
     const nameIn = h('input', { type: 'text', value: ch.name || '' });
     nameIn.addEventListener('change', () => update(c => { c.name = nameIn.value; }));
     return h('div', { class: 'card' },
-      h('b', {}, 'Character setup'),
+      h('b', {}, 'Model setup'),
       h('div', { class: 'ctl c2' }, h('span', {}, 'Name'), nameIn),
       numberCtl('Height (m)', () => ch.height ?? '', v => update(c => { if (v) c.height = v; else delete c.height; }), 0.1, 4, 0.01),
       numberCtl('Walk speed (m/s)', () => ch.speed ?? '', v => update(c => { if (v) c.speed = v; else delete c.speed; }), 0.1, 3, 0.05),
       clipSel('idle', 'Idle clip'), clipSel('walk', 'Walk clip'), clipSel('pose', 'Pose clip'), clipSel('swim', 'Swim clip'),
       h('div', { class: 'ctl c2' }, h('span', {}, 'Outfit mesh'), outSel),
-      h('div', { class: 'muted' }, info?.outfit ? 'The drawing goes on this mesh (its UVs must match the worksheet).' : 'Pick the mesh that should wear the child’s drawing.'),
+      h('div', { class: 'muted' }, info?.outfit ? 'The drawing goes on this mesh (its UVs must match the worksheet).' : 'Pick the mesh of this model that should wear the child’s drawing.'),
       row(fileInput('Try a drawing', 'image/*', f => busy('Dressing', async () => (await ctx.tryOutfit(id, URL.createObjectURL(f))) ? 'Outfit shown (not saved)' : 'Pick an outfit mesh first')),
         btn('Clear', () => ctx.tryOutfit(id, null)),
-        btn('Remove character', () => { if (confirm('Remove ' + (ch.name || id) + '?')) busy('Removing', async () => { await ctx.setCast(cast.filter(c => c.id !== id)); selectCapy(null); return 'Removed. Save to keep it.'; }); }, { cls: 'warn' })));
+        btn('Remove model', () => { if (confirm('Remove ' + (ch.name || id) + '?')) busy('Removing', async () => { await ctx.setCast(cast.filter(c => c.id !== id)); selectCapy(null); return 'Removed. Save to keep it.'; }); }, { cls: 'warn' })));
   }
 
   // ------------------------------------------------------------ story (story.json)
@@ -366,14 +366,14 @@ export function initEditor(ctx) {
         const setMode = v => { st.mode = v; delete st.follow; if (v !== 'fixed' && !st.who) st.who = who()[0]?.[0]; if (v === 'follow' && !st.offset) st.offset = [0, 0.9, 2.2]; };
         const preset = (label, off, frame) => btn(label, () => { snapshot(); st.offset = off; st.frame = frame; storyChanged(); ctx.previewCamera({ ...st, seconds: 0.8 }); });
         const fields = [
-          sel('Camera', [['fixed', 'Fixed shot'], ['look', 'Look at a character'], ['follow', 'Follow a character'], ['orbit', 'Circle a character']], () => mode, setMode)];
-        if (mode !== 'fixed') fields.push(sel('Character', who(), () => st.who, v => { st.who = v; }));
+          sel('Camera', [['fixed', 'Fixed shot'], ['look', 'Look at a model'], ['follow', 'Follow a model'], ['orbit', 'Circle a model']], () => mode, setMode)];
+        if (mode !== 'fixed') fields.push(sel('Model', who(), () => st.who, v => { st.who = v; }));
         if (mode === 'fixed' || mode === 'look') fields.push(
           row(btn('Use current view', () => { snapshot(); st.shot = ctx.currentShot(); storyChanged(); }),
             ...(mode === 'fixed' ? [btn('Hero view', () => { snapshot(); st.shot = 'hero'; storyChanged(); })] : [])),
           h('div', { class: 'muted' }, 'Frame it in Free view (right-drag to orbit, wheel to zoom), then “Use current view”.'));
         if (mode === 'follow') fields.push(
-          h('div', { class: 'muted' }, 'Where the camera rides, relative to the character:'),
+          h('div', { class: 'muted' }, 'Where the camera rides, relative to the model:'),
           row(preset('In front', [0, 0.9, 2.2], 'character'), preset('Behind', [0, 1.1, -2.4], 'character'), preset('Side', [2.2, 0.9, 0], 'character')),
           row(btn('Use current view', () => {
             const p = ctx.charPos(st.who), c = ctx.currentShot(); if (!p) return;
@@ -428,7 +428,7 @@ export function initEditor(ctx) {
     const list = h('div', { class: 'list' });
     steps.forEach((st, i) => list.append(h('div', { class: 'item' + (stepSel === i ? ' on' : ''), onclick: () => { stepSel = i; refresh(); } },
       h('span', { class: 'muted' }, String(i + 1)), h('span', { class: 'grow' }, stepSummary(st)), playingStep === i ? h('span', {}, '▶') : '')));
-    if (!steps.length) list.append(h('div', { class: 'muted' }, 'No steps yet. Add a camera shot, then make characters walk, pose and talk.'));
+    if (!steps.length) list.append(h('div', { class: 'muted' }, 'No steps yet. Add a camera shot, then make models walk, pose and talk.'));
     const typeSel = h('select', {}, STEP_TYPES.map(t => { const o = h('option', { value: t }, STEP_NAMES[t] || t); if (t === newStepType) o.selected = true; return o; }));
     typeSel.onchange = () => { newStepType = typeSel.value; };
     body.append(list, h('div', { class: 'ctl c2' }, typeSel, btn('Add step', () => {
@@ -455,7 +455,7 @@ export function initEditor(ctx) {
   function tabRoutes() {
     body.append(...viewRow(),
       heading('Routes'),
-      h('div', { class: 'muted' }, 'Paths capybaras walk along, point by point (they go around obstacles between points).'),
+      h('div', { class: 'muted' }, 'Paths models walk along, point by point (they go around obstacles between points).'),
       row(btn('Draw route', () => setTool('route'), { on: tool === 'route', dot: COLORS.route })));
     const rl = h('div', { class: 'list' });
     (zones.routes || []).forEach((r, i) => rl.append(h('div', { class: 'item' + (sel?.kind === 'route' && sel.i === i ? ' on' : ''), onclick: () => { sel = { kind: 'route', list: 'routes', i }; tool = 'select'; refresh(); redraw(); } }, h('span', { class: 'dot', style: 'background:#ff6fd8' }), h('span', { class: 'grow' }, r.name), h('span', { class: 'muted' }, `${r.points.length} pts`))));
@@ -560,9 +560,35 @@ export function initEditor(ctx) {
     await ctx.reloadBackdrop(); redraw();
     return `${L1.name} replaced at ${at} (previous kept as ${L1.file}.bak)`;
   }
+  function envSection() {
+    const env = ctx.envInfo();
+    const label = { glb: `3D model: ${env.file}`, stage: 'Lit stage (built in)', depth: 'Image backdrop (2.5D)', splat: 'Marble splat world' }[env.mode] || env.mode;
+    const card = h('div', { class: 'card' },
+      h('div', {}, 'Now: ', h('b', {}, label)),
+      h('div', { class: 'muted' }, 'Upload a GLB of the place (a room, a park, a stage set). Models walk on its floors; draw walk areas in the Draw tab.'),
+      row(fileInput('Upload environment (GLB)', '.glb,model/gltf-binary', f => busy('Uploading ' + f.name, async () => {
+        if (!confirm('Switch this scene to the uploaded 3D environment? Your changes are saved first and the editor reloads.')) return 'Cancelled';
+        const name = `env/${slug(f.name)}.glb`;
+        await ctx.put(name, f, 'model/gltf-binary');
+        await ctx.setEnvironment({ glb: name });
+        return 'Reloading…';
+      })), ...(env.mode !== 'stage' ? [btn('Use lit stage', () => busy('Switching', async () => {
+        if (!confirm('Switch this scene to the built-in lit stage? Your changes are saved first and the editor reloads.')) return 'Cancelled';
+        await ctx.setEnvironment({ stage: true }); return 'Reloading…';
+      }))] : [])));
+    if (env.mode === 'glb') {
+      const t = env.transform;
+      const n = (label, key, min, max, step) => numberCtl(label, () => t[key], v => { ctx.setEnvTransform({ [key]: v ?? (key === 'scale' ? 1 : 0) }); msg('Unsaved changes'); }, min, max, step);
+      card.append(h('div', { class: 'muted' }, 'If the place looks too big, small, turned or below the floor:'),
+        n('Scale', 'scale', 0.001, 1000, 0.01), n('Turn (°)', 'rotY', -180, 180, 1), n('Lift (m)', 'y', -50, 50, 0.05),
+        n('Shift X (m)', 'x', -100, 100, 0.1), n('Shift Z (m)', 'z', -100, 100, 0.1));
+    }
+    return [heading('Environment'), card];
+  }
   function tabFiles() {
+    body.append(...envSection());
     body.append(heading('Backdrop layers'));
-    if (ctx.backdrop !== 'depth' || !ctx.files.backdropDir) body.append(h('div', { class: 'muted' }, 'Open the page without ?backdrop=splat to work on the image backdrop layers.'));
+    if (ctx.backdrop !== 'depth' || !ctx.files.backdropDir) body.append(h('div', { class: 'muted' }, ctx.backdrop === 'depth' || ctx.backdrop === 'splat' ? 'Open the page without ?backdrop=splat to work on the image backdrop layers.' : 'Only for image-backdrop worlds.'));
     else for (const L1 of LAYERS) body.append(h('div', { class: 'card' }, h('b', {}, L1.name), h('div', { class: 'muted' }, L1.note),
       row(btn('Download', () => busy('Preparing', () => downloadLayer(L1))), btn('Upload…', () => busy('Uploading', () => uploadLayer(L1))))));
     if (ctx.files.pano) body.append(heading('Sky panorama'), h('div', { class: 'card' }, h('div', { class: 'muted' }, '2:1 panorama behind everything and in the water reflections.'),
@@ -571,7 +597,7 @@ export function initEditor(ctx) {
           const f = await pickFile('image/*'); if (!f) return 'Cancelled';
           const at = await ctx.put(ctx.files.pano, await toJpeg(f, 2048, 1024), 'image/jpeg'); await ctx.reloadSky(); return `Sky replaced at ${at}`;
         })))));
-    body.append(heading('Scene settings'), h('div', { class: 'card' }, h('div', { class: 'muted' }, 'Everything from the other tabs: zones.json (areas, water, capybaras, routes, props) and layout.json (look).'),
+    body.append(heading('Scene settings'), h('div', { class: 'card' }, h('div', { class: 'muted' }, 'Everything from the other tabs: zones.json (areas, water, models, routes, props), layout.json (look), cast.json (models) and story.json.'),
       row(btn('Download zones', () => { download(new Blob([JSON.stringify(zones, null, 2)], { type: 'application/json' }), 'zones.json'); msg('Downloaded zones.json'); }),
         btn('Download look', () => { download(new Blob([JSON.stringify(L, null, 2)], { type: 'application/json' }), 'layout.json'); msg('Downloaded layout.json'); })),
       row(btn('Load zones…', () => busy('Loading', async () => {
@@ -584,7 +610,7 @@ export function initEditor(ctx) {
           snapshot(); ctx.importLayout(JSON.parse(await f.text())); refresh();
           return `Loaded ${f.name}. Not saved yet: press Save scene to keep it.`;
         })))),
-      h('div', { class: 'muted', style: 'margin-top:8px' }, 'Uploads replace the file in the world folder right away (needs serve.py); the previous version is kept as .bak.'));
+      h('div', { class: 'muted', style: 'margin-top:8px' }, 'Uploads go into the working copy right away; Publish makes them live. Earlier versions stay available.'));
   }
 
   // ============================================================ overlays
@@ -820,5 +846,5 @@ export function initEditor(ctx) {
 
   disposers.push(() => clearInterval(tick));
   refresh(); redraw();
-  return { redraw, refresh, dispose: () => { for (const d of disposers.splice(0)) d(); } };
+  return { redraw, refresh, saveAll: () => ctx.save(), dispose: () => { for (const d of disposers.splice(0)) d(); } };
 }

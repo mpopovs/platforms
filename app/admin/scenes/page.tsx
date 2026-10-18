@@ -40,7 +40,7 @@ export default async function ScenesPage() {
           <button className="rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700">Create scene</button>
         </form>
         <p className="mt-2 text-sm text-gray-500">
-          To bring in the hot spring world folder with its capybaras, use <code>scripts/import-scene.ts</code> (see SCENES.md).
+          To bring in a world folder with its models from the terminal, use <code>scripts/import-scene.ts</code> (see SCENES.md).
         </p>
 
         <div className="mt-6 overflow-hidden rounded-xl bg-white shadow-sm">
