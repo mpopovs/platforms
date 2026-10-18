@@ -503,13 +503,42 @@ function capyMarker() {
   const m = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.5, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicNodeMaterial({ color: 0xffe066, transparent: true, depthTest: false, depthWrite: false, toneMapped: false, fog: false }));
   m.renderOrder = 104; m.visible = false; return m;
 }
+// Stand-in figure for characters whose GLB is missing: body, head and an
+// "Outfit" mesh with UVs (so the drawing can be shown), plus idle/walk/pose clips.
+function placeholderCharacter() {
+  const model = new THREE.Group(); model.name = 'placeholder';
+  const skin = new THREE.MeshStandardNodeMaterial({ color: 0xe8d5c4, roughness: 0.7 });
+  const hips = new THREE.Group(); hips.name = 'hips'; model.add(hips);
+  const legs = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.55, 4, 12), skin); legs.position.y = 0.37; hips.add(legs);
+  const torso = new THREE.Group(); torso.name = 'torso'; torso.position.y = 0.95; hips.add(torso);
+  const outfit = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.26, 0.62, 24, 1, true), new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.8, side: THREE.DoubleSide }));
+  outfit.name = 'Outfit'; outfit.material.name = 'Outfit'; torso.add(outfit);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.14, 20, 14), skin); head.name = 'head'; head.position.y = 0.48; torso.add(head);
+  const t = [0, 0.3, 0.6];
+  const clips = [
+    new THREE.AnimationClip('idle', 2, [new THREE.VectorKeyframeTrack('torso.position', [0, 1, 2], [0, 0.95, 0, 0, 0.965, 0, 0, 0.95, 0])]),
+    new THREE.AnimationClip('walk', 0.6, [
+      new THREE.VectorKeyframeTrack('hips.position', t, [0, 0, 0, 0, 0.04, 0, 0, 0, 0]),
+      new THREE.QuaternionKeyframeTrack('torso.quaternion', t, [0, -0.06, 0, 0.998, 0, 0.06, 0, 0.998, 0, -0.06, 0, 0.998])
+    ]),
+    new THREE.AnimationClip('pose', 1.6, [new THREE.QuaternionKeyframeTrack('hips.quaternion', [0, 0.8, 1.6], [0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, -1])])
+  ];
+  return { scene: model, animations: clips };
+}
 async function loadCapy(ch, i) {
   const tag = ch.id;
-  const gltf = await loader.loadAsync(castUrl(ch));
+  let gltf, placeholder = false;
+  try {
+    if (!ch.file) throw new Error('no file');
+    gltf = await loader.loadAsync(castUrl(ch));
+  } catch (e) {
+    console.warn(`[scene] ${tag}: ${ch.file || 'no file'} not found, showing a stand-in figure`);
+    gltf = placeholderCharacter(); placeholder = true;
+  }
   const model = gltf.scene;
   model.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
   const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3());
-  const h0 = ch.height || L.capy.height * (ch.sizeFactor ?? 1), k = h0 / size.y;
+  const h0 = (placeholder && !ch.height ? 1.6 : ch.height) || L.capy.height * (ch.sizeFactor ?? 1), k = h0 / size.y;
   const inner = new THREE.Group(); inner.add(model);
   model.scale.setScalar(k); model.position.y = -box.min.y * k;
   inner.rotation.y = THREE.MathUtils.degToRad(L.capy.facing);
@@ -521,13 +550,13 @@ async function loadCapy(ch, i) {
   proxy.position.y = h0 * 0.5; proxy.userData.capyIndex = i; root.add(proxy);
   const marker = capyMarker(); marker.scale.setScalar(h0 * 1.4); root.add(marker);
   const mixer = new THREE.AnimationMixer(model);
-  const clip = n => THREE.AnimationClip.findByName(gltf.animations, ch.clips?.[n] || n);
+  const clip = n => THREE.AnimationClip.findByName(gltf.animations, placeholder ? n : ch.clips?.[n] || n);
   // meshes that wear the drawing (cast.json outfit.mesh: mesh or material names)
-  const outfitNames = [].concat(ch.outfit?.mesh || []);
+  const outfitNames = [].concat(ch.outfit?.mesh || (placeholder ? 'Outfit' : []));
   const outfit = [];
   model.traverse(o => { if (o.isMesh && (outfitNames.includes(o.name) || outfitNames.includes(o.material?.name))) outfit.push({ mesh: o, original: o.material }); });
   const meshNames = []; model.traverse(o => { if (o.isMesh) meshNames.push(o.name || o.material?.name || ''); });
-  const c = { tag, ch, outfit, meshNames, clipNames: gltf.animations.map(a => a.name), root, inner, blob, proxy, marker, mixer, clip, h0, h: h0, enabled: true, cur: null, state: 'idle', timer: 0.5 + Math.random() * 2, swimming: false, rippleT: 0, blinkT: 2 + Math.random() * 3, path: null };
+  const c = { tag, ch, placeholder, outfit, meshNames, clipNames: gltf.animations.map(a => a.name), root, inner, blob, proxy, marker, mixer, clip, h0, h: h0, enabled: true, cur: null, state: 'idle', timer: 0.5 + Math.random() * 2, swimming: false, rippleT: 0, blinkT: 2 + Math.random() * 3, path: null };
   proxy.userData.capy = c;
   scene.add(root); capys.push(c); play(c, 'idle');
   placeAtStart(c);
@@ -556,7 +585,7 @@ async function setOutfit(c, url) {
 async function loadCast(list) {
   for (const c of capys.splice(0)) { scene.remove(c.root); c.mixer.stopAllAction(); }
   cast = list; TAGS = cast.map(ch => ch.id);
-  const use = cast.filter(ch => ch.enabled !== false && ch.file);
+  const use = cast.filter(ch => ch.enabled !== false);
   const limit = cast === legacyList ? Math.min(L.capy.count, use.length) : use.length;
   for (let i = 0; i < limit; i++) await loadCapy(use[i], i).catch(e => console.warn('character', use[i].id, e));
   applyCapyConfig();
@@ -864,7 +893,7 @@ async function boot() {
       castInfo: () => capys.map(c => ({ id: c.tag, name: c.ch.name || c.tag, clips: c.clipNames, meshes: c.meshNames, outfit: c.outfit.length })),
       getCast: () => structuredClone(cast),
       setCast: list => { legacyList = null; return loadCast(structuredClone(list)); },
-      castName: id => cast.find(ch => ch.id === id)?.name || id,
+      castName: id => { const n = cast.find(ch => ch.id === id)?.name || id; return capys.find(c => c.tag === id)?.placeholder ? `${n} (stand-in)` : n; },
       tryOutfit: (id, url) => setOutfit(capys.find(c => c.tag === id), url),
       getStory: () => structuredClone(story),
       setStory: st => { story = structuredClone(st); },

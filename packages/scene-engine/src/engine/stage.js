@@ -29,8 +29,11 @@ export function buildStage(cfg = {}) {
 
   const wall = new THREE.Mesh(new THREE.PlaneGeometry(24, c.wallHeight), mat(c.wall));
   wall.position.set(0, c.wallHeight / 2, -c.wallDistance); g.add(wall);
-  const panel = new THREE.Mesh(new THREE.PlaneGeometry(c.runwayWidth * 1.6, c.wallHeight * 0.7), new THREE.MeshBasicNodeMaterial({ color: c.accent }));
-  panel.position.set(0, c.wallHeight * 0.45, -c.wallDistance + 0.02); g.add(panel);
+  // entrance: a soft-lit doorway the models come out of
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(Math.max(1.6, c.runwayWidth * 1.1), Math.min(3.2, c.wallHeight * 0.5)), new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(c.accent).multiplyScalar(0.45) }));
+  panel.position.set(0, Math.min(3.2, c.wallHeight * 0.5) / 2, -c.wallDistance + 0.02); g.add(panel);
+  const frame = new THREE.Mesh(new THREE.PlaneGeometry(Math.max(1.6, c.runwayWidth * 1.1) + 0.12, Math.min(3.2, c.wallHeight * 0.5) + 0.12), new THREE.MeshBasicNodeMaterial({ color: c.accent }));
+  frame.position.set(0, Math.min(3.2, c.wallHeight * 0.5) / 2, -c.wallDistance + 0.01); g.add(frame);
 
   const lights = new THREE.Group(); lights.name = 'stage-lights';
   for (let i = 0; i < c.spotlights; i++) {
