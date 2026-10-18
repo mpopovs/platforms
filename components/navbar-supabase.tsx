@@ -15,7 +15,7 @@ import {
   DialogTrigger
 } from '@/components/ui/dialog';
 import { CustomDomainForm } from '@/app/custom-domain-form';
-import { User, LogOut, Plus, Mail, Settings, Globe, Eye, LayoutGrid } from 'lucide-react';
+import { User, LogOut, Plus, Mail, Settings, Globe, Eye, LayoutGrid, Mountain } from 'lucide-react';
 import Link from 'next/link';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 
@@ -369,6 +369,15 @@ export function NavBarSupabase() {
                       >
                         <LayoutGrid className="h-4 w-4" />
                         Exhibition Grid
+                      </Link>
+
+                      <Link
+                        href="/admin/scenes"
+                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                        onClick={() => setShowProfileMenu(false)}
+                      >
+                        <Mountain className="h-4 w-4" />
+                        Scene editor
                       </Link>
 
                       <Link

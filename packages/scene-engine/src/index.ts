@@ -1,13 +1,32 @@
 /**
  * @claypixels/scene-engine
  *
- * Shared three.js scene player and editor core, used by the Scene editor in
- * the claypixels admin (/admin/scenes) and the consumer player (/d/[code]).
- *
- * M0 only creates the package. M1 moves the hot spring player and editor
- * (main.js, editor.js, nav.js, backdrop.js, png16.js) here and swaps their
- * put()/save() file hooks for storage uploads.
+ * The hot spring player and layout editor (three.js r186, WebGPU with WebGL
+ * fallback), packaged for the Scene editor (/admin/scenes) and the player.
+ * Browser-only: import it dynamically from a client component.
  */
+export { SCENE_FORMAT_VERSION } from './manifest';
+export type { SceneManifest } from './manifest';
 
-/** Version of the scene.json format this engine reads and writes. */
-export const SCENE_FORMAT_VERSION = 1 as const;
+export interface MountOptions {
+  /** URL prefix all scene files are read from, e.g. /api/scenes/<id>/files/draft */
+  base: string;
+  /** Where capybara GLBs live; defaults to `${base}/capys` */
+  capysBase?: string;
+  /** Show the layout editor */
+  edit?: boolean;
+  /** Debug flags: webgl, backdrop, camera, splat, parallax */
+  params?: Record<string, string | number | boolean | undefined>;
+  /** Save a file of the scene (editor Files tab and Save). Returns a time label. */
+  saveFile?: (name: string, body: Blob | string, type: string) => Promise<string>;
+}
+
+export interface SceneHandle {
+  ready: Promise<void>;
+  destroy(): void;
+}
+
+export async function mountScene(container: HTMLElement, options: MountOptions): Promise<SceneHandle> {
+  const mod = (await import('./engine/main.js')) as unknown as { mountScene: (c: HTMLElement, o: MountOptions) => SceneHandle };
+  return mod.mountScene(container, options);
+}
