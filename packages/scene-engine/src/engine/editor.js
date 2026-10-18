@@ -585,18 +585,67 @@ export function initEditor(ctx) {
     }
     return [heading('Environment'), card];
   }
+  // one stored file: download it, replace it (same name, so references stay), or add it
+  function fileCard(title, note, name, accept, { upload, remove, extra = [] } = {}) {
+    return h('div', { class: 'card' }, h('b', {}, title), h('div', { class: 'muted' }, note),
+      h('div', { class: 'muted' }, name ? `File: ${name}` : 'No file yet'),
+      row(...(name ? [btn('Download', () => busy('Preparing', async () => { download(await fetchBlob(name), name.split('/').pop()); return `Downloaded ${name.split('/').pop()}`; }))] : []),
+        ...(upload ? [fileInput(name ? 'Replace…' : 'Upload…', accept, f => busy('Uploading ' + f.name, () => upload(f)))] : []),
+        ...(name && remove ? [btn('Remove', () => busy('Removing', remove), { cls: 'warn' })] : []),
+        ...extra));
+  }
+  const extOf = f => (f.name.split('.').pop() || '').toLowerCase();
   function tabFiles() {
+    const files = ctx.sceneFiles();
     body.append(...envSection());
-    body.append(heading('Backdrop layers'));
-    if (ctx.backdrop !== 'depth' || !ctx.files.backdropDir) body.append(h('div', { class: 'muted' }, ctx.backdrop === 'depth' || ctx.backdrop === 'splat' ? 'Open the page without ?backdrop=splat to work on the image backdrop layers.' : 'Only for image-backdrop worlds.'));
+    if (files.mode === 'glb' && files.environment) body.append(fileCard('Environment GLB', 'The place itself.', files.environment, '.glb', {
+      upload: async f => { await ctx.put(files.environment, f, 'model/gltf-binary'); return ctx.setEnvironment({ glb: files.environment }).then(() => 'Reloading…'); } }));
+
+    body.append(heading('Background'), fileCard('360° background image', 'A 2:1 panorama (JPG or PNG) behind everything; also lights the scene and shows in water. Without it: a plain sky or the stage colour.', files.pano || null, 'image/*', {
+      upload: async f => {
+        const name = files.pano || 'sky/pano.jpg';
+        const at = await ctx.put(name, await toJpeg(f, 2048, 1024), 'image/jpeg');
+        if (!files.pano) await ctx.updateSceneFiles({ files: { pano: name } });
+        await ctx.reloadSky(); refresh(); return `Background replaced at ${at}`;
+      },
+      remove: async () => { await ctx.updateSceneFiles({ files: { pano: null } }); ctx.clearSky(); refresh(); return 'Background removed'; }
+    }));
+
+    body.append(heading('Image backdrop layers'));
+    if (files.mode !== 'depth' || !ctx.files.backdropDir) body.append(h('div', { class: 'muted' }, files.mode === 'splat' ? 'This world uses the splat. Open it without ?backdrop=splat if it also has an image backdrop.' : 'Only for image-backdrop (2.5D) worlds made with the world tools.'));
     else for (const L1 of LAYERS) body.append(h('div', { class: 'card' }, h('b', {}, L1.name), h('div', { class: 'muted' }, L1.note),
       row(btn('Download', () => busy('Preparing', () => downloadLayer(L1))), btn('Upload…', () => busy('Uploading', () => uploadLayer(L1))))));
-    if (ctx.files.pano) body.append(heading('Sky panorama'), h('div', { class: 'card' }, h('div', { class: 'muted' }, '2:1 panorama behind everything and in the water reflections.'),
-      row(btn('Download', () => busy('Preparing', async () => { download(await fetchBlob(ctx.files.pano), 'pano_web.jpg'); return 'Downloaded pano_web.jpg'; })),
-        btn('Upload…', () => busy('Uploading', async () => {
-          const f = await pickFile('image/*'); if (!f) return 'Cancelled';
-          const at = await ctx.put(ctx.files.pano, await toJpeg(f, 2048, 1024), 'image/jpeg'); await ctx.reloadSky(); return `Sky replaced at ${at}`;
-        })))));
+
+    body.append(heading('3D Gaussian splats'));
+    const sets = Object.entries(files.splats || {});
+    for (const [key, val] of sets) for (const name of [].concat(val)) body.append(fileCard(`Splat (${key})`, 'A Marble / 3DGS world in .spz.', name, '.spz', {
+      upload: async f => { if (extOf(f) !== 'spz') throw new Error('Pick a .spz file'); await ctx.put(name, f, 'application/octet-stream'); await ctx.reloadSplats(); return `Replaced ${name}`; }
+    }));
+    body.append(h('div', { class: 'card' }, h('div', { class: 'muted' }, sets.length ? 'Add another splat file as the main set:' : 'Use a 3D Gaussian splat (.spz) as this scene’s world. The scene switches to it and the editor reloads.'),
+      row(fileInput(sets.length ? 'Upload splat (.spz)…' : 'Use a splat world (.spz)…', '.spz', f => busy('Uploading ' + f.name, async () => {
+        if (extOf(f) !== 'spz') throw new Error('Pick a .spz file');
+        if (!sets.length && !confirm('Switch this scene to the splat world? Your changes are saved first and the editor reloads.')) return 'Cancelled';
+        const name = `splats/${slug(f.name.replace(/\.spz$/i, ''))}.spz`;
+        await ctx.put(name, f, 'application/octet-stream');
+        await ctx.updateSceneFiles({ files: { splats: { ...(files.splats || {}), full_res: name }, ...(sets.length ? {} : { environment: null, backdrop: null }) }, top: sets.length ? {} : { environment: null } }, { reload: true });
+        return 'Reloading…';
+      })))));
+    if (files.mode === 'splat') body.append(fileCard('Collision surface (GLB)', 'Optional ground mesh for the splat world, so models walk on it (Marble’s collider.glb).', files.collider || null, '.glb', {
+      upload: async f => { const name = files.collider || 'splats/collider.glb'; await ctx.put(name, f, 'model/gltf-binary'); return ctx.updateSceneFiles({ files: { collider: name } }, { reload: true }).then(() => 'Reloading…'); }
+    }));
+
+    body.append(heading('Models'));
+    const cast = ctx.getCast();
+    if (!cast.length) body.append(h('div', { class: 'muted' }, 'No models yet: add them in the Models tab.'));
+    for (const ch of cast) body.append(fileCard(ch.name || ch.id, ch.file ? 'Rigged GLB with its animations.' : 'Stand-in capsule (no file yet).', ch.file || null, '.glb', {
+      upload: async f => {
+        const name = ch.file || `cast/${slug(ch.id)}.glb`;
+        await ctx.put(name, f, 'model/gltf-binary');
+        const next = ctx.getCast().map(c => c.id === ch.id ? { ...c, file: name } : c);
+        await ctx.setCast(next); refresh(); return `Updated ${ch.name || ch.id}. Save to keep it.`;
+      }
+    }));
+
     body.append(heading('Scene settings'), h('div', { class: 'card' }, h('div', { class: 'muted' }, 'Everything from the other tabs: zones.json (areas, water, models, routes, props), layout.json (look), cast.json (models) and story.json.'),
       row(btn('Download zones', () => { download(new Blob([JSON.stringify(zones, null, 2)], { type: 'application/json' }), 'zones.json'); msg('Downloaded zones.json'); }),
         btn('Download look', () => { download(new Blob([JSON.stringify(L, null, 2)], { type: 'application/json' }), 'layout.json'); msg('Downloaded layout.json'); })),

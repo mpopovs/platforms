@@ -244,7 +244,8 @@ function pickSplatSet(files) {
     : renderer.backend?.isWebGLBackend ? ['150k', '100k', '500k']
     : IS_PHONE ? ['hero_mobile', '500k', '150k'] : ['hero', '500k', '150k', 'full_res'];
   for (const k of order) if (files.splats?.[k]) return [].concat(files.splats[k]);
-  return [];
+  const any = Object.values(files.splats || {})[0]; // e.g. only full_res uploaded
+  return any ? [].concat(any) : [];
 }
 async function loadSplats(list) {
   const loaded = await Promise.all(list.map(f => new SPZLoader().loadAsync(`${WORLD}/${f}`)));
@@ -849,7 +850,7 @@ const storyRunner = createStoryRunner({
   reset: () => {},
   onStep: i => storyStepListener?.(i)
 });
-let envGroup = null;
+let envGroup = null, stageBackground = null;
 // GLB environments come in any units/orientation: scale, turn and lift them
 function applyEnvTransform(t = {}) {
   if (!envGroup || envMode !== 'glb') return;
@@ -894,8 +895,8 @@ async function boot() {
   const mode = Q.get('backdrop') || (sceneInfo.environment === 'stage' ? 'stage' : sceneInfo.files.environment ? 'glb' : sceneInfo.files.backdrop ? 'depth' : 'splat');
   envMode = mode;
   if (mode === 'stage') {
-    const st = buildStage(sceneInfo.stage); scene.add(st.group); envGroup = st.group;
-    scene.background = new THREE.Color(st.background); scene.environment = sky;
+    const st = buildStage(sceneInfo.stage); scene.add(st.group); envGroup = st.group; stageBackground = st.background;
+    if (!sceneInfo.files.pano) scene.background = new THREE.Color(st.background);
     hf = buildHeightField(st.group);
   } else if (mode === 'glb') {
     const g = await loader.loadAsync(`${WORLD}/${sceneInfo.files.environment}`);
@@ -952,6 +953,19 @@ async function boot() {
       storyRunning: () => storyRunner.running,
       onStoryStep: fn => { storyStepListener = fn; },
       previewCamera: step => cameraTo(step),
+      sceneFiles: () => ({ mode: envMode, ...structuredClone(sceneInfoRef.files || {}) }),
+      // change scene.json file references (null removes); reload = save all and reload the editor
+      updateSceneFiles: async (patch, { reload = false } = {}) => {
+        const info = sceneInfoRef; info.files = info.files || {};
+        for (const [k, v] of Object.entries(patch.files || {})) { if (v === null) delete info.files[k]; else info.files[k] = v; }
+        for (const [k, v] of Object.entries(patch.top || {})) { if (v === null) delete info[k]; else info[k] = v; }
+        if (reload) await editorHandle.saveAll();
+        const at = await putJSON('scene.json', info);
+        if (reload) location.reload();
+        return at;
+      },
+      clearSky: () => { const g = gradientSky(); scene.background = stageBackground ? new THREE.Color(stageBackground) : g; scene.environment = g; },
+      reloadSplats: async () => { if (envMode === 'splat') return loadSplats(pickSplatSet(sceneInfoRef.files)); },
       envInfo: () => ({ mode: envMode, file: sceneInfoRef.files?.environment || null, transform: { scale: 1, rotY: 0, x: 0, y: 0, z: 0, ...(sceneInfoRef.environmentTransform || {}) } }),
       setEnvTransform: t => { sceneInfoRef.environmentTransform = { ...(sceneInfoRef.environmentTransform || {}), ...t }; applyEnvTransform(sceneInfoRef.environmentTransform); buildNav(); for (const c of capys) placeAtStart(c); },
       // switch environment: save everything, then reload so the new one loads cleanly

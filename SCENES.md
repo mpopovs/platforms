@@ -122,6 +122,18 @@ walk (route or spot), place, animation, caption, wait, show / hide, outfit
 behaviour). *Start next step together* lets two things happen at once.
 *Plays by itself* starts it in the player; *Loop* repeats it.
 
+**Files tab** (no serve.py needed: files go to the scene's storage):
+
+| Card | Download | Upload / replace |
+|---|---|---|
+| Environment GLB | yes | switch the scene to a GLB place; scale / turn / lift / shift |
+| 360° background image | yes | JPG/PNG panorama (also lights the scene); remove |
+| Image backdrop layers | yes | front image, background fill, both 16-bit depth maps |
+| 3D Gaussian splats (.spz) | yes | replace a set, or switch the scene to a splat world |
+| Collision surface (GLB) | yes | ground mesh for splat worlds |
+| Models | yes | replace a model's GLB or give a stand-in a real file |
+| Scene settings | zones / look JSON | load zones / look JSON |
+
 ## How it fits together
 
 - The engine is `packages/scene-engine` (three.js r186, WebGPU with WebGL
