@@ -419,7 +419,7 @@ export function initEditor(ctx) {
     switch (st.do) {
       case 'camera': {
         const m = st.mode || (st.follow ? 'look' : 'fixed'), w = ctx.castName(st.who || st.follow || '');
-        const what = m === 'follow' ? `Camera follows ${w}` : m === 'orbit' ? `Camera circles ${w}` : m === 'look' ? `Camera watches ${w}` : st.shot === 'hero' ? 'Camera: hero view' : 'Camera shot';
+        const what = m === 'director' ? `Director: ${(st.operators?.length || ctx.cameraOperators().length)} cameras on ${st.who && st.who !== 'auto' ? w : 'whoever performs'}` : m === 'follow' ? `Camera follows ${w}` : m === 'orbit' ? `Camera circles ${w}` : m === 'look' ? `Camera watches ${w}` : st.shot === 'hero' ? 'Camera: hero view' : 'Camera shot';
         return `${what}${st.seconds ? ` (${st.seconds}s move)` : ''}${st.wait === false ? ' (with next)' : ''}`;
       }
       case 'walk': return `${n} walks ${st.route ? 'route “' + st.route + '”' : st.spot != null ? 'to spot ' + (st.spot + 1) : 'to a point'}${st.wait === false ? ' (with next)' : ''}`;
@@ -436,7 +436,7 @@ export function initEditor(ctx) {
   function defaultStep(type) {
     const first = ctx.castInfo()[0]?.id;
     return ({
-      camera: { do: 'camera', mode: 'fixed', shot: ctx.currentShot(), seconds: 1.5 },
+      camera: { do: 'camera', mode: 'director', who: 'auto' },
       walk: { do: 'walk', who: first, route: zones.routes?.[0]?.name },
       place: { do: 'place', who: first, spot: (zones.spots || []).findIndex(s => s.type === 'start') >= 0 ? (zones.spots || []).findIndex(s => s.type === 'start') : null, turn: 0 },
       anim: { do: 'anim', who: first, clip: 'pose' },
@@ -471,10 +471,25 @@ export function initEditor(ctx) {
       case 'camera': {
         const mode = st.mode || (st.follow ? 'look' : 'fixed');
         if (st.follow && !st.who) { st.who = st.follow; }
-        const setMode = v => { st.mode = v; delete st.follow; if (v !== 'fixed' && !st.who) st.who = who()[0]?.[0]; if (v === 'follow' && !st.offset) st.offset = [0, 0.9, 2.2]; };
+        const setMode = v => { st.mode = v; delete st.follow; if (v === 'director') { st.who = st.who || 'auto'; return; } if (st.who === 'auto') delete st.who; if (v !== 'fixed' && !st.who) st.who = who()[0]?.[0]; if (v === 'follow' && !st.offset) st.offset = [0, 0.9, 2.2]; };
         const preset = (label, off, frame) => btn(label, () => { snapshot(); st.offset = off; st.frame = frame; storyChanged(); ctx.previewCamera({ ...st, seconds: 0.8 }); });
         const fields = [
-          sel('Camera', [['fixed', 'Fixed shot'], ['look', 'Look at a model'], ['follow', 'Follow a model'], ['orbit', 'Circle a model']], () => mode, setMode)];
+          sel('Camera', [['director', 'Director (several cameras)'], ['fixed', 'Fixed shot'], ['look', 'Look at a model'], ['follow', 'Follow a model'], ['orbit', 'Circle a model']], () => mode, setMode)];
+        if (mode === 'director') {
+          fields.push(h('div', { class: 'muted' }, 'Several camera operators film the show; it cuts between them at unpredictable moments until the next camera step.'),
+            sel('Films', [['auto', 'Whoever is performing'], ...who()], () => st.who || 'auto', v => { st.who = v; }));
+          const ops = ctx.cameraOperators(), on = new Set(st.operators?.length ? st.operators : ops.map(o => o[0]));
+          const box = h('div', { class: 'row' });
+          for (const [k, label] of ops) {
+            const b = btn(label, () => { snapshot(); if (on.has(k)) on.delete(k); else on.add(k); st.operators = on.size === ops.length ? undefined : [...on]; if (!on.size) st.operators = [k]; storyChanged(); }, { on: on.has(k), cls: 'mini' });
+            box.append(b);
+          }
+          fields.push(h('div', { class: 'muted' }, 'Cameras used:'), box,
+            num('Cut after at least (s)', () => st.cutMin ?? 2.5, v => { st.cutMin = v ?? 2.5; }, 0.5, 30, 0.5),
+            num('…and at most (s)', () => st.cutMax ?? 6, v => { st.cutMax = v ?? 6; }, 0.5, 60, 0.5),
+            row(btn('Preview cameras', () => ctx.previewCamera(st))));
+          return fields;
+        }
         if (mode !== 'fixed') fields.push(sel('Model', who(), () => st.who, v => { st.who = v; }));
         if (mode === 'fixed' || mode === 'look') fields.push(
           row(btn('Use current view', () => { snapshot(); st.shot = ctx.currentShot(); storyChanged(); }),
@@ -594,6 +609,11 @@ export function initEditor(ctx) {
       slider('Tilt', () => c.pitch, v => { c.pitch = v; }, -35, 10, 0.5, 'camera'),
       slider('Turn', () => c.yaw, v => { c.yaw = v; }, -60, 60, 0.5, 'camera'));
     else body.append(h('div', { class: 'muted' }, 'The image backdrop fixes the view; framing comes from the image.'));
+    c.handheld = c.handheld || {};
+    body.append(heading('Live camera'),
+      h('div', { class: 'muted' }, 'A gentle handheld sway that makes the camera feel alive. 0 = steady tripod. (Calm while you edit; plays in the player and in story preview.)'),
+      slider('Handheld', () => c.handheld.amount ?? 0.5, v => { c.handheld.amount = v; }, 0, 2, 0.05, 'look'),
+      slider('Sway speed', () => c.handheld.speed ?? 1, v => { c.handheld.speed = v; }, 0.2, 3, 0.05, 'look'));
     body.append(heading('Light'),
       slider('Exposure', () => k.exposure, v => { k.exposure = v; }, 0.3, 2, 0.01, 'look'),
       slider('Sky light', () => k.ambient ?? 1.6, v => { k.ambient = v; }, 0, 4, 0.05, 'look'),

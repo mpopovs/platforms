@@ -3,8 +3,8 @@
  * manifest; files (GLBs, images) are added later in the editor.
  *
  * - fashion-show: a lit catwalk (procedural stage), Model 1-4 (capsules until
- *   they get GLBs) and a story: each walks the catwalk with the camera
- *   following, poses while the camera circles, and walks back.
+ *   they get GLBs) and a story: each walks the catwalk, poses and walks back
+ *   while several camera operators film it (Director camera) with handheld sway.
  * - stage: an empty lit stage for any story.
  * - hot-spring: nothing; upload the world folder.
  */
@@ -25,7 +25,7 @@ const FRONT_Z = 0.2; // posing spot
 const stageLook = {
   capy: { height: 1.6, speed: 1, facing: 0, count: 8, personal: 0.6 },
   look: { exposure: 1.05, fog: '#121319', fogNear: 18, fogFar: 45, snow: 0, steam: 0, warmLight: [0, 3, -9], warmIntensity: 0, ambient: 0.55, sun: 0.35 },
-  camera: { pos: [0, 1.5, 4.2], target: [0, 0.7, -4], fov: 40, parallax: 0.08, drift: 0.015, mode: 'hero' }
+  camera: { pos: [0, 1.5, 4.2], target: [0, 0.7, -4], fov: 40, parallax: 0.08, drift: 0.015, mode: 'hero', handheld: { amount: 0.6, speed: 1 } }
 };
 
 function fashionShow(): Record<string, unknown> {
@@ -45,23 +45,21 @@ function fashionShow(): Record<string, unknown> {
     { do: 'camera', mode: 'fixed', shot: hero, seconds: 0 },
     { do: 'say', text: 'Welcome to the Magic Forms fashion show!', seconds: 3 }
   ];
+  // from here several camera operators film the show and cut between them
+  steps.push({ do: 'camera', mode: 'director', who: 'auto', cutMin: 2.5, cutMax: 5.5 });
   models.forEach((m, i) => {
     steps.push(
-      // tracking shot: the camera rides in front of the model down the catwalk
-      { do: 'camera', mode: 'follow', who: m.id, offset: [0.7, 1.3, 3.0], frame: 'world', seconds: 1.5, wait: false },
       { do: 'walk', who: m.id, spot: poseSpot },
-      // circle the model while it poses
-      { do: 'camera', mode: 'orbit', who: m.id, radius: 2.4, height: 1.0, speed: 35, seconds: 1, wait: false },
       { do: 'say', text: `${m.name}!`, seconds: 2, wait: false },
       { do: 'anim', who: m.id, clip: 'pose' },
       { do: 'place', who: m.id, turn: 180 },
-      { do: 'camera', mode: 'fixed', shot: hero, seconds: 1.2, wait: false },
       { do: 'walk', who: m.id, spot: i, wait: false },
       { do: 'wait', seconds: 1.5 }
     );
   });
   steps.push(
-    { do: 'wait', seconds: 3 },
+    { do: 'camera', mode: 'fixed', shot: hero, seconds: 1.5 },
+    { do: 'wait', seconds: 2 },
     { do: 'say', text: 'Thank you for watching!', seconds: 3 }
   );
 

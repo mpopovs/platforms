@@ -163,11 +163,95 @@ function desiredCam(dt, pos, target) {
     pos.set(c.root.position.x + Math.sin(storyCam.angle) * storyCam.radius, c.root.position.y + storyCam.height, c.root.position.z + Math.cos(storyCam.angle) * storyCam.radius);
   }
 }
+// ---------------------------------------------------------------- live camera
+// Handheld: a smooth, never-repeating sway (sum of sines at unrelated
+// frequencies) added on top of whatever the camera does, every frame, in
+// every view except free editing. Applied just for rendering, so it never
+// feeds back into the camera's own movement. layout.json camera.handheld:
+// { amount 0..2 (default 0.5), speed 0.2..3 (default 1) }.
+const SWAY = [[0.31, 1.7], [0.53, 0.4], [0.87, 2.9], [1.37, 5.1], [2.11, 3.3]];
+function sway(t, seed) { let v = 0, a = 1, n = 0; for (const [f, p] of SWAY) { v += a * Math.sin(t * f * (1 + seed * 0.13) + p + seed * 7.1); n += a; a *= 0.6; } return v / n; }
+const _shakePos = new THREE.Vector3(), _shakeQuat = new THREE.Quaternion(), _shakeE = new THREE.Euler();
+function applyHandheld(t) {
+  const hh = L.camera.handheld || {};
+  const amount = (hh.amount ?? 0.5) * (director.on ? director.op?.shake ?? 1 : 1);
+  if (amount <= 0 || (EDIT && view !== 'story')) return false; // calm while editing; live in the player and story preview
+  const st = t * (hh.speed ?? 1);
+  _shakePos.copy(camera.position); _shakeQuat.copy(camera.quaternion);
+  const p = 0.018 * amount, r = THREE.MathUtils.degToRad(0.55) * amount;
+  camera.position.x += sway(st, 1) * p; camera.position.y += sway(st, 2) * p * 0.8; camera.position.z += sway(st, 3) * p * 0.6;
+  _shakeE.set(sway(st * 1.1, 4) * r, sway(st * 0.9, 5) * r, sway(st * 0.7, 6) * r * 0.5);
+  camera.quaternion.multiply(new THREE.Quaternion().setFromEuler(_shakeE));
+  camera.updateMatrixWorld();
+  return true;
+}
+function undoHandheld() { camera.position.copy(_shakePos); camera.quaternion.copy(_shakeQuat); camera.updateMatrixWorld(); }
+
+// Director: several virtual camera operators cover the performer and the
+// show cuts between them at unpredictable moments (camera mode "director").
+const OPERATORS = {
+  front: { label: 'Front tracking', shake: 1.0, fov: 40, pose: (s, h, f, u) => ({ off: [Math.sin(f) * (3.4 + u * 1.0) + Math.cos(f) * 0.6, h * (0.55 + u * 0.3), Math.cos(f) * (3.4 + u * 1.0) - Math.sin(f) * 0.6], track: true }) },
+  side: { label: 'Side dolly', shake: 0.8, fov: 42, pose: (s, h, f, u) => ({ off: [Math.cos(f) * (u > 0.5 ? 2.6 : -2.6), h * 0.55, -Math.sin(f) * (u > 0.5 ? 2.6 : -2.6)], track: true }) },
+  low: { label: 'Low angle', shake: 1.3, fov: 46, pose: (s, h, f, u) => ({ off: [Math.sin(f + 0.5) * 2.0, 0.25, Math.cos(f + 0.5) * 2.0], aim: h * 0.75, track: true }) },
+  close: { label: 'Close-up', shake: 1.6, fov: 28, pose: (s, h, f, u) => ({ orbit: { radius: 1.6 + u * 0.4, height: h * 0.7, speed: u > 0.5 ? 14 : -14 }, aim: h * 0.6 }) },
+  crane: { label: 'Crane', shake: 0.5, fov: 40, pose: (s, h, f, u) => ({ off: [Math.sin(f + 2.4) * 3.5, h + 2.6 + u, Math.cos(f + 2.4) * 3.5], rise: 0.25, track: true }) },
+  wide: { label: 'Wide (hero)', shake: 0.6, fov: null, pose: () => ({ hero: true }) },
+  back: { label: 'Behind', shake: 1.1, fov: 44, pose: (s, h, f, u) => ({ off: [-Math.sin(f) * 2.6, h * 0.9, -Math.cos(f) * 2.6], track: true }) }
+};
+const director = { on: false, ops: Object.keys(OPERATORS), who: 'auto', min: 2.5, max: 6, next: 0, op: null, opName: '', plan: null, u: 0, t: 0 };
+let lastPerformer = null; // set by the story runner
+function directorSubject() {
+  if (director.who && director.who !== 'auto') return findChar(director.who) || null;
+  if (lastPerformer && lastPerformer.enabled) return lastPerformer;
+  return capys.find(c => c.enabled && c.state === 'move') || capys.find(c => c.enabled) || null;
+}
+function directorCut(first = false) {
+  const pool = director.ops.filter(n => OPERATORS[n] && (n !== director.opName || director.ops.length === 1));
+  director.opName = pool[Math.floor(Math.random() * pool.length)] || 'wide';
+  director.op = OPERATORS[director.opName];
+  director.u = Math.random();
+  director.t = 0;
+  director.next = director.min + Math.random() * Math.max(0, director.max - director.min);
+  const s = directorSubject();
+  director.plan = s ? director.op.pose(s, s.h, s.root.rotation.y, director.u) : { hero: true };
+  // most cuts are hard cuts, some are quick glides (like a live vision mixer)
+  storyCam.fromPos.copy(camera.position); storyCam.fromT.copy(storyCam.target); storyCam.fromFov = camera.fov;
+  storyCam.t = first || Math.random() < 0.7 ? 1 : 0; storyCam.dur = 0.6;
+  if (director.plan.orbit && s) storyCam.angle = Math.atan2(camera.position.x - s.root.position.x, camera.position.z - s.root.position.z) + (Math.random() - 0.5);
+  if (storyCam.t >= 1) { directorPose(0, _cp, _ct); camera.position.copy(_cp); storyCam.target.copy(_ct); camera.fov = director.op.fov || L.camera.fov; }
+}
+function directorPose(dt, pos, target) {
+  const s = directorSubject(), plan = director.plan || { hero: true };
+  director.t += dt;
+  if (!s || plan.hero) {
+    pos.fromArray(L.camera.pos || [0, 1.6, 4]);
+    if (s) target.set(s.root.position.x, s.root.position.y + s.h * 0.55, s.root.position.z); else target.fromArray(L.camera.target || [0, 0.8, 0]);
+    return;
+  }
+  const P = s.root.position;
+  target.set(P.x, P.y + (plan.aim ?? s.h * 0.55), P.z);
+  if (plan.orbit) {
+    storyCam.angle += THREE.MathUtils.degToRad(plan.orbit.speed) * dt;
+    pos.set(P.x + Math.sin(storyCam.angle) * plan.orbit.radius, P.y + plan.orbit.height, P.z + Math.cos(storyCam.angle) * plan.orbit.radius);
+    return;
+  }
+  pos.set(P.x + plan.off[0], P.y + plan.off[1] + (plan.rise || 0) * director.t, P.z + plan.off[2]);
+}
+
 function cameraTo(step = {}) {
   const shot = step.shot ?? 'hero';
   const mode = step.mode || (step.follow ? 'look' : 'fixed');
   const who = step.who || step.follow;
-  if (mode === 'fixed' && shot === 'hero') { storyCam.c = null; setView('hero'); return Promise.resolve(); }
+  director.on = mode === 'director';
+  if (director.on) {
+    director.who = who || 'auto';
+    director.ops = Array.isArray(step.operators) && step.operators.length ? step.operators.filter(n => OPERATORS[n]) : Object.keys(OPERATORS);
+    director.min = step.cutMin ?? 2.5; director.max = step.cutMax ?? 6;
+    view = 'story'; controls.enabled = false; storyCam.mode = 'director';
+    directorCut(true);
+    return Promise.resolve();
+  }
+  if (mode === 'fixed' && shot === 'hero') { storyCam.c = null; director.on = false; setView('hero'); return Promise.resolve(); }
   if (view !== 'story') storyCam.target.copy(camera.position).add(camera.getWorldDirection(_ct).multiplyScalar(5));
   view = 'story'; controls.enabled = false;
   storyCam.mode = mode; storyCam.c = who ? findChar(who) || null : null;
@@ -182,6 +266,24 @@ function cameraTo(step = {}) {
   return new Promise(res => { storyCam.done = res; });
 }
 function updateStoryCam(dt) {
+  if (storyCam.mode === 'director') {
+    director.next -= dt;
+    if (director.next <= 0) directorCut();
+    directorPose(dt, _cp, _ct);
+    const fov = director.op?.fov || L.camera.fov || 42;
+    if (storyCam.t < 1) {
+      storyCam.t = Math.min(1, storyCam.t + dt / storyCam.dur);
+      const e = storyCam.t * storyCam.t * (3 - 2 * storyCam.t);
+      camera.position.lerpVectors(storyCam.fromPos, _cp, e); storyCam.target.lerpVectors(storyCam.fromT, _ct, e);
+      camera.fov = storyCam.fromFov + (fov - storyCam.fromFov) * e;
+    } else {
+      // operators keep the performer framed with a little lag, like a person would
+      camera.position.lerp(_cp, Math.min(1, dt * 3.5)); storyCam.target.lerp(_ct, Math.min(1, dt * 5));
+      camera.fov += (fov - camera.fov) * Math.min(1, dt * 2);
+    }
+    camera.updateProjectionMatrix(); camera.lookAt(storyCam.target);
+    return;
+  }
   storyCam.t = storyCam.dur > 0 ? Math.min(1, storyCam.t + dt / storyCam.dur) : 1;
   const e = storyCam.t * storyCam.t * (3 - 2 * storyCam.t);
   desiredCam(dt, _cp, _ct);
@@ -198,7 +300,7 @@ function updateStoryCam(dt) {
   if (storyCam.t >= 1 && storyCam.done) { const d = storyCam.done; storyCam.done = null; d(); }
 }
 function setView(v) {
-  view = v;
+  view = v; if (v !== 'story') director.on = false;
   controls.enabled = v !== 'hero';
   if (v === 'hero') { setupHero(); return; }
   camera.fov = 50; camera.updateProjectionMatrix();
@@ -821,7 +923,7 @@ const findChar = id => capys.find(c => c.tag === id);
 const storyRunner = createStoryRunner({
   char: findChar,
   allChars: () => capys,
-  claim: c => { c.story = true; if (c.state !== 'move') { c.path = null; c.state = 'act'; c.timer = 1e9; } },
+  claim: c => { lastPerformer = c; c.story = true; if (c.state !== 'move') { c.path = null; c.state = 'act'; c.timer = 1e9; } },
   release: c => { if (c.story) { c.story = false; c.state = 'idle'; } },
   play: (c, name, o) => play(c, name, o),
   walk: (c, s) => {
@@ -953,6 +1055,7 @@ async function boot() {
       storyRunning: () => storyRunner.running,
       onStoryStep: fn => { storyStepListener = fn; },
       previewCamera: step => cameraTo(step),
+      cameraOperators: () => Object.entries(OPERATORS).map(([k, o]) => [k, o.label]),
       sceneFiles: () => ({ mode: envMode, ...structuredClone(sceneInfoRef.files || {}) }),
       // change scene.json file references (null removes); reload = save all and reload the editor
       updateSceneFiles: async (patch, { reload = false } = {}) => {
@@ -1037,7 +1140,9 @@ function frame() {
   for (const c of capys) updateCapy(c, dt);
   updateSteam(dt); updateSnow(dt, t); updateRipples(dt); updatePathViz();
   if (view === 'hero') updateHero(dt, t); else if (view === 'story') updateStoryCam(dt); else controls.update();
+  const shaken = applyHandheld(t);
   renderer.render(scene, camera);
+  if (shaken) undoHandheld();
 }
 
 const ready = boot().catch(e => { console.error(e); say('Could not load the scene: ' + e.message); throw e; });

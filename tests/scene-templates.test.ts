@@ -23,12 +23,12 @@ describe('scene templates', () => {
     assert.ok(steps.length > 10);
     for (const s of steps) {
       assert.ok(STEP_TYPES.includes(s.do), `known step ${s.do}`);
-      if (s.who && s.who !== 'all') assert.ok(ids.has(s.who), `cast has ${s.who}`);
+      if (s.who && s.who !== 'all' && s.who !== 'auto') assert.ok(ids.has(s.who), `cast has ${s.who}`);
       if (s.follow) assert.ok(ids.has(s.follow), `cast has ${s.follow}`);
       if (s.spot != null) assert.ok(s.spot >= 0 && s.spot < spots, `spot ${s.spot} exists`);
       if (s.route) assert.ok(routes.has(s.route), `route ${s.route} exists`);
-      if (s.do === 'camera') assert.ok(['fixed', 'look', 'follow', 'orbit'].includes(s.mode ?? 'fixed'), `camera mode ${s.mode}`);
-      if (s.do === 'camera' && s.mode && s.mode !== 'fixed') assert.ok(s.who && ids.has(s.who), 'camera mode has a character');
+      if (s.do === 'camera') assert.ok(['fixed', 'look', 'follow', 'orbit', 'director'].includes(s.mode ?? 'fixed'), `camera mode ${s.mode}`);
+      if (s.do === 'camera' && s.mode && s.mode !== 'fixed') assert.ok(s.who === 'auto' || (s.who && ids.has(s.who)), 'camera mode has a model');
     }
     // characters stand still unless the story moves them
     const b = j['zones.json'].behaviour;
