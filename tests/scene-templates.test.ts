@@ -27,7 +27,7 @@ describe('scene templates', () => {
       if (s.follow) assert.ok(ids.has(s.follow), `cast has ${s.follow}`);
       if (s.spot != null) assert.ok(s.spot >= 0 && s.spot < spots, `spot ${s.spot} exists`);
       if (s.route) assert.ok(routes.has(s.route), `route ${s.route} exists`);
-      if (s.do === 'camera') assert.ok(['fixed', 'look', 'follow', 'orbit', 'director'].includes(s.mode ?? 'fixed'), `camera mode ${s.mode}`);
+      if (s.do === 'camera') assert.ok(['fixed', 'look', 'follow', 'orbit', 'director', 'drift'].includes(s.mode ?? 'fixed'), `camera mode ${s.mode}`);
       if (s.do === 'camera' && s.mode && s.mode !== 'fixed') assert.ok(s.who === 'auto' || (s.who && ids.has(s.who)), 'camera mode has a model');
     }
     // characters stand still unless the story moves them

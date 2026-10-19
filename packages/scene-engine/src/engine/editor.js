@@ -419,7 +419,7 @@ export function initEditor(ctx) {
     switch (st.do) {
       case 'camera': {
         const m = st.mode || (st.follow ? 'look' : 'fixed'), w = ctx.castName(st.who || st.follow || '');
-        const what = m === 'director' ? `Director: ${(st.operators?.length || ctx.cameraOperators().length)} cameras on ${st.who && st.who !== 'auto' ? w : 'whoever performs'}` : m === 'follow' ? `Camera follows ${w}` : m === 'orbit' ? `Camera circles ${w}` : m === 'look' ? `Camera watches ${w}` : st.shot === 'hero' ? 'Camera: hero view' : 'Camera shot';
+        const what = m === 'director' ? `Director: ${(st.operators?.length || ctx.cameraOperators().length)} cameras on ${st.who && st.who !== 'auto' ? w : 'whoever performs'}` : m === 'follow' ? `Camera follows ${w}` : m === 'orbit' ? `Camera circles ${w}` : m === 'drift' ? 'Camera drifts slowly' : m === 'look' ? `Camera watches ${w}` : st.shot === 'hero' ? 'Camera: hero view' : 'Camera shot';
         return `${what}${st.seconds ? ` (${st.seconds}s move)` : ''}${st.wait === false ? ' (with next)' : ''}`;
       }
       case 'walk': return `${n} walks ${st.route ? 'route “' + st.route + '”' : st.spot != null ? 'to spot ' + (st.spot + 1) : 'to a point'}${st.wait === false ? ' (with next)' : ''}`;
@@ -471,10 +471,10 @@ export function initEditor(ctx) {
       case 'camera': {
         const mode = st.mode || (st.follow ? 'look' : 'fixed');
         if (st.follow && !st.who) { st.who = st.follow; }
-        const setMode = v => { st.mode = v; delete st.follow; if (v === 'director') { st.who = st.who || 'auto'; return; } if (st.who === 'auto') delete st.who; if (v !== 'fixed' && !st.who) st.who = who()[0]?.[0]; if (v === 'follow' && !st.offset) st.offset = [0, 0.9, 2.2]; };
+        const setMode = v => { st.mode = v; delete st.follow; if (v === 'director') { st.who = st.who || 'auto'; return; } if (st.who === 'auto') delete st.who; if (v === 'drift') { delete st.who; return; } if (v !== 'fixed' && !st.who) st.who = who()[0]?.[0]; if (v === 'follow' && !st.offset) st.offset = [0, 0.9, 2.2]; };
         const preset = (label, off, frame) => btn(label, () => { snapshot(); st.offset = off; st.frame = frame; storyChanged(); ctx.previewCamera({ ...st, seconds: 0.8 }); });
         const fields = [
-          sel('Camera', [['director', 'Director (several cameras)'], ['fixed', 'Fixed shot'], ['look', 'Look at a model'], ['follow', 'Follow a model'], ['orbit', 'Circle a model']], () => mode, setMode)];
+          sel('Camera', [['director', 'Director (several cameras)'], ['fixed', 'Fixed shot'], ['look', 'Look at a model'], ['follow', 'Follow a model'], ['orbit', 'Circle a model'], ['drift', 'Slow drift (calm, 2.5D)']], () => mode, setMode)];
         if (mode === 'director') {
           fields.push(h('div', { class: 'muted' }, 'Several camera operators film the show; it cuts between them at unpredictable moments until the next camera step.'),
             sel('Films', [['auto', 'Whoever is performing'], ...who()], () => st.who || 'auto', v => { st.who = v; }));
@@ -488,6 +488,20 @@ export function initEditor(ctx) {
             num('Cut after at least (s)', () => st.cutMin ?? 2.5, v => { st.cutMin = v ?? 2.5; }, 0.5, 30, 0.5),
             num('…and at most (s)', () => st.cutMax ?? 6, v => { st.cutMax = v ?? 6; }, 0.5, 60, 0.5),
             row(btn('Preview cameras', () => ctx.previewCamera(st))));
+          return fields;
+        }
+        if (mode === 'drift') {
+          const mv = () => st.move || [0.12, 0, 0.15];
+          const setMv = (i, v) => { const m = [...mv()]; m[i] = v ?? 0; st.move = m; };
+          fields.push(h('div', { class: 'muted' }, 'A calm, slow glide that shows the depth of the picture. Keep it small for 2.5D backgrounds so the edges never show.'),
+            row(btn('Start from current view', () => { snapshot(); st.shot = ctx.currentShot(); storyChanged(); }), btn('From where the camera is', () => { snapshot(); delete st.shot; storyChanged(); })),
+            num('Sideways (m)', () => mv()[0], v => setMv(0, v), -3, 3, 0.01),
+            num('Up (m)', () => mv()[1], v => setMv(1, v), -3, 3, 0.01),
+            num('Forward (m)', () => mv()[2], v => setMv(2, v), -3, 3, 0.01),
+            num('Glide time (s)', () => st.driftSeconds ?? 14, v => { st.driftSeconds = v ?? 14; }, 2, 120, 1),
+            chk('Glide back and forth', () => st.pingpong !== false, v => { if (v) delete st.pingpong; else st.pingpong = false; }),
+            num('Blend in (s)', () => st.seconds, v => { st.seconds = v ?? 0; }, 0, 10, 0.1),
+            withNext(), row(btn('Preview camera', () => ctx.previewCamera(st))));
           return fields;
         }
         if (mode !== 'fixed') fields.push(sel('Model', who(), () => st.who, v => { st.who = v; }));
@@ -610,10 +624,24 @@ export function initEditor(ctx) {
       slider('Turn', () => c.yaw, v => { c.yaw = v; }, -60, 60, 0.5, 'camera'));
     else body.append(h('div', { class: 'muted' }, 'The image backdrop fixes the view; framing comes from the image.'));
     c.handheld = c.handheld || {};
-    body.append(heading('Live camera'),
-      h('div', { class: 'muted' }, 'A gentle handheld sway that makes the camera feel alive. 0 = steady tripod. (Calm while you edit; plays in the player and in story preview.)'),
-      slider('Handheld', () => c.handheld.amount ?? 0.5, v => { c.handheld.amount = v; }, 0, 2, 0.05, 'look'),
-      slider('Sway speed', () => c.handheld.speed ?? 1, v => { c.handheld.speed = v; }, 0.2, 3, 0.05, 'look'));
+    const feel = ctx.cameraFeel();
+    const FEELS = {
+      still: { label: 'Still', note: 'Locked off, no movement.', hh: { amount: 0, rotate: 0, speed: 1, breathe: 0 }, parallax: 0, drift: 0 },
+      gentle: { label: 'Gentle', note: 'Barely moves: a slow breath and soft parallax. Best for 2.5D pictures.', hh: { amount: 0.25, rotate: 0.25, speed: 0.6, breathe: 0.04, breathePeriod: 18 }, parallax: 0.08, drift: 0.02 },
+      handheld: { label: 'Handheld', note: 'Someone holding the camera: alive but calm.', hh: { amount: 0.6, rotate: 1, speed: 1, breathe: 0 }, parallax: 0.15, drift: 0.03 },
+      show: { label: 'Show', note: 'Energetic. Add a Director camera step in Story for several operators.', hh: { amount: 0.9, rotate: 1, speed: 1.25, breathe: 0 }, parallax: 0.2, drift: 0.04 }
+    };
+    const current = Object.entries(FEELS).find(([, f]) => Math.abs((feel.amount) - f.hh.amount) < 0.01 && Math.abs(feel.breathe - (f.hh.breathe || 0)) < 0.005 && Math.abs(feel.rotate - f.hh.rotate) < 0.01)?.[0];
+    body.append(heading('Camera feel'),
+      row(...Object.entries(FEELS).map(([k, f]) => btn(f.label, () => {
+        snapshot(); c.handheld = { ...f.hh }; c.parallax = f.parallax; c.drift = f.drift; apply('look'); msg(`Camera feel: ${f.label}. ${f.note}`);
+      }, { on: current === k }))),
+      h('div', { class: 'muted' }, current ? FEELS[current].note : 'Custom mix. (The camera stays calm while you edit; the feel plays in the player and in story preview.)'),
+      slider('Handheld sway', () => c.handheld.amount ?? feel.amount, v => { c.handheld.amount = v; }, 0, 2, 0.05, 'look'),
+      slider('Tilt in sway', () => c.handheld.rotate ?? feel.rotate, v => { c.handheld.rotate = v; }, 0, 1, 0.05, 'look'),
+      slider('Sway speed', () => c.handheld.speed ?? feel.speed, v => { c.handheld.speed = v; }, 0.2, 3, 0.05, 'look'),
+      slider('Breathing (m)', () => c.handheld.breathe ?? feel.breathe, v => { c.handheld.breathe = v; }, 0, 0.3, 0.005, 'look'),
+      slider('Breath length (s)', () => c.handheld.breathePeriod ?? feel.period, v => { c.handheld.breathePeriod = v; }, 4, 60, 1, 'look'));
     body.append(heading('Light'),
       slider('Exposure', () => k.exposure, v => { k.exposure = v; }, 0.3, 2, 0.01, 'look'),
       slider('Sky light', () => k.ambient ?? 1.6, v => { k.ambient = v; }, 0, 4, 0.05, 'look'),

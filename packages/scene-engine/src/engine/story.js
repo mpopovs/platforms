@@ -10,6 +10,7 @@
 //   { "do": "camera", "mode": "orbit",  "who": "<id>", "radius": 2.5, "height": 1.2, "speed": 20 }
 //   { "do": "camera", "mode": "director", "who": "auto" | "<id>", "operators": ["front","side","low","close","crane","wide","back"], "cutMin": 2.5, "cutMax": 6 }
 //        several camera operators; the show cuts between them at random moments
+//   { "do": "camera", "mode": "drift", "shot": {pos,target,fov}?, "move": [right, up, forward], "driftSeconds": 14, "pingpong": true }  calm glide for still / 2.5D scenes
 //   { "do": "walk",   "who": "<id>", "route": "<route name>" | "spot": 3 | "to": [x, z] }
 //   { "do": "place",  "who": "<id>", "spot": 3 | "at": [x, z], "turn": 180 }
 //   { "do": "anim",   "who": "<id>", "clip": "pose", "loop": false }

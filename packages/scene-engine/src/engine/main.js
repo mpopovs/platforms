@@ -92,15 +92,15 @@ controls.enableDamping = true;
 
 // ---------------------------------------------------------------- hero camera
 let view = 'hero';
-const hero = { base: new THREE.Vector3(), dir: new THREE.Vector3(), aim: new THREE.Vector2(), cur: new THREE.Vector2(), cam: new THREE.PerspectiveCamera() };
+const hero = { base: new THREE.Vector3(), dir: new THREE.Vector3(), aim: new THREE.Vector2(), cur: new THREE.Vector2(), cam: new THREE.PerspectiveCamera(), input: -1e9 };
 on(window, 'resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   hero.cam.aspect = camera.aspect; hero.cam.updateProjectionMatrix();
   if (view === 'hero' && typeof splatRoot !== 'undefined') setupHero();
   renderer.setSize(innerWidth, innerHeight);
 });
-on(window, 'pointermove', e => hero.aim.set((e.clientX / innerWidth) * 2 - 1, (e.clientY / innerHeight) * 2 - 1));
-on(window, 'deviceorientation', e => { if (e.gamma != null) hero.aim.set(THREE.MathUtils.clamp(e.gamma / 25, -1, 1), THREE.MathUtils.clamp((e.beta - 45) / 25, -1, 1)); });
+on(window, 'pointermove', e => (hero.input = performance.now()) && hero.aim.set((e.clientX / innerWidth) * 2 - 1, (e.clientY / innerHeight) * 2 - 1));
+on(window, 'deviceorientation', e => { if (e.gamma != null) hero.input = performance.now(), hero.aim.set(THREE.MathUtils.clamp(e.gamma / 25, -1, 1), THREE.MathUtils.clamp((e.beta - 45) / 25, -1, 1)); });
 let backdropMeta = null; // set when the 2.5D image backdrop is used
 let envMode = 'splat';
 function setupHero() {
@@ -128,7 +128,13 @@ function setupHero() {
 const _look = new THREE.Vector3();
 function updateHero(dt, t) {
   const still = EDIT; // no parallax or drift while editing
-  if (still) hero.cur.set(0, 0); else hero.cur.lerp(hero.aim, Math.min(1, dt * 2.5));
+  // nobody moving the mouse or the phone (a display, a phone on the table):
+  // the view wanders slowly by itself so the 2.5D parallax still shows
+  if (!still && performance.now() - hero.input > 4000) {
+    const w = (L.camera.handheld?.speed ?? (envMode === 'depth' ? 0.6 : 1)) * 0.12;
+    hero.aim.set(Math.sin(t * w) * 0.8, Math.sin(t * w * 0.63 + 1.3) * 0.5);
+    hero.cur.lerp(hero.aim, Math.min(1, dt * 0.8));
+  } else if (still) hero.cur.set(0, 0); else hero.cur.lerp(hero.aim, Math.min(1, dt * 2.5));
   const par = still ? 0 : L.camera.parallax, dr = still ? 0 : L.camera.drift;
   const ox = hero.cur.x * par + Math.sin(t * 0.13) * dr, oy = -hero.cur.y * par * 0.4 + Math.sin(t * 0.21) * dr * 0.5;
   camera.position.set(hero.base.x + ox, hero.base.y + oy, hero.base.z);
@@ -141,8 +147,11 @@ function updateHero(dt, t) {
 //   follow  move with a character, keeping `offset` from it (world axes, or
 //           the character's own when frame = "character"): a tracking shot
 //   orbit   circle a character at `radius` / `height`, `speed` degrees per second
+//   drift   a slow, calm camera move for still or 2.5D scenes: from shot (or
+//           where the camera is) glide `move` [right, up, forward] metres over
+//           `driftSeconds`, then back again (`pingpong`, default true)
 // Every change blends from the current view over `seconds`.
-const storyCam = { mode: 'fixed', c: null, shot: null, offset: new THREE.Vector3(0, 1, 2.5), frame: 'world',
+const storyCam = { mode: 'fixed', c: null, elapsed: 0, drift: null, shot: null, offset: new THREE.Vector3(0, 1, 2.5), frame: 'world',
   radius: 2.5, height: 1.2, speed: 20, angle: 0, fov: 42,
   fromPos: new THREE.Vector3(), fromT: new THREE.Vector3(), fromFov: 42, t: 1, dur: 0, done: null,
   target: new THREE.Vector3() };
@@ -150,6 +159,16 @@ const _cp = new THREE.Vector3(), _ct = new THREE.Vector3(), _off = new THREE.Vec
 const charAim = (c, out) => out.set(c.root.position.x, c.root.position.y + c.h * 0.55, c.root.position.z);
 function desiredCam(dt, pos, target) {
   const m = storyCam.mode, c = storyCam.c;
+  if (m === 'drift') {
+    storyCam.elapsed += dt;
+    const D = storyCam.drift, T = Math.max(1, D.seconds);
+    let p = storyCam.elapsed / T;
+    p = D.pingpong ? (Math.floor(p) % 2 ? 1 - (p % 1) : p % 1) : Math.min(1, p);
+    const e = p * p * (3 - 2 * p);
+    pos.copy(D.pos).addScaledVector(D.right, D.move[0] * e).addScaledVector(D.up, D.move[1] * e).addScaledVector(D.fwd, D.move[2] * e);
+    target.copy(D.target).addScaledVector(D.right, D.move[0] * e * 0.6).addScaledVector(D.up, D.move[1] * e * 0.6);
+    return;
+  }
   if (m === 'fixed' || !c) { pos.fromArray(storyCam.shot?.pos || camera.position.toArray()); target.fromArray(storyCam.shot?.target || storyCam.target.toArray()); return; }
   charAim(c, target);
   if (m === 'look') { pos.fromArray(storyCam.shot?.pos || storyCam.fromPos.toArray()); return; }
@@ -172,16 +191,29 @@ function desiredCam(dt, pos, target) {
 const SWAY = [[0.31, 1.7], [0.53, 0.4], [0.87, 2.9], [1.37, 5.1], [2.11, 3.3]];
 function sway(t, seed) { let v = 0, a = 1, n = 0; for (const [f, p] of SWAY) { v += a * Math.sin(t * f * (1 + seed * 0.13) + p + seed * 7.1); n += a; a *= 0.6; } return v / n; }
 const _shakePos = new THREE.Vector3(), _shakeQuat = new THREE.Quaternion(), _shakeE = new THREE.Euler();
+// Defaults depend on the world: 2.5D picture backdrops get a calm, gentle
+// camera (little tilt so the picture edges never show), others a livelier one.
+function cameraFeel() {
+  const hh = L.camera.handheld || {}, calm = envMode === 'depth';
+  return {
+    amount: hh.amount ?? (calm ? 0.25 : 0.5),
+    speed: hh.speed ?? (calm ? 0.6 : 1),
+    rotate: hh.rotate ?? (calm ? 0.25 : 1),           // share of the sway that tilts the view
+    breathe: hh.breathe ?? (calm ? 0.04 : 0),          // slow push in / pull back, metres
+    period: hh.breathePeriod ?? 18                     // seconds per breath
+  };
+}
+const _fwd = new THREE.Vector3();
 function applyHandheld(t) {
-  const hh = L.camera.handheld || {};
-  const amount = (hh.amount ?? 0.5) * (director.on ? director.op?.shake ?? 1 : 1);
-  if (amount <= 0 || (EDIT && view !== 'story')) return false; // calm while editing; live in the player and story preview
-  const st = t * (hh.speed ?? 1);
+  const f = cameraFeel();
+  const amount = f.amount * (director.on ? director.op?.shake ?? 1 : 1);
+  if ((amount <= 0 && f.breathe <= 0) || (EDIT && view !== 'story')) return false; // calm while editing; live in the player and story preview
+  const st = t * f.speed;
   _shakePos.copy(camera.position); _shakeQuat.copy(camera.quaternion);
-  const p = 0.018 * amount, r = THREE.MathUtils.degToRad(0.55) * amount;
+  const p = 0.018 * amount, r = THREE.MathUtils.degToRad(0.55) * amount * f.rotate;
   camera.position.x += sway(st, 1) * p; camera.position.y += sway(st, 2) * p * 0.8; camera.position.z += sway(st, 3) * p * 0.6;
-  _shakeE.set(sway(st * 1.1, 4) * r, sway(st * 0.9, 5) * r, sway(st * 0.7, 6) * r * 0.5);
-  camera.quaternion.multiply(new THREE.Quaternion().setFromEuler(_shakeE));
+  if (f.breathe > 0) { camera.getWorldDirection(_fwd); camera.position.addScaledVector(_fwd, Math.sin((t / f.period) * Math.PI * 2) * f.breathe); }
+  if (r > 0) { _shakeE.set(sway(st * 1.1, 4) * r, sway(st * 0.9, 5) * r, sway(st * 0.7, 6) * r * 0.5); camera.quaternion.multiply(new THREE.Quaternion().setFromEuler(_shakeE)); }
   camera.updateMatrixWorld();
   return true;
 }
@@ -259,6 +291,15 @@ function cameraTo(step = {}) {
   if (Array.isArray(step.offset)) storyCam.offset.fromArray(step.offset);
   storyCam.frame = step.frame === 'character' ? 'character' : 'world';
   storyCam.radius = step.radius ?? 2.5; storyCam.height = step.height ?? 1.2; storyCam.speed = step.speed ?? 20;
+  if (mode === 'drift') {
+    const sp = storyCam.shot ? new THREE.Vector3().fromArray(storyCam.shot.pos) : camera.position.clone();
+    const tp = storyCam.shot ? new THREE.Vector3().fromArray(storyCam.shot.target) : camera.position.clone().add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(5));
+    const fwd = tp.clone().sub(sp).normalize(), right = new THREE.Vector3().crossVectors(fwd, THREE.Object3D.DEFAULT_UP).normalize(), up = new THREE.Vector3().crossVectors(right, fwd);
+    const calm = envMode === 'depth';
+    storyCam.drift = { pos: sp, target: tp, fwd, right, up, move: Array.isArray(step.move) ? step.move : calm ? [0.12, 0, 0.15] : [0.6, 0, 0.5],
+      seconds: step.driftSeconds ?? (calm ? 14 : 10), pingpong: step.pingpong !== false };
+    storyCam.elapsed = 0; storyCam.c = null;
+  }
   if (mode === 'orbit' && storyCam.c) { const p = storyCam.c.root.position; storyCam.angle = Math.atan2(camera.position.x - p.x, camera.position.z - p.z); }
   storyCam.fov = step.fov ?? storyCam.shot?.fov ?? camera.fov;
   storyCam.fromPos.copy(camera.position); storyCam.fromT.copy(storyCam.target); storyCam.fromFov = camera.fov;
@@ -1055,6 +1096,7 @@ async function boot() {
       storyRunning: () => storyRunner.running,
       onStoryStep: fn => { storyStepListener = fn; },
       previewCamera: step => cameraTo(step),
+      cameraFeel: () => cameraFeel(),
       cameraOperators: () => Object.entries(OPERATORS).map(([k, o]) => [k, o.label]),
       sceneFiles: () => ({ mode: envMode, ...structuredClone(sceneInfoRef.files || {}) }),
       // change scene.json file references (null removes); reload = save all and reload the editor
