@@ -72,14 +72,25 @@ export async function GET(
       throw texturesError;
     }
 
-    // Attach each texture's queue number (the #555 shown on the viewer)
+    // Attach each texture's queue number (the #555 shown on the viewer).
+    // IDs are queried in batches: a model can have hundreds of textures, and
+    // one request with all IDs exceeds the URL length limit (HTTP 414).
     const queueNumbers = new Map<string, number>();
-    if (textures && textures.length > 0) {
-      const { data: queueRows, error: queueError } = await supabase
-        .from('texture_queue')
-        .select('texture_id, queue_number')
-        .in('texture_id', textures.map((t) => t.id));
-
+    const textureIds = (textures || []).map((t) => t.id);
+    const BATCH_SIZE = 100;
+    const batches: string[][] = [];
+    for (let i = 0; i < textureIds.length; i += BATCH_SIZE) {
+      batches.push(textureIds.slice(i, i + BATCH_SIZE));
+    }
+    const batchResults = await Promise.all(
+      batches.map((ids) =>
+        supabase
+          .from('texture_queue')
+          .select('texture_id, queue_number')
+          .in('texture_id', ids)
+      )
+    );
+    for (const { data: queueRows, error: queueError } of batchResults) {
       if (queueError) {
         console.warn('Failed to fetch texture queue numbers:', queueError);
       }
