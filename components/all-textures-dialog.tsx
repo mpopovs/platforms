@@ -19,6 +19,7 @@ interface Texture {
   original_photo_url: string;
   uploaded_at: string;
   upload_source_viewer_id?: string | null;
+  queue_number?: number | null;
 }
 
 interface AllTexturesDialogProps {
@@ -159,7 +160,7 @@ export function AllTexturesDialog({
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
                     <h3 className="text-sm font-semibold">
-                      Texture #{textures.length - index}
+                      {texture.queue_number != null ? `#${texture.queue_number}` : `Texture #${textures.length - index}`}
                       {index === 0 && (
                         <span className="ml-2 text-xs font-normal text-green-600 bg-green-50 px-2 py-0.5 rounded">
                           Latest
@@ -192,13 +193,20 @@ export function AllTexturesDialog({
                   <p className="text-xs font-medium text-gray-700">
                     Processed Texture
                   </p>
-                  <img
-                    src={getStorageThumbnailUrl(texture.corrected_texture_url, { width: 800, quality: 70 })}
-                    alt="Processed texture"
-                    loading="lazy"
-                    decoding="async"
-                    className="w-full rounded-md border border-gray-200 bg-white"
-                  />
+                  <div className="relative">
+                    <img
+                      src={getStorageThumbnailUrl(texture.corrected_texture_url, { width: 800, quality: 70 })}
+                      alt="Processed texture"
+                      loading="lazy"
+                      decoding="async"
+                      className="w-full rounded-md border border-gray-200 bg-white"
+                    />
+                    {texture.queue_number != null && (
+                      <span className="absolute top-2 left-2 text-base font-bold bg-black/70 text-white px-2.5 py-1 rounded">
+                        #{texture.queue_number}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}

@@ -72,9 +72,25 @@ export async function GET(
       throw texturesError;
     }
 
+    // Attach each texture's queue number (the #555 shown on the viewer)
+    const queueNumbers = new Map<string, number>();
+    if (textures && textures.length > 0) {
+      const { data: queueRows, error: queueError } = await supabase
+        .from('texture_queue')
+        .select('texture_id, queue_number')
+        .in('texture_id', textures.map((t) => t.id));
+
+      if (queueError) {
+        console.warn('Failed to fetch texture queue numbers:', queueError);
+      }
+      for (const row of queueRows || []) {
+        queueNumbers.set(row.texture_id, row.queue_number);
+      }
+    }
+
     return NextResponse.json({
       success: true,
-      textures: textures || [],
+      textures: (textures || []).map((t) => ({ ...t, queue_number: queueNumbers.get(t.id) ?? null })),
       count: textures?.length || 0
     });
 

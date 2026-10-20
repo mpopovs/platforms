@@ -200,6 +200,11 @@ function ClassroomTexturesDialog({
                           height={300}
                           className="w-full aspect-square object-cover"
                         />
+                        {texture.queue_number != null && (
+                          <span className="absolute top-1.5 left-1.5 text-sm font-bold bg-black/70 text-white px-2 py-0.5 rounded">
+                            #{texture.queue_number}
+                          </span>
+                        )}
                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
                         <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                           <Button
