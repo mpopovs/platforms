@@ -7,6 +7,8 @@
  *   while several camera operators film it (Director camera) with handheld sway.
  * - picture: start from one picture; the editor makes it a 2.5D world (depth
  *   worked out in the browser) with a calm, gently moving camera.
+ * - layers: start from several prepared PNG layers (with transparency) placed
+ *   at chosen distances, like flats on a stage.
  * - stage: an empty lit stage for any story.
  * - hot-spring: nothing; upload the world folder.
  */
@@ -15,6 +17,7 @@ import { emptyManifest, type SceneManifest } from '@claypixels/scene-engine/mani
 export const TEMPLATES = [
   { id: 'fashion-show', name: 'Fashion show', note: 'Catwalk, 4 models, a ready story' },
   { id: 'picture', name: 'From a picture (2.5D)', note: 'One picture becomes a 2.5D world' },
+  { id: 'layers', name: 'From picture layers (2.5D)', note: 'Your PNG layers at chosen distances' },
   { id: 'stage', name: 'Empty stage', note: 'Lit stage for any story' },
   { id: 'hot-spring', name: 'From a world folder', note: 'Upload a Marble / hot spring world' }
 ] as const;
@@ -102,10 +105,10 @@ function emptyStage(): Record<string, unknown> {
   };
 }
 
-function pictureScene(): Record<string, unknown> {
+function pictureScene(start: 'picture' | 'layers' = 'picture'): Record<string, unknown> {
   // a lit stage stands in until the picture is made into a 2.5D world (Files tab opens first)
   return {
-    'scene.json': { caption: 'Picture scene', environment: 'stage', stage: { runwayLength: 0, wallDistance: 8, spotlights: 3 }, start: 'picture' },
+    'scene.json': { caption: 'Picture scene', environment: 'stage', stage: { runwayLength: 0, wallDistance: 8, spotlights: 3 }, start },
     'layout.json': {
       capy: { height: 1.6, speed: 1, facing: 0, count: 8, personal: 0.6 },
       look: { exposure: 1, fog: '#cdd6e0', fogNear: 40, fogFar: 120, snow: 0, steam: 0, warmIntensity: 0 },
@@ -126,5 +129,6 @@ export function templateManifest(id: string): SceneManifest {
   if (id === 'fashion-show') m.json = fashionShow();
   else if (id === 'stage') m.json = emptyStage();
   else if (id === 'picture') m.json = pictureScene();
+  else if (id === 'layers') m.json = pictureScene('layers');
   return m;
 }

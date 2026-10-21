@@ -29,6 +29,7 @@ import { createUi } from './ui.js';
 import { buildStage } from './stage.js';
 import { createStoryRunner } from './story.js';
 import { createLighting } from './lights.js';
+import { buildLayers, pickLayer, forgetLayerFile } from './layers.js';
 
 /**
  * Mount the scene into `container`. Returns { ready, destroy }.
@@ -104,6 +105,7 @@ on(window, 'pointermove', e => (hero.input = performance.now()) && hero.aim.set(
 on(window, 'deviceorientation', e => { if (e.gamma != null) hero.input = performance.now(), hero.aim.set(THREE.MathUtils.clamp(e.gamma / 25, -1, 1), THREE.MathUtils.clamp((e.beta - 45) / 25, -1, 1)); });
 let backdropMeta = null; // set when the 2.5D image backdrop is used
 let envMode = 'splat';
+const isPictureWorld = () => envMode === 'depth' || envMode === 'layers';
 function setupHero() {
   // the generation camera sits at the splat's own origin; the image backdrop has its own camera
   let fov = L.camera.fov, pitchDeg = L.camera.pitch, yawDeg = L.camera.yaw;
@@ -137,7 +139,7 @@ function updateHero(dt, t) {
   // the view wanders slowly by itself so the 2.5D parallax still shows.
   // In the editor preview it always wanders (the mouse is busy with the panel), a bit faster.
   if (!still && (EDIT || performance.now() - hero.input > 4000)) {
-    const w = (L.camera.handheld?.speed ?? (envMode === 'depth' ? 0.6 : 1)) * (EDIT ? 0.45 : 0.12);
+    const w = (L.camera.handheld?.speed ?? (isPictureWorld() ? 0.6 : 1)) * (EDIT ? 0.45 : 0.12);
     hero.aim.set(Math.sin(t * w) * 0.8, Math.sin(t * w * 0.63 + 1.3) * 0.5);
     hero.cur.lerp(hero.aim, Math.min(1, dt * 0.8));
   } else if (still) hero.cur.lerp(_zero2, Math.min(1, dt * 2)); else hero.cur.lerp(hero.aim, Math.min(1, dt * 2.5));
@@ -202,7 +204,7 @@ const _shakePos = new THREE.Vector3(), _shakeQuat = new THREE.Quaternion(), _sha
 // Defaults depend on the world: 2.5D picture backdrops get a calm, gentle
 // camera (little tilt so the picture edges never show), others a livelier one.
 function cameraFeel() {
-  const hh = L.camera.handheld || {}, calm = envMode === 'depth';
+  const hh = L.camera.handheld || {}, calm = isPictureWorld();
   return {
     amount: hh.amount ?? (calm ? 0.25 : 0.5),
     speed: hh.speed ?? (calm ? 0.6 : 1),
@@ -303,7 +305,7 @@ function cameraTo(step = {}) {
     const sp = storyCam.shot ? new THREE.Vector3().fromArray(storyCam.shot.pos) : camera.position.clone();
     const tp = storyCam.shot ? new THREE.Vector3().fromArray(storyCam.shot.target) : camera.position.clone().add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(5));
     const fwd = tp.clone().sub(sp).normalize(), right = new THREE.Vector3().crossVectors(fwd, THREE.Object3D.DEFAULT_UP).normalize(), up = new THREE.Vector3().crossVectors(right, fwd);
-    const calm = envMode === 'depth';
+    const calm = isPictureWorld();
     storyCam.drift = { pos: sp, target: tp, fwd, right, up, move: Array.isArray(step.move) ? step.move : calm ? [0.12, 0, 0.15] : [0.6, 0, 0.5],
       seconds: step.driftSeconds ?? (calm ? 14 : 10), pingpong: step.pingpong !== false };
     storyCam.elapsed = 0; storyCam.c = null;
@@ -386,7 +388,7 @@ scene.add(hemi, key, warm);
 const lighting = createLighting({
   scene, camera, renderer, hemi, key, warm, edit: EDIT,
   getL: () => L, getHero: () => hero,
-  getBackdrop: () => bdGroup ? [bdGroup.userData.front, bdGroup.userData.back].filter(Boolean) : [],
+  getBackdrop: () => bdGroup ? [bdGroup.userData.front, bdGroup.userData.back].filter(Boolean) : layersGroup ? layersGroup.children.flatMap(c => c.isMesh ? [c] : c.children) : [],
   findChar: id => findChar(id), getPerformer: () => lastPerformer
 });
 
@@ -1028,6 +1030,18 @@ const putJSON = (name, data) => putFile(name, JSON.stringify(data, null, 2), 'ap
 
 // ---------------------------------------------------------------- swap files at runtime (editor Files tab)
 let bdGroup = null, sceneInfoRef = null;
+// layered 2.5D (layers.js)
+let layersDef = null, layersGroup = null, layersBuild = 0;
+async function rebuildLayers({ bust = '' } = {}) {
+  const n = ++layersBuild;
+  const res = await buildLayers(layersDef, WORLD, { bust });
+  if (n !== layersBuild) { res.group.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } }); return; } // a newer build won
+  if (layersGroup) { scene.remove(layersGroup); layersGroup.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } }); }
+  layersGroup = res.group; scene.add(layersGroup);
+  const first = !backdropMeta; backdropMeta = res.meta;
+  hf = res.floor.children.length ? buildHeightField(res.floor) : null;
+  if (!first) { setupHero(); if (view === 'hero') updateHero(0, 0); if (nav) buildNav(); }
+}
 // editor: show the backdrop coloured by distance (red near, blue far) instead of the picture
 let depthViewOn = false;
 async function setDepthView(on) {
@@ -1162,7 +1176,7 @@ async function boot() {
   applyLayout(); lighting.build();
 
   say('Loading the scene…');
-  const mode = Q.get('backdrop') || (sceneInfo.environment === 'stage' ? 'stage' : sceneInfo.files.environment ? 'glb' : sceneInfo.files.backdrop ? 'depth' : 'splat');
+  const mode = Q.get('backdrop') || (sceneInfo.environment === 'stage' ? 'stage' : sceneInfo.files.environment ? 'glb' : sceneInfo.files.layers ? 'layers' : sceneInfo.files.backdrop ? 'depth' : 'splat');
   envMode = mode;
   if (mode === 'stage') {
     const st = buildStage(sceneInfo.stage); scene.add(st.group); envGroup = st.group; stageBackground = st.background;
@@ -1181,9 +1195,14 @@ async function boot() {
     hf = buildHeightField(bd.front); // capybaras stand on the image's own ground
     if (Q.get('parallax') == null && L.camera.parallax > 0.15) L.camera.parallax = 0.15;
   }
+  if (mode === 'layers') {
+    try { const r = await fetch(`${WORLD}/${sceneInfo.files.layers}`); layersDef = r.ok ? await r.json() : { layers: [] }; } catch { layersDef = { layers: [] }; }
+    await rebuildLayers();
+    if (Q.get('parallax') == null && L.camera.parallax > 0.15) L.camera.parallax = 0.15;
+  }
   setupHero();
   // a 2.5D picture only works from its own camera: always start there
-  setView(Q.get('camera') === 'orbit' || (L.camera.mode === 'orbit' && mode !== 'depth') ? 'free' : 'hero');
+  setView(Q.get('camera') === 'orbit' || (L.camera.mode === 'orbit' && mode !== 'depth' && mode !== 'layers') ? 'free' : 'hero');
   if (mode === 'splat') {
     const set = pickSplatSet(sceneInfo.files);
     if (sceneInfo.files.splats?.['100k'] && !set.includes(sceneInfo.files.splats['100k'])) await loadSplats([sceneInfo.files.splats['100k']]);
@@ -1294,6 +1313,12 @@ async function boot() {
       setLive: on => { live.on = on; live.until = 0; },
       previewLive: (sec = 8) => { if (view === 'free' || view === 'top') setView('hero'); live.until = performance.now() + sec * 1000; },
       depthView: on => setDepthView(on),
+      layers: () => layersDef ? structuredClone(layersDef) : null,
+      layersFile: () => sceneInfoRef.files?.layers || null,
+      setLayers: async (def, opts = {}) => { layersDef = structuredClone(def); if (opts.forget) for (const f of opts.forget) forgetLayerFile(`${WORLD}/${f}`); await rebuildLayers(opts); },
+      pickLayer: (ndcX, ndcY) => { if (!layersGroup) return null; _rc.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera); return pickLayer(layersGroup, _rc); },
+      // screen pixels per frame fraction (to drag pieces in the hero view)
+      frameScale: () => { if (!backdropMeta) return null; const fr = Math.tan(THREE.MathUtils.degToRad(backdropMeta.camera.vfov) / 2) / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2); const hpx = innerHeight * fr; return { x: hpx * backdropMeta.width / backdropMeta.height, y: hpx }; },
       lightObject: (id, aim) => lighting.objectFor(id, aim),
       sunLine: () => ({ from: key.position.toArray(), to: key.target.position.toArray() }),
       pickLight: (ndcX, ndcY) => { _rc.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera); return lighting.pick(_rc); },
@@ -1322,6 +1347,7 @@ async function boot() {
       container,
       save: async () => {
         const a = await putJSON('zones.json', zones);
+        if (envMode === 'layers' && layersDef && sceneInfoRef.files?.layers) await putJSON(sceneInfoRef.files.layers, layersDef);
         if (view === 'free' && (envMode === 'splat' || envMode === 'depth')) { L.camera.pos = camera.position.toArray(); L.camera.target = controls.target.toArray(); }
         if (envMode === 'glb' || envMode === 'stage') await putJSON('scene.json', sceneInfoRef);
         await putJSON('layout.json', L);

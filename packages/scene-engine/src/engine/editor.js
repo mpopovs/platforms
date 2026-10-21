@@ -14,6 +14,7 @@ import { polyContains, polyCentroid } from './nav.js';
 import { encodeGray16, decodePNG } from './png16.js';
 import { STEP_TYPES } from './story.js';
 import { DEFAULT_FIT } from './picture.js';
+import { LAYERS_DEFAULT_CAMERA } from './layers.js';
 import { MOODS, ANIMS, newLightId } from './lights.js';
 
 const COLORS = { water: 0x38c8ff, walk: 0x5dff86, terrace: 0xffc94a, blocked: 0xff4f5e, start: 0xffffff, rest: 0xffe066, entry: 0x38c8ff, route: 0xff6fd8, prop: 0xff9a3c, capy: 0xffe066 };
@@ -32,11 +33,12 @@ export function initEditor(ctx) {
   const { scene, camera, renderer, controls } = ctx;
   const L = ctx.layout();
   let zones = ctx.getZones();
-  let tab = ctx.startHint === 'picture' && ctx.backdrop !== 'depth' ? 'files' : 'draw', tool = 'select', drawKind = null, spotType = null, propType = null;
+  let tab = (ctx.startHint === 'picture' && ctx.backdrop !== 'depth') || (ctx.startHint === 'layers' && ctx.backdrop !== 'layers') || ctx.backdrop === 'layers' ? 'files' : 'draw', tool = 'select', drawKind = null, spotType = null, propType = null;
   let draft = [], sel = null, drag = null, capySel = null;
   const undo = [];
   let story = ctx.getStory();
-  const snapshot = () => { undo.push(JSON.stringify({ zones, look: L, story })); if (undo.length > 80) undo.shift(); };
+  let ldef = ctx.layers?.() || null; // layered 2.5D (layers.json), when the scene uses it
+  const snapshot = () => { undo.push(JSON.stringify({ zones, look: L, story, layers: ldef })); if (undo.length > 80) undo.shift(); };
 
   // ============================================================ panel
   const css = document.createElement('style');
@@ -124,6 +126,7 @@ export function initEditor(ctx) {
   }
   // push changes into the scene; scope decides how much has to be rebuilt
   function apply(scope) {
+    if (scope === 'layers') { ctx.setLayers(ldef); msg('Unsaved changes'); return; }
     if (scope === 'look' || scope === 'snow' || scope === 'camera') ctx.applyLook(scope);
     else ctx.setZones(structuredClone(zones), scope);
     redraw(); msg('Unsaved changes');
@@ -836,7 +839,7 @@ export function initEditor(ctx) {
       colorCtl('Ground bounce', () => k.groundColor ?? '#8d939c', v => { k.groundColor = v; }, 'look'),
       slider('Sky strength', () => k.ambient ?? 1.6, v => { k.ambient = v; }, 0, 4, 0.05, 'look'),
       slider('Exposure', () => k.exposure, v => { k.exposure = v; }, 0.3, 2.5, 0.01, 'look'));
-    if (ctx.backdrop === 'depth') body.append(heading('Picture'),
+    if (ctx.backdrop === 'depth' || ctx.backdrop === 'layers') body.append(heading('Picture'),
       h('div', { class: 'muted' }, 'The 2.5D picture is not lit by lights (they light models and objects). Tint it to match the mood.'),
       colorCtl('Picture tint', () => k.pictureTint ?? '#ffffff', v => { k.pictureTint = v; }, 'look'),
       slider('Picture brightness', () => k.pictureBrightness ?? 1, v => { k.pictureBrightness = v; }, 0.1, 1.6, 0.01, 'look'));
@@ -1006,7 +1009,7 @@ export function initEditor(ctx) {
   }
   function envSection() {
     const env = ctx.envInfo();
-    const label = { glb: `3D model: ${env.file}`, stage: 'Lit stage (built in)', depth: 'Image backdrop (2.5D)', splat: 'Marble splat world' }[env.mode] || env.mode;
+    const label = { glb: `3D model: ${env.file}`, stage: 'Lit stage (built in)', depth: 'Image backdrop (2.5D)', layers: 'Picture layers (2.5D)', splat: 'Marble splat world' }[env.mode] || env.mode;
     const card = h('div', { class: 'card' },
       h('div', {}, 'Now: ', h('b', {}, label)),
       h('div', { class: 'muted' }, 'Upload a GLB of the place (a room, a park, a stage set). Models walk on its floors; draw walk areas in the Draw tab.'),
@@ -1027,14 +1030,146 @@ export function initEditor(ctx) {
         n('Scale', 'scale', 0.001, 1000, 0.01), n('Turn (°)', 'rotY', -180, 180, 1), n('Lift (m)', 'y', -50, 50, 0.05),
         n('Shift X (m)', 'x', -100, 100, 0.1), n('Shift Z (m)', 'z', -100, 100, 0.1));
     }
-    return [heading('Environment'), card, ...pictureSection(env)];
+    return [heading('Environment'), card, ...layersSection(env), ...pictureSection(env)];
   }
   // ---------- picture -> 2.5D (depth made here in the browser)
   let building = false, depthView = false;
   const depthOpts = () => ({ modelUrl: ctx.depth?.modelUrl || undefined, wasmPaths: ctx.depth?.wasmPaths || undefined, onProgress: m => msg(m) });
   async function putAll(files) { let n = 0; for (const [name, blob] of Object.entries(files)) { msg(`Saving ${++n}/${Object.keys(files).length}…`); await ctx.put(name, blob, blob.type || 'application/octet-stream'); } }
+  // ---------- layered 2.5D: your own PNGs (with transparency) at chosen distances
+  function fileInputMulti(label, accept, onFiles) {
+    const i = h('input', { type: 'file', accept, multiple: '', style: 'display:none' });
+    i.addEventListener('change', () => { const fs = [...(i.files || [])]; i.value = ''; if (fs.length) onFiles(fs); });
+    const b = h('button', {}, label); b.onclick = () => i.click();
+    return h('span', { style: 'display:contents' }, b, i);
+  }
+  const layerById = id => ldef?.layers.find(l => l.id === id);
+  const selectLayer = id => { sel = id ? { kind: 'layer', id } : null; tool = 'select'; refresh(); };
+  let layerSeq = 0;
+  // upload images and turn them into layers: same size as the frame = whole-frame layer, smaller = a piece
+  async function addLayerImages(def, files) {
+    const items = [];
+    for (const f of files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
+      const bmp = await createImageBitmap(f); const w = bmp.width, hh = bmp.height; bmp.close();
+      const ext = (f.name.split('.').pop() || 'png').toLowerCase().replace('jpeg', 'jpg');
+      const name = `layers/${slug(f.name.replace(/\.[^.]+$/, ''))}_${Date.now().toString(36)}${layerSeq++}.${ext}`;
+      msg(`Uploading ${f.name}…`);
+      await ctx.put(name, f, f.type || 'image/png');
+      items.push({ f, name, w, h: hh });
+    }
+    if (!def.width) { const big = items.reduce((a, b) => (b.w * b.h > a.w * a.h ? b : a)); def.width = big.w; def.height = big.h; }
+    const A = def.width / def.height;
+    const frames = items.filter(it => Math.abs(it.w / it.h - A) < 0.01 && it.w >= def.width * 0.5), pieces = items.filter(it => !frames.includes(it));
+    const n = frames.length, haveFrames = def.layers.some(l => l.fit !== 'piece');
+    frames.forEach((it, i) => def.layers.push({
+      id: `layer_${Date.now().toString(36)}_${layerSeq++}`, name: it.f.name.replace(/\.[^.]+$/, ''), file: it.name, fit: 'frame',
+      // first file (by name) is the farthest; spread from 40 m to 4 m
+      distance: +(haveFrames ? 8 : n === 1 ? 30 : 40 * Math.pow(4 / 40, i / (n - 1))).toFixed(2), visible: true
+    }));
+    pieces.forEach((it, i) => def.layers.push({
+      id: `layer_${Date.now().toString(36)}_${layerSeq++}`, name: it.f.name.replace(/\.[^.]+$/, ''), file: it.name, fit: 'piece',
+      x: +(0.5 + (i - (pieces.length - 1) / 2) * 0.12).toFixed(3), y: 0.6, size: +Math.min(0.6, it.w / def.width).toFixed(3), distance: 6, visible: true
+    }));
+    return items.length;
+  }
+  async function makeLayerDepth(l) {
+    const { estimateDisparity } = await import('./picture.js');
+    const { encodeGray16 } = await import('./png16.js');
+    const bmp = await createImageBitmap(await fetchBlob(l.file));
+    const c = new OffscreenCanvas(bmp.width, bmp.height), g = c.getContext('2d');
+    g.fillStyle = '#808080'; g.fillRect(0, 0, c.width, c.height); g.drawImage(bmp, 0, 0); // transparent parts: neutral grey
+    const flat = await createImageBitmap(c);
+    const disp = await estimateDisparity(flat, depthOpts()); flat.close();
+    // the layer's own alpha at the depth size: normalise over the visible pixels only
+    const ac = new OffscreenCanvas(disp.w, disp.h), ag = ac.getContext('2d', { willReadFrequently: true }); ag.drawImage(bmp, 0, 0, disp.w, disp.h); bmp.close();
+    const al = ag.getImageData(0, 0, disp.w, disp.h).data, vis = [];
+    for (let i = 0; i < disp.d.length; i++) if (al[i * 4 + 3] > 128) vis.push(disp.d[i]);
+    if (vis.length < 20) throw new Error('this layer is almost empty');
+    vis.sort((a, b) => a - b);
+    const lo = vis[Math.floor(vis.length * 0.02)], hi = Math.max(lo + 1e-6, vis[Math.floor(vis.length * 0.98)]), mid = vis[vis.length >> 1];
+    const q = new Uint16Array(disp.d.length);
+    for (let i = 0; i < q.length; i++) { const v = al[i * 4 + 3] > 128 ? disp.d[i] : mid; q[i] = Math.round(Math.min(1, Math.max(0, (v - lo) / (hi - lo))) * 65535); }
+    const name = l.file.replace(/\.[^.]+$/, '') + '_disp.png';
+    await ctx.put(name, await encodeGray16(disp.w, disp.h, q), 'image/png');
+    l.disp = name; if (!(l.relief > 0)) l.relief = 0.5;
+    await ctx.setLayers(ldef, { forget: [name] });
+  }
+  function layersSection(env) {
+    const start = ctx.startHint === 'layers' && env.mode !== 'layers';
+    const out = [heading('2.5D from your own layers')];
+    if (env.mode !== 'layers') {
+      out.push(h('div', { class: 'card', style: start ? 'border-color:#5b8fc0;box-shadow:0 0 0 2px rgba(91,143,192,.35)' : '' },
+        h('div', { class: 'muted' }, 'Pick several prepared pictures at once (PNG with transparency): sky, hills, house, bushes… Each becomes a layer at its own distance, like flats on a stage. Pictures the size of the whole composition fill the frame (the first by name is the farthest); smaller ones become pieces you place by hand.'),
+        row(fileInputMulti(start ? 'Choose layer images…' : 'Make from layer images…', 'image/png,image/webp,image/jpeg', fs => {
+          if (building) return;
+          if (!start && !confirm('Switch this scene to picture layers? Your changes are saved first and the editor reloads.')) return;
+          busy('Making layers', async () => {
+            building = true;
+            try {
+              const def = { camera: { ...LAYERS_DEFAULT_CAMERA }, width: 0, height: 0, layers: [] };
+              const n = await addLayerImages(def, fs);
+              await ctx.put('layers/layers.json', new Blob([JSON.stringify(def, null, 2)], { type: 'application/json' }), 'application/json');
+              await ctx.updateSceneFiles({ files: { layers: 'layers/layers.json', backdrop: null, environment: null, splats: null, collider: null }, top: { environment: null, start: null } }, { reload: true });
+              return `${n} layers made. Reloading…`;
+            } finally { building = false; }
+          });
+        }))));
+      return out;
+    }
+    if (!ldef) ldef = ctx.layers() || { layers: [] };
+    const cam = ldef.camera = { ...LAYERS_DEFAULT_CAMERA, ...(ldef.camera || {}) };
+    out.push(h('div', { class: 'card' },
+      h('div', { class: 'muted' }, 'Click a layer in the view to select it. Pieces: drag to move, mouse wheel to resize (Alt + wheel: nearer / farther). Use Look from the side to see the stack.'),
+      row(fileInputMulti('Add layer images…', 'image/png,image/webp,image/jpeg', fs => busy('Adding layers', async () => {
+        snapshot(); const n = await addLayerImages(ldef, fs); await ctx.setLayers(ldef); refresh(); return `Added ${n} layer${n > 1 ? 's' : ''}. Save to keep the arrangement.`;
+      })), btn('Look from the side', () => { ctx.lookFromSide(); redraw(); msg('Side view: the layers as flats on a stage. “Back to camera” returns.'); }),
+      btn('Back to camera', () => { ctx.setView('hero'); redraw(); })),
+      h('b', { style: 'display:block;margin-top:8px' }, 'Camera'),
+      numberCtl('Lens (vertical °)', () => cam.vfov, v => { if (v) { snapshot(); cam.vfov = v; apply('layers'); } }, 10, 100, 1),
+      numberCtl('Camera height (m)', () => cam.position[1], v => { if (v != null) { snapshot(); cam.position = [0, v, 0]; apply('layers'); } }, 0.1, 50, 0.05),
+      numberCtl('Camera tilt (°)', () => cam.pitch, v => { if (v != null) { snapshot(); cam.pitch = v; apply('layers'); } }, -60, 30, 0.5)));
+    const list = [...ldef.layers].sort((a, b) => (b.distance ?? 0) - (a.distance ?? 0));
+    const ll = h('div', { class: 'list' });
+    for (const l of list) {
+      const vis = h('input', { type: 'checkbox' }); vis.checked = l.visible !== false;
+      vis.addEventListener('click', ev => ev.stopPropagation());
+      vis.addEventListener('change', () => { snapshot(); l.visible = vis.checked; apply('layers'); });
+      ll.append(h('div', { class: 'item' + (sel?.kind === 'layer' && sel.id === l.id ? ' on' : ''), onclick: () => selectLayer(l.id) },
+        h('span', { class: 'dot', style: `background:${l.floor ? '#5dff86' : l.fit === 'piece' ? '#ff9a3c' : '#5b8fc0'}` }),
+        h('span', { class: 'grow' }, l.name || 'Layer'), h('span', { class: 'muted' }, `${(l.distance ?? 0).toFixed(1)} m${l.floor ? ' · ground' : ''}`), vis));
+    }
+    if (!list.length) ll.append(h('div', { class: 'muted' }, 'No layers yet.'));
+    out.push(h('div', { class: 'muted', style: 'margin-top:6px' }, 'Far to near:'), ll);
+    const l = sel?.kind === 'layer' ? layerById(sel.id) : null;
+    if (l) {
+      const card = h('div', { class: 'card' },
+        textCtl('Name', () => l.name, v => { l.name = v; }),
+        selectCtl('Fits', [['frame', 'The whole frame'], ['piece', 'A piece I place']], () => l.fit || 'frame', v => { l.fit = v; if (v === 'piece') { l.x = l.x ?? 0.5; l.y = l.y ?? 0.5; l.size = l.size ?? 0.4; } }, 'layers'),
+        slider('Distance (m)', () => Math.log10(l.distance ?? 10), v => { l.distance = +Math.pow(10, v).toFixed(2); }, Math.log10(0.5), 2, 0.005, 'layers', v => Math.pow(10, +v).toFixed(1)),
+        h('div', { class: 'muted' }, 'Farther = moves less when the camera moves. It still looks the same size from the camera.'));
+      if (l.fit === 'piece') card.append(
+        slider('Left ↔ right', () => l.x ?? 0.5, v => { l.x = v; }, -0.2, 1.2, 0.001, 'layers', v => Math.round(v * 100) + '%'),
+        slider('Up ↕ down', () => l.y ?? 0.5, v => { l.y = v; }, -0.2, 1.2, 0.001, 'layers', v => Math.round(v * 100) + '%'),
+        slider('Size', () => l.size ?? 0.3, v => { l.size = v; }, 0.02, 2, 0.001, 'layers', v => Math.round(v * 100) + '%'));
+      card.append(
+        slider('Relief', () => l.relief ?? 0, v => { l.relief = v; }, 0, 1, 0.01, 'layers'),
+        h('div', { class: 'muted' }, l.disp ? 'Relief rounds the layer using its own depth (0 = flat cut-out).' : 'Flat cut-out. Make depth to give it some roundness.'),
+        row(btn(l.disp ? 'Make depth again' : 'Make depth for this layer', () => { if (building) return; busy('Making depth', async () => { building = true; snapshot(); try { await makeLayerDepth(l); refresh(); return `Depth made for ${l.name}. Use Relief to set how round it is.`; } finally { building = false; } }); })),
+        checkCtl('Ground (lies flat)', () => l.floor, v => { l.floor = v || undefined; }, 'layers'),
+        h('div', { class: 'muted' }, 'Ground: below the horizon this layer lies on the floor, and models walk on it.'),
+        row(fileInput('Replace image…', 'image/png,image/webp,image/jpeg', f => busy('Replacing', async () => {
+          await ctx.put(l.file, f, f.type || 'image/png'); delete l.disp; await ctx.setLayers(ldef, { forget: [l.file] }); refresh(); return 'Image replaced (same place and distance).';
+        })),
+          btn('Nearer', () => { snapshot(); l.distance = +(l.distance * 0.8).toFixed(2); apply('layers'); refresh(); }),
+          btn('Farther', () => { snapshot(); l.distance = +(l.distance * 1.25).toFixed(2); apply('layers'); refresh(); }),
+          btn('Delete', () => { snapshot(); ldef.layers = ldef.layers.filter(q => q !== l); sel = null; apply('layers'); refresh(); }, { cls: 'warn' })));
+      out.push(card);
+    }
+    return out;
+  }
   function pictureSection(env) {
     const start = ctx.startHint === 'picture' && env.mode !== 'depth';
+    if (env.mode === 'layers') return [];
     const out = [heading('2.5D from a picture')];
     out.push(h('div', { class: 'card', style: start ? 'border-color:#5b8fc0;box-shadow:0 0 0 2px rgba(91,143,192,.35)' : '' },
       h('div', { class: 'muted' }, start
@@ -1299,6 +1434,14 @@ export function initEditor(ctx) {
   dom.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
     if (tc.object && (tc.dragging || tc.axis)) return; // using the move/turn/size handles
+    if (tool === 'select' && tab === 'files' && ctx.backdrop === 'layers' && ctx.view() === 'hero') {
+      const id = ctx.pickLayer((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+      if (id) {
+        const l = layerById(id); selectLayer(id);
+        if (l?.fit === 'piece') { snapshot(); drag = { layer: id, sx: e.clientX, sy: e.clientY, x: l.x ?? 0.5, y: l.y ?? 0.5 }; dom.setPointerCapture(e.pointerId); }
+        return;
+      }
+    }
     if (tool === 'select' && tab === 'lights') {
       const hit = ctx.pickLight((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
       if (hit) { lightPart = hit.aim ? 'aim' : 'pos'; selectLight(hit.id); return; }
@@ -1351,6 +1494,11 @@ export function initEditor(ctx) {
   dom.addEventListener('dblclick', () => { if ((tool === 'draw' && draft.length >= 3) || (tool === 'route' && draft.length >= 2)) finishDraw(); });
   dom.addEventListener('pointermove', e => {
     if (!drag) return;
+    if (drag.layer) {
+      const l = layerById(drag.layer), fs = ctx.frameScale(); if (!l || !fs) return;
+      l.x = +(drag.x + (e.clientX - drag.sx) / fs.x).toFixed(4); l.y = +(drag.y + (e.clientY - drag.sy) / fs.y).toFixed(4);
+      ctx.setLayers(ldef); return;
+    }
     const g = groundPick(e); if (!g) return;
     if (drag.capy) { ctx.moveCapy(drag.capy, g[0], g[1]); return; }
     if (drag.spot != null) { zones.spots[drag.spot].x = g[0]; zones.spots[drag.spot].z = g[1]; }
@@ -1361,9 +1509,24 @@ export function initEditor(ctx) {
   dom.addEventListener('pointerup', () => {
     if (!drag) return;
     const d = drag; drag = null; controls.enabled = ctx.view() !== 'hero';
+    if (d.layer) { msg('Moved. Save to keep it.'); refresh(); return; }
     if (d.capy) { ctx.holdCapy(d.capy, false); return; }
     apply(d.prop != null ? 'props' : d.spot != null ? 'nav' : scopeOf(sel || {}));
   });
+  // mouse wheel over a selected piece: size (Alt: distance)
+  const onWheel = e => {
+    if (tab !== 'files' || ctx.backdrop !== 'layers' || sel?.kind !== 'layer' || ctx.view() !== 'hero') return;
+    const l = layerById(sel.id); if (!l) return;
+    if (!e.altKey && l.fit !== 'piece') return;
+    e.preventDefault();
+    if (editingKey !== 'wheel') { snapshot(); editingKey = 'wheel'; clearTimeout(onWheel.t); }
+    onWheel.t = setTimeout(() => { editingKey = null; refresh(); }, 400);
+    const f = Math.exp(-e.deltaY * 0.0015);
+    if (e.altKey) l.distance = +Math.min(100, Math.max(0.5, l.distance / f)).toFixed(2); else l.size = +Math.min(2, Math.max(0.02, (l.size ?? 0.3) * f)).toFixed(4);
+    ctx.setLayers(ldef); msg(e.altKey ? `Distance ${l.distance.toFixed(1)} m` : `Size ${Math.round(l.size * 100)}%`);
+  };
+  dom.addEventListener('wheel', onWheel, { passive: false });
+  disposers.push(() => dom.removeEventListener('wheel', onWheel));
   const onKey = e => {
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
     if (e.key === 'Enter' && (tool === 'draw' || tool === 'route')) finishDraw();
@@ -1411,7 +1574,7 @@ export function initEditor(ctx) {
   }
   function doUndo() {
     const s = undo.pop(); if (!s) { msg('Nothing to undo.'); return; }
-    const o = JSON.parse(s); zones = o.zones; Object.assign(L, o.look); if (o.story) { story = o.story; ctx.setStory(story); }
+    const o = JSON.parse(s); zones = o.zones; Object.assign(L, o.look); if (o.story) { story = o.story; ctx.setStory(story); } if (o.layers && ldef) { ldef = o.layers; ctx.setLayers(ldef); }
     sel = null; ctx.setZones(structuredClone(zones), 'all'); ctx.applyLook('snow'); ctx.applyLook('camera'); ctx.applyLook('lights'); redraw(); refresh(); msg('Undone');
   }
   async function save() {

@@ -181,3 +181,15 @@ Editor → **Lights**:
 
 Story → **Light / mood** step fades the whole mood, or switches, recolours and dims lights. These changes last only while the story plays; the saved lights stay as set.
 Saved in `layout.json` → `look` (mood values) and `lights` (placed lights).
+
+## 2.5D from your own layers
+
+New scene → **From picture layers (2.5D)** (or, in any scene, Files → *2.5D from your own layers*). Pick several prepared images at once (PNG with transparency):
+- Images the size of the whole composition **fill the frame**. Sorted by file name, the first is the farthest, so name them `1_sky.png`, `2_hills.png`, `3_house.png`, … They're spread from 40 m to 4 m.
+- Smaller images become **pieces** you place by hand: drag them in the view, use the mouse wheel to resize (Alt + wheel moves them nearer or farther), or use the sliders.
+- **Distance** changes only how much a layer shifts as the camera moves; seen from the camera, it always looks as you composed it.
+- **Make depth for this layer** + **Relief** gives one layer some roundness using its own depth (0 = flat cut-out).
+- **Ground (lies flat):** below the horizon that layer lies on the floor, and models walk on it.
+- **Look from the side** shows the stack like stage flats. The camera lens, height and tilt can be changed too.
+
+Stored in `layers/layers.json` (see `engine/layers.js` for the format).
