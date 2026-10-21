@@ -169,3 +169,15 @@ Editor → **Objects**: upload any GLB (it lands in the middle of the view), the
 ## Snow
 
 Look → Snowfall: amount, fall speed, flake size, wind (m/s), wind direction and gusts. Flakes fill a box that travels with the camera, so the snow never runs out.
+
+## Lights
+
+Editor → **Lights**:
+- **Mood presets:** Day, Golden hour, Blue hour, Night, Show and Studio. Each sets sky, sun, fog and picture tint together.
+- **Sun:** direction and height. A sun disc shows in the scene while you drag.
+- **Sky light:** sky colour, ground bounce and strength.
+- **Picture tint:** for 2.5D pictures, which the lights don't light.
+- **Lights you add:** spotlights, lamps or a set of three "show lights". Move a light and its aim point with the on-screen handles. Each has colour, strength, reach, beam width, soft edge, shadows and an animation (pulse, flicker, sweep, colour cycle, follow a model).
+
+Story → **Light / mood** step fades the whole mood, or switches, recolours and dims lights. These changes last only while the story plays; the saved lights stay as set.
+Saved in `layout.json` → `look` (mood values) and `lights` (placed lights).

@@ -20,8 +20,10 @@
 //   { "do": "outfit", "who": "<id>", "image": "<file name>" | "drawing" }
 //   { "do": "music",  "file": "<file name>", "volume": 0.6 } | { "do": "music", "stop": true }
 //   { "do": "free",   "who": "<id>" | "all" }      back to their own behaviour
+//   { "do": "light",  "mood": "day|golden|blue|night|show|studio", "seconds": 3 }   fade the whole mood
+//   { "do": "light",  "light": "<light id>" | "all", "on": true, "color": "#ff4f9a", "intensity": 80, "seconds": 1 }
 
-export const STEP_TYPES = ['camera', 'walk', 'place', 'anim', 'say', 'wait', 'show', 'hide', 'outfit', 'music', 'free'];
+export const STEP_TYPES = ['camera', 'walk', 'place', 'anim', 'say', 'wait', 'show', 'hide', 'outfit', 'music', 'light', 'free'];
 
 export function createStoryRunner(api) {
   let run = null;
@@ -73,6 +75,11 @@ export function createStoryRunner(api) {
         }
         break;
       }
+      case 'light': {
+        api.light?.(s);
+        if (wait && s.seconds) await sleep(s.seconds * 1000, r);
+        break;
+      }
       case 'free': {
         if (s.who === 'all' || !s.who) api.allChars().forEach(api.release); else if (c) api.release(c);
         break;
@@ -102,6 +109,7 @@ export function createStoryRunner(api) {
     run.cancelled = true; run.timers.forEach(clearTimeout); run = null;
     if (audio) { audio.pause(); audio = null; }
     api.caption(null);
+    api.resetLights?.();
     api.allChars().forEach(api.release);
     api.onStep?.(-1);
   }

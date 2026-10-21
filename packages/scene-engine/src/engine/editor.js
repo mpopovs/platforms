@@ -4,6 +4,7 @@
 //   Capys    on/off, size, speed, start spot, route, behaviour mix, drag them, send them somewhere
 //   Routes   walking routes they follow
 //   Objects  uploaded GLB objects and small props: move / turn / size with handles
+//   Lights   mood, sun, sky, picture tint, spotlights and lamps (with handles)
 //   Look     camera parallax, light, snow, fog, colour grade
 // One Save writes zones.json (scene content) and layout.json (look) into the world folder.
 
@@ -13,6 +14,7 @@ import { polyContains, polyCentroid } from './nav.js';
 import { encodeGray16, decodePNG } from './png16.js';
 import { STEP_TYPES } from './story.js';
 import { DEFAULT_FIT } from './picture.js';
+import { MOODS, ANIMS, newLightId } from './lights.js';
 
 const COLORS = { water: 0x38c8ff, walk: 0x5dff86, terrace: 0xffc94a, blocked: 0xff4f5e, start: 0xffffff, rest: 0xffe066, entry: 0x38c8ff, route: 0xff6fd8, prop: 0xff9a3c, capy: 0xffe066 };
 const BEHAVIOUR = [['walk', 'Walk around'], ['swim', 'Swim'], ['soak', 'Soak (sit in water)'], ['rest', 'Rest / graze'], ['nap', 'Nap'], ['surprise', 'Surprise move'], ['route', 'Walk a route']];
@@ -42,7 +44,7 @@ export function initEditor(ctx) {
   #ed{position:fixed;left:12px;top:12px;width:330px;max-height:calc(100vh - 24px);display:flex;flex-direction:column;background:rgba(20,26,34,.92);color:#e8eef5;
       font:12.5px/1.35 system-ui,sans-serif;border-radius:12px;z-index:20;box-shadow:0 6px 24px rgba(0,0,0,.3)}
   #ed .tabs{display:flex;gap:2px;padding:8px 8px 0}
-  #ed .tabs button{flex:1 1 auto;min-width:0;background:transparent;border:0;border-bottom:2px solid transparent;border-radius:0;padding:6px 1px;font-size:11.5px;color:#9fb2c6;font-weight:600}
+  #ed .tabs{flex-wrap:wrap} #ed .tabs button{flex:1 1 18%;min-width:0;background:transparent;border:0;border-bottom:2px solid transparent;border-radius:0;padding:5px 1px;font-size:11.5px;color:#9fb2c6;font-weight:600}
   #ed .tabs button.on{color:#fff;border-bottom-color:#5b8fc0;background:transparent}
   #ed .body{overflow:auto;padding:4px 12px 8px;flex:1}
   #ed .foot{border-top:1px solid #2f3b4a;padding:8px 12px;display:flex;flex-direction:column;gap:6px}
@@ -72,7 +74,7 @@ export function initEditor(ctx) {
   document.head.appendChild(css);
   const disposers = [() => css.remove()];
   const el = document.createElement('div'); el.id = 'ed';
-  el.innerHTML = `<div class="tabs">${[['draw', 'Draw'], ['water', 'Water'], ['capys', 'Models'], ['routes', 'Routes'], ['objects', 'Objects'], ['story', 'Story'], ['look', 'Look'], ['files', 'Files']].map(([k, t]) => `<button data-tab="${k}">${t}</button>`).join('')}</div>
+  el.innerHTML = `<div class="tabs">${[['draw', 'Draw'], ['water', 'Water'], ['capys', 'Models'], ['routes', 'Routes'], ['objects', 'Objects'], ['lights', 'Lights'], ['story', 'Story'], ['look', 'Look'], ['files', 'Files']].map(([k, t]) => `<button data-tab="${k}">${t}</button>`).join('')}</div>
     <div class="body"></div>
     <div class="foot"><div class="hint"></div><div class="row"><button data-a="undo">Undo</button><button data-a="save" class="save">Save scene</button></div><div class="msg"></div></div>`;
   (ctx.container || document.body).appendChild(el);
@@ -156,8 +158,9 @@ export function initEditor(ctx) {
     el.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
     el.querySelector('.hint').textContent = HINT[tool] || '';
     body.innerHTML = '';
-    ({ draw: tabDraw, water: tabWater, capys: tabCapys, routes: tabRoutes, objects: tabObjects, story: tabStory, look: tabLook, files: tabFiles })[tab]();
+    ({ draw: tabDraw, water: tabWater, capys: tabCapys, routes: tabRoutes, objects: tabObjects, lights: tabLights, story: tabStory, look: tabLook, files: tabFiles })[tab]();
     queueMicrotask(attachGizmo);
+    ctx.showLightHelpers(tab === 'lights', sel?.kind === 'light' ? sel.id : null);
   }
   el.querySelector('.tabs').addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (b) { tab = b.dataset.tab; refresh(); } });
   el.querySelector('[data-a=undo]').onclick = doUndo;
@@ -189,7 +192,8 @@ export function initEditor(ctx) {
     'Breathing (m)': 'slow push in and pull back',
     'Breath length (s)': 'seconds per push in and back',
     'Wind (m/s)': 'arrow shows the wind', 'Wind direction (°)': 'arrow shows where the snow blows', 'Gusts': 'how much the wind swells and calms',
-    'Starts at (m)': 'green ring: fog starts', 'Full at (m)': 'white ring: fully fogged'
+    'Starts at (m)': 'green ring: fog starts', 'Full at (m)': 'white ring: fully fogged',
+    'Sun direction (°)': '0 = behind you, 90 = from the right, 180 = against the light', 'Sun height (°)': 'low = long shadows, warm light'
   };
   const cues = new THREE.Group(); cues.renderOrder = 110; scene.add(cues);
   disposers.push(() => { scene.remove(cues); cueClear(); });
@@ -218,6 +222,15 @@ export function initEditor(ctx) {
     g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); g.position.copy(at).addScaledVector(dir, -len / 2).add(new THREE.Vector3(0, scale * 0.6, 0));
     g.children.forEach(c => { c.renderOrder = 111; }); cues.add(g);
   }
+  function sunCue() { // a sun disc and its ray toward the middle of the scene
+    const s = ctx.sunLine(); if (!s) return;
+    const from = new THREE.Vector3().fromArray(s.from), to = new THREE.Vector3().fromArray(s.to);
+    const p = to.clone().lerp(from, 0.45), d = camera.position.distanceTo(p) * 0.04;
+    const sun = new THREE.Mesh(new THREE.SphereGeometry(d, 20, 12), cueMat(0xffd25a, 0.95)); sun.position.copy(p); sun.renderOrder = 111; cues.add(sun);
+    const dir = to.clone().sub(p), len = dir.length(); dir.normalize();
+    const ray = new THREE.Mesh(new THREE.CylinderGeometry(d * 0.12, d * 0.12, len, 8), cueMat(0xffd25a, 0.6));
+    ray.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); ray.position.copy(p).addScaledVector(dir, len / 2); ray.renderOrder = 111; cues.add(ray);
+  }
   function fogRings(active) {
     const k = L.look, y = ctx.groundY(camera.position.x, camera.position.z) + 0.03;
     for (const [r, col, key] of [[k.fogNear, 0x5dff86, 'Starts at (m)'], [k.fogFar, 0xffffff, 'Full at (m)']]) {
@@ -235,6 +248,7 @@ export function initEditor(ctx) {
       return;
     }
     if (label === 'Wind (m/s)' || label === 'Wind direction (°)' || label === 'Gusts') { cueShow(windArrow); msg(`${label}: ${value} (${what})`); return; }
+    if (label === 'Sun direction (°)' || label === 'Sun height (°)') { cueShow(sunCue); msg(`${label}: ${value} (${what})`); return; }
     if (label === 'Starts at (m)' || label === 'Full at (m)') { cueShow(() => fogRings(label), 5); msg(`${label}: ${value} (${what})`); return; }
     msg(`${label}: ${value}${what ? ` (${what})` : ''}`);
   }
@@ -479,7 +493,7 @@ export function initEditor(ctx) {
   }
 
   // ------------------------------------------------------------ story (story.json)
-  const STEP_NAMES = { camera: 'Camera shot', walk: 'Walk', place: 'Place', anim: 'Animation', say: 'Caption', wait: 'Wait', show: 'Show', hide: 'Hide', outfit: 'Outfit', music: 'Music', free: 'Free (own behaviour)' };
+  const STEP_NAMES = { camera: 'Camera shot', walk: 'Walk', place: 'Place', anim: 'Animation', say: 'Caption', wait: 'Wait', show: 'Show', hide: 'Hide', outfit: 'Outfit', music: 'Music', light: 'Light / mood', free: 'Free (own behaviour)' };
   let stepSel = null, playingStep = -1, newStepType = 'walk';
   ctx.onStoryStep(i => { playingStep = i; if (tab === 'story') refresh(); });
   const storyChanged = () => { ctx.setStory(story); msg('Unsaved changes'); };
@@ -500,6 +514,11 @@ export function initEditor(ctx) {
       case 'outfit': return `${n} wears ${st.image === 'drawing' ? 'the child’s drawing' : st.image || '—'}`;
       case 'music': return st.stop ? 'Stop music' : `Music ${st.file || '—'}`;
       case 'free': return `${st.who === 'all' ? 'Everyone' : n} back to own behaviour`;
+      case 'light': {
+        if (st.mood) return `Mood: ${MOODS[st.mood]?.label || st.mood}${st.seconds ? ` (fade ${st.seconds}s)` : ''}`;
+        const ln = st.light === 'all' || !st.light ? 'All lights' : lightName(lightById(st.light) || {});
+        return `${ln}${st.on === true ? ' on' : st.on === false ? ' off' : ''}${st.color ? ' ' + st.color : ''}${st.intensity != null ? ` @${st.intensity}` : ''}${st.seconds ? ` (fade ${st.seconds}s)` : ''}`;
+      }
       default: return `${STEP_NAMES[st.do] || st.do} ${n}`;
     }
   }
@@ -515,7 +534,8 @@ export function initEditor(ctx) {
       show: { do: 'show', who: first }, hide: { do: 'hide', who: first },
       outfit: { do: 'outfit', who: first, image: 'drawing' },
       music: { do: 'music', file: '', volume: 0.6 },
-      free: { do: 'free', who: 'all' }
+      free: { do: 'free', who: 'all' },
+      light: { do: 'light', mood: 'night', seconds: 3 }
     })[type];
   }
   function stepFields(st) {
@@ -619,6 +639,23 @@ export function initEditor(ctx) {
         h('div', { class: 'muted' }, st.file || 'No file yet'), row(upload('Choose audio…', 'audio/*', 'audio', n => { st.file = n; })),
         num('Volume', () => st.volume, v => { st.volume = v ?? 0.6; }, 0, 1, 0.05)];
       case 'free': return [whoSel(true)];
+      case 'light': {
+        const f = [sel('Change', [['mood', 'The whole mood'], ['light', 'A light']], () => st.mood ? 'mood' : 'light', v => {
+          if (v === 'mood') { st.mood = st.mood || 'night'; delete st.light; delete st.on; delete st.color; delete st.intensity; } else { delete st.mood; st.light = st.light || 'all'; st.on = st.on ?? true; }
+        })];
+        if (st.mood) f.push(sel('Mood', Object.entries(MOODS).map(([k, m]) => [k, m.label]), () => st.mood, v => { st.mood = v; }));
+        else {
+          f.push(sel('Light', [['all', 'All lights'], ...(L.lights || []).map(l => [l.id, lightName(l)])], () => st.light || 'all', v => { st.light = v; }),
+            sel('Switch', [['', 'Keep'], ['on', 'On'], ['off', 'Off']], () => st.on === true ? 'on' : st.on === false ? 'off' : '', v => { if (v === '') delete st.on; else st.on = v === 'on'; }),
+            chk('Change colour', () => st.color != null, v => { if (v) st.color = st.color || '#ff4f9a'; else delete st.color; }));
+          if (st.color != null) { const ci = h('input', { type: 'color', value: st.color }); ci.addEventListener('change', () => set(() => { st.color = ci.value; })()); f.push(h('div', { class: 'ctl c2' }, h('span', {}, 'Colour'), ci)); }
+          f.push(num('Strength (empty = keep)', () => st.intensity, v => { if (v == null) delete st.intensity; else st.intensity = v; }, 0, 500, 1));
+          if (!(L.lights || []).length) f.push(h('div', { class: 'muted' }, 'No lights yet: add them in the Lights tab.'));
+        }
+        f.push(num('Fade (s)', () => st.seconds, v => { st.seconds = v ?? 0; }, 0, 30, 0.1), withNext(),
+          h('div', { class: 'muted' }, 'Story changes are not saved into the lights: when the story ends or loops, the lights go back to how you set them.'));
+        return f;
+      }
       default: return [];
     }
   }
@@ -683,9 +720,19 @@ export function initEditor(ctx) {
   tc.addEventListener('dragging-changed', ev => {
     controls.enabled = !ev.value && ctx.view() !== 'hero';
     if (ev.value) { snapshot(); tcBefore = true; return; }
-    if (tcBefore) { tcBefore = null; const p = zones.props?.[sel?.i]; apply(p?.blocks ? 'nav' : 'props'); attachGizmo(); refresh(); }
+    if (tcBefore) {
+      tcBefore = null;
+      if (sel?.kind === 'light') { msg('Unsaved changes'); refresh(); return; }
+      const p = zones.props?.[sel?.i]; apply(p?.blocks ? 'nav' : 'props'); attachGizmo(); refresh();
+    }
   });
   tc.addEventListener('objectChange', () => {
+    if (sel?.kind === 'light') {
+      const l = lightById(sel.id), o = tc.object; if (!l || !o) return;
+      const v = o.position.toArray().map(n => +n.toFixed(3));
+      if (lightPart === 'aim') l.aim = v; else l.pos = v;
+      msg('Unsaved changes'); return;
+    }
     const p = zones.props?.[sel?.i], o = tc.object; if (!p || !o) return;
     if (gizmoMode === 'scale') { const s = Math.max(0.01, (o.scale.x + o.scale.y + o.scale.z) / 3); o.scale.setScalar(s); p.scale = +s.toFixed(3); }
     p.x = +o.position.x.toFixed(3); p.z = +o.position.z.toFixed(3);
@@ -696,6 +743,11 @@ export function initEditor(ctx) {
     redraw(); msg('Unsaved changes');
   });
   function attachGizmo() {
+    if (tab === 'lights' && sel?.kind === 'light') {
+      const o = ctx.lightObject(sel.id, lightPart === 'aim');
+      if (o) { tc.attach(o); tc.setMode('translate'); tc.setSpace('world'); } else tc.detach();
+      return;
+    }
     const show = tab === 'objects' && sel?.kind === 'prop' && zones.props?.[sel.i];
     const o = show ? ctx.propObject(sel.i) : null;
     if (o) { o.rotation.order = 'YXZ'; tc.attach(o); tc.setMode(gizmoMode); tc.setSpace(gizmoMode === 'scale' ? 'local' : 'world'); tc.showY = true; }
@@ -752,6 +804,95 @@ export function initEditor(ctx) {
     }
   }
 
+  // ============================================================ lights
+  let lightPart = 'pos';
+  const lightById = id => (L.lights || []).find(l => l.id === id);
+  const selectLight = id => { sel = id ? { kind: 'light', id } : null; tool = 'select'; refresh(); };
+  const lightName = l => l.name || (l.type === 'spot' ? 'Spotlight' : 'Lamp');
+  function addLight(type, extra = {}) {
+    const g = groundPick({ clientX: innerWidth / 2 + 165, clientY: innerHeight * 0.62 }) || [0, -3];
+    const gy = ctx.groundY(g[0], g[1]);
+    const l = type === 'spot'
+      ? { id: newLightId(), type: 'spot', name: `Spotlight ${(L.lights || []).filter(q => q.type === 'spot').length + 1}`, on: true, color: '#fff4e6', intensity: 80, pos: [+(g[0] + 2).toFixed(2), +(gy + 4.5).toFixed(2), +(g[1] + 1.5).toFixed(2)], aim: [g[0], +gy.toFixed(2), g[1]], beam: 20, soft: 0.45, reach: 16, anim: { kind: 'none' }, ...extra }
+      : { id: newLightId(), type: 'lamp', name: `Lamp ${(L.lights || []).filter(q => q.type === 'lamp').length + 1}`, on: true, color: '#ffc98a', intensity: 15, pos: [g[0], +(gy + 1.6).toFixed(2), g[1]], reach: 8, anim: { kind: 'none' }, ...extra };
+    L.lights = L.lights || []; L.lights.push(l);
+    return l;
+  }
+  function tabLights() {
+    const k = L.look;
+    body.append(...viewRow(),
+      heading('Mood'),
+      h('div', { class: 'muted' }, 'One click sets sky, sun, fog and picture colour together. Fine-tune below. (A Story step can fade between moods.)'),
+      row(...Object.entries(MOODS).map(([key, m]) => btn(m.label, () => {
+        snapshot(); Object.assign(k, structuredClone(m.look)); apply('look'); msg(`Mood: ${m.label}. Not saved yet.`);
+      }, { cls: 'mini' }))),
+      heading('Sun'),
+      slider('Sun direction (°)', () => k.sunAz ?? -40, v => { k.sunAz = v; k.sunElev = k.sunElev ?? 55; }, -180, 180, 1, 'look'),
+      slider('Sun height (°)', () => k.sunElev ?? 55, v => { k.sunElev = v; k.sunAz = k.sunAz ?? -40; }, 0, 90, 1, 'look'),
+      colorCtl('Sun colour', () => k.sunColor ?? '#eef3ff', v => { k.sunColor = v; }, 'look'),
+      slider('Sun strength', () => k.sun ?? 1.4, v => { k.sun = v; }, 0, 5, 0.05, 'look'),
+      heading('Sky light'),
+      colorCtl('Sky colour', () => k.skyColor ?? '#e3ebf5', v => { k.skyColor = v; }, 'look'),
+      colorCtl('Ground bounce', () => k.groundColor ?? '#8d939c', v => { k.groundColor = v; }, 'look'),
+      slider('Sky strength', () => k.ambient ?? 1.6, v => { k.ambient = v; }, 0, 4, 0.05, 'look'),
+      slider('Exposure', () => k.exposure, v => { k.exposure = v; }, 0.3, 2.5, 0.01, 'look'));
+    if (ctx.backdrop === 'depth') body.append(heading('Picture'),
+      h('div', { class: 'muted' }, 'The 2.5D picture is not lit by lights (they light models and objects). Tint it to match the mood.'),
+      colorCtl('Picture tint', () => k.pictureTint ?? '#ffffff', v => { k.pictureTint = v; }, 'look'),
+      slider('Picture brightness', () => k.pictureBrightness ?? 1, v => { k.pictureBrightness = v; }, 0.1, 1.6, 0.01, 'look'));
+    if (ctx.backdrop === 'depth' || ctx.backdrop === 'splat') body.append(slider('Window glow', () => k.warmIntensity ?? 6, v => { k.warmIntensity = v; }, 0, 20, 0.5, 'look'));
+
+    body.append(heading('Lights'),
+      row(btn('+ Spotlight', () => { snapshot(); const l = addLight('spot'); lightPart = 'pos'; apply('lights'); selectLight(l.id); msg('Spotlight added. Drag the bulb to move it, the small dot to aim it.'); }),
+        btn('+ Lamp', () => { snapshot(); const l = addLight('lamp'); lightPart = 'pos'; apply('lights'); selectLight(l.id); msg('Lamp added: it glows all around. Drag it with the arrows.'); }),
+        btn('+ Show lights', () => {
+          snapshot(); let last;
+          [['#ff4f9a', -3.5, 0], ['#4f8bff', 3.5, 1.7], ['#fff4e6', 0, 3.4]].forEach(([c, dx, ph], i) => {
+            last = addLight('spot', { name: `Show light ${i + 1}`, color: c, intensity: 120, beam: 16, anim: { kind: i === 2 ? 'follow' : 'sweep', speed: 0.8 + ph * 0.1, amount: 0.5, who: 'auto' } });
+            last.pos = [+(last.aim[0] + dx).toFixed(2), +(last.pos[1] + 1).toFixed(2), +(last.aim[2] + 2.5).toFixed(2)];
+          });
+          apply('lights'); selectLight(last.id); msg('Three show lights: two sweep, one follows whoever performs. Try the Show mood with them.');
+        })));
+    const list = L.lights || [];
+    const ll = h('div', { class: 'list' });
+    list.forEach(l => {
+      const on = h('input', { type: 'checkbox' }); on.checked = l.on !== false;
+      on.addEventListener('click', ev => ev.stopPropagation());
+      on.addEventListener('change', () => { snapshot(); l.on = on.checked; apply(l.shadow ? 'lights' : 'look'); });
+      ll.append(h('div', { class: 'item' + (sel?.kind === 'light' && sel.id === l.id ? ' on' : ''), onclick: () => { lightPart = 'pos'; selectLight(l.id); } },
+        h('span', { class: 'dot', style: `background:${l.color}` }), h('span', { class: 'grow' }, lightName(l)),
+        h('span', { class: 'muted' }, l.anim?.kind && l.anim.kind !== 'none' ? ANIMS.find(a => a[0] === l.anim.kind)?.[1].split(' ')[0] : ''), on));
+    });
+    if (!list.length) ll.append(h('div', { class: 'muted' }, 'No lights yet. Lights shine on models and objects (and the stage); they show as glowing dots while this tab is open.'));
+    body.append(ll);
+    const l = sel?.kind === 'light' ? lightById(sel.id) : null;
+    if (!l) return;
+    l.anim = l.anim || { kind: 'none' };
+    const spot = l.type === 'spot', a = l.anim;
+    const card = h('div', { class: 'card' },
+      textCtl('Name', () => l.name, v => { l.name = v; }),
+      spot ? row(btn('Move light', () => { lightPart = 'pos'; attachGizmo(); }, { on: lightPart === 'pos' }), btn('Move aim', () => { lightPart = 'aim'; attachGizmo(); }, { on: lightPart === 'aim' })) : '',
+      h('div', { class: 'muted' }, spot ? 'Drag the arrows in the scene. The big dot is the light, the small dot is where it points.' : 'Drag the arrows in the scene to move the lamp.'),
+      colorCtl('Colour', () => l.color, v => { l.color = v; }, 'look'),
+      slider('Strength', () => l.intensity ?? (spot ? 80 : 15), v => { l.intensity = v; }, 0, spot ? 400 : 100, 1, 'look'),
+      slider('Reach (m)', () => l.reach ?? (spot ? 16 : 8), v => { l.reach = v; }, 1, 50, 0.5, 'look'));
+    if (spot) card.append(
+      slider('Beam width (°)', () => l.beam ?? 20, v => { l.beam = v; }, 3, 70, 1, 'look'),
+      slider('Soft edge', () => l.soft ?? 0.45, v => { l.soft = v; }, 0, 1, 0.01, 'look'),
+      checkCtl('Shadows', () => l.shadow, v => { l.shadow = v || undefined; }, 'lights'));
+    card.append(selectCtl('Animation', ANIMS.filter(([kk]) => spot || (kk !== 'sweep' && kk !== 'follow')), () => a.kind || 'none', v => { a.kind = v; if (v === 'follow') a.who = a.who || 'auto'; }, 'look'));
+    if (a.kind && a.kind !== 'none') {
+      if (a.kind === 'follow') card.append(selectCtl('Follows', [['auto', 'Whoever performs'], ...who()], () => a.who || 'auto', v => { a.who = v; }, 'look'));
+      card.append(slider('Speed', () => a.speed ?? 1, v => { a.speed = v; }, 0.1, 4, 0.05, 'look'));
+      if (a.kind !== 'follow' && a.kind !== 'rainbow') card.append(slider('Amount', () => a.amount ?? 0.5, v => { a.amount = v; }, 0, 1, 0.01, 'look'));
+      if (a.kind === 'follow') card.append(h('div', { class: 'muted' }, 'Aims at the model while the story plays (between steps it keeps its own aim).'));
+    }
+    card.append(row(
+      btn('Duplicate', () => { snapshot(); const c = structuredClone(l); c.id = newLightId(); c.name = lightName(l) + ' copy'; c.pos = [c.pos[0] + 1, c.pos[1], c.pos[2]]; L.lights.push(c); apply('lights'); selectLight(c.id); }),
+      btn('Delete', () => { snapshot(); tc.detach(); L.lights = L.lights.filter(q => q !== l); sel = null; apply('lights'); refresh(); }, { cls: 'warn' })));
+    body.append(card);
+  }
+
   function tabLook() {
     const c = L.camera, k = L.look;
     body.append(...viewRow(), heading('Hero camera'),
@@ -789,10 +930,7 @@ export function initEditor(ctx) {
       slider('Breathing (m)', () => c.handheld.breathe ?? feel.breathe, v => { c.handheld.breathe = v; }, 0, 0.3, 0.005, 'look'),
       slider('Breath length (s)', () => c.handheld.breathePeriod ?? feel.period, v => { c.handheld.breathePeriod = v; }, 4, 60, 1, 'look'));
     body.append(heading('Light'),
-      slider('Exposure', () => k.exposure, v => { k.exposure = v; }, 0.3, 2, 0.01, 'look'),
-      slider('Sky light', () => k.ambient ?? 1.6, v => { k.ambient = v; }, 0, 4, 0.05, 'look'),
-      slider('Sun', () => k.sun ?? 1.4, v => { k.sun = v; }, 0, 4, 0.05, 'look'),
-      slider('Window glow', () => k.warmIntensity ?? 6, v => { k.warmIntensity = v; }, 0, 20, 0.5, 'look'),
+      row(btn('Open the Lights tab (mood, sun, spotlights) →', () => { tab = 'lights'; })),
       heading('Snowfall'),
       slider('Amount', () => k.snow, v => { k.snow = v; }, 0, 3, 0.05, 'snow'),
       slider('Fall speed', () => k.snowSpeed ?? 1, v => { k.snowSpeed = v; }, 0.1, 3, 0.05, 'look'),
@@ -1161,6 +1299,10 @@ export function initEditor(ctx) {
   dom.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
     if (tc.object && (tc.dragging || tc.axis)) return; // using the move/turn/size handles
+    if (tool === 'select' && tab === 'lights') {
+      const hit = ctx.pickLight((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+      if (hit) { lightPart = hit.aim ? 'aim' : 'pos'; selectLight(hit.id); return; }
+    }
     if (tool === 'select' && (tab === 'objects' || !hitHandle(e))) {
       const i = ctx.propsAt((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
       if (i != null) { tab = 'objects'; selectProp(i); return; }
@@ -1270,7 +1412,7 @@ export function initEditor(ctx) {
   function doUndo() {
     const s = undo.pop(); if (!s) { msg('Nothing to undo.'); return; }
     const o = JSON.parse(s); zones = o.zones; Object.assign(L, o.look); if (o.story) { story = o.story; ctx.setStory(story); }
-    sel = null; ctx.setZones(structuredClone(zones), 'all'); ctx.applyLook('snow'); ctx.applyLook('camera'); redraw(); refresh(); msg('Undone');
+    sel = null; ctx.setZones(structuredClone(zones), 'all'); ctx.applyLook('snow'); ctx.applyLook('camera'); ctx.applyLook('lights'); redraw(); refresh(); msg('Undone');
   }
   async function save() {
     try { msg(await ctx.save()); }

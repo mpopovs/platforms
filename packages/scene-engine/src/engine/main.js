@@ -28,6 +28,7 @@ import { loadDepthBackdrop } from './backdrop.js';
 import { createUi } from './ui.js';
 import { buildStage } from './stage.js';
 import { createStoryRunner } from './story.js';
+import { createLighting } from './lights.js';
 
 /**
  * Mount the scene into `container`. Returns { ready, destroy }.
@@ -382,6 +383,12 @@ const hemi = new THREE.HemisphereLight(0xe3ebf5, 0x8d939c, 1.6);
 const key = new THREE.DirectionalLight(0xeef3ff, 1.4); key.position.set(-6, 9, 4);
 const warm = new THREE.PointLight(0xffb066, 6, 9, 1.6);
 scene.add(hemi, key, warm);
+const lighting = createLighting({
+  scene, camera, renderer, hemi, key, warm, edit: EDIT,
+  getL: () => L, getHero: () => hero,
+  getBackdrop: () => bdGroup ? [bdGroup.userData.front, bdGroup.userData.back].filter(Boolean) : [],
+  findChar: id => findChar(id), getPerformer: () => lastPerformer
+});
 
 // ---------------------------------------------------------------- splat backdrop (near + far layers)
 const splatRoot = new THREE.Group(); scene.add(splatRoot);
@@ -1009,7 +1016,7 @@ function applyLayout() {
   renderer.toneMappingExposure = L.look.exposure;
   scene.fog = new THREE.Fog(L.look.fog, L.look.fogNear, L.look.fogFar);
   warm.position.fromArray(L.look.warmLight);
-  warm.intensity = L.look.warmIntensity ?? 6; hemi.intensity = L.look.ambient ?? 1.6; key.intensity = L.look.sun ?? 1.4;
+  lighting.applyMood();
 }
 async function putFile(name, body, type) {
   if (opts.saveFile) return opts.saveFile(name, body, type);
@@ -1107,8 +1114,10 @@ const storyRunner = createStoryRunner({
   outfit: (c, image) => setOutfit(c, image === 'drawing' ? opts.drawingUrl?.(c.tag) : image ? `${WORLD}/${image}` : null),
   caption: t => ui.caption(t),
   cameraTo: step => cameraTo(step),
+  light: s => { if (s.mood) lighting.mood(s.mood, s.seconds ?? 2); else lighting.light(s); },
+  resetLights: () => lighting.reset(),
   url: name => `${WORLD}/${name}`,
-  reset: () => {},
+  reset: () => lighting.reset(),
   onStep: i => storyStepListener?.(i)
 });
 let envGroup = null, stageBackground = null;
@@ -1150,7 +1159,7 @@ async function boot() {
     ? await new THREE.TextureLoader().loadAsync(`${WORLD}/${sceneInfo.files.pano}`).then(t => { t.mapping = THREE.EquirectangularReflectionMapping; t.colorSpace = THREE.SRGBColorSpace; return t; })
     : gradientSky();
   scene.background = sky; scene.environment = sky;
-  applyLayout();
+  applyLayout(); lighting.build();
 
   say('Loading the scene…');
   const mode = Q.get('backdrop') || (sceneInfo.environment === 'stage' ? 'stage' : sceneInfo.files.environment ? 'glb' : sceneInfo.files.backdrop ? 'depth' : 'splat');
@@ -1251,6 +1260,7 @@ async function boot() {
       applyLook: what => {
         applyLayout();
         if (what === 'snow') buildSnow();
+        if (what === 'lights') lighting.build();
         if (what === 'camera' && view === 'hero') setupHero();
       },
       view: () => view, setView,
@@ -1278,12 +1288,18 @@ async function boot() {
       },
       files: { backdropDir: sceneInfo.files.backdrop ? sceneInfo.files.backdrop.replace(/[^/]*$/, '') : null, pano: sceneInfo.files.pano || null },
       reloadBackdrop, reloadSky,
-      importLayout: l => { L = deepMerge(L, l); applyLayout(); buildSnow(); if (view === 'hero') setupHero(); return L; },
+      importLayout: l => { L = deepMerge(L, l); applyLayout(); lighting.build(); buildSnow(); if (view === 'hero') setupHero(); return L; },
       put: putFile,
       live: () => ({ on: live.on, left: Math.max(0, live.until - performance.now()) / 1000 }),
       setLive: on => { live.on = on; live.until = 0; },
       previewLive: (sec = 8) => { if (view === 'free' || view === 'top') setView('hero'); live.until = performance.now() + sec * 1000; },
       depthView: on => setDepthView(on),
+      lightObject: (id, aim) => lighting.objectFor(id, aim),
+      sunLine: () => ({ from: key.position.toArray(), to: key.target.position.toArray() }),
+      pickLight: (ndcX, ndcY) => { _rc.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera); return lighting.pick(_rc); },
+      showLightHelpers: (on, sel) => lighting.showHelpers(on, sel),
+      lightMood: (name, secs) => lighting.mood(name, secs),
+      resetLights: () => lighting.reset(),
       lookFromSide: () => {
         if (view !== 'free') setView('free');
         const tgt = hero.base.clone().addScaledVector(hero.dir, 6);
@@ -1323,7 +1339,7 @@ function frame() {
   timer.update();
   const dt = Math.min(timer.getDelta(), 0.05), t = timer.getElapsed();
   for (const c of capys) updateCapy(c, dt);
-  updateSteam(dt); updateSnow(dt, t); updateRipples(dt); updatePathViz();
+  updateSteam(dt); updateSnow(dt, t); updateRipples(dt); updatePathViz(); lighting.update(t, dt);
   if (view === 'hero') updateHero(dt, t); else if (view === 'story') updateStoryCam(dt); else controls.update();
   const shaken = applyHandheld(t);
   renderer.render(scene, camera);
