@@ -95,7 +95,7 @@ export function initEditor(ctx) {
   function slider(label, get, set, min, max, step, scope, fmt = v => (+v).toFixed(step < 0.01 ? 3 : step < 0.1 ? 2 : step < 1 ? 1 : 0)) {
     const v = h('span', { class: 'v' }, fmt(get()));
     const i = h('input', { type: 'range', min, max, step, value: get() });
-    i.addEventListener('input', () => { if (editingKey !== label) { snapshot(); editingKey = label; } set(+i.value); v.textContent = fmt(i.value); apply(scope); });
+    i.addEventListener('input', () => { if (editingKey !== label) { snapshot(); editingKey = label; } set(+i.value); v.textContent = fmt(i.value); apply(scope); cue(label, fmt(i.value)); });
     i.addEventListener('change', () => { editingKey = null; });
     return h('div', { class: 'ctl' }, h('span', {}, label), i, v);
   }
@@ -172,7 +172,72 @@ export function initEditor(ctx) {
   const cancelTool = () => { draft = []; tool = 'select'; redrawTarget = null; redraw(); refresh(); };
   const undoCorner = () => { draft.pop(); redraw(); updateBanner(); };
   const toolOpts = {};
-  const viewRow = () => [heading('View'), row(...[['hero', 'Hero'], ['top', 'Top'], ['free', 'Free']].map(([v, t]) => btn(t, () => { ctx.setView(v); redraw(); }, { on: ctx.view() === v })))];
+  const viewRow = () => [heading('View'), row(...[['hero', 'Hero'], ['top', 'Top'], ['free', 'Free']].map(([v, t]) => btn(t, () => { ctx.setView(v); redraw(); }, { on: ctx.view() === v })),
+    btn(ctx.live().on ? '■ Live motion' : '▶ Live motion', () => {
+      const on = !ctx.live().on; ctx.setLive(on); if (on && ctx.view() !== 'hero') { ctx.setView('hero'); redraw(); }
+      msg(on ? 'Live motion: the camera moves as viewers will see it (parallax, sway, breathing, snow). Turn off to edit in a still view.' : 'Live motion off: still camera for editing.');
+    }, { on: ctx.live().on }))];
+
+  // ---------- visual cues: show what a setting does while you change it
+  const CAMERA_CUES = new Set(['Parallax (m)', 'Drift (m)', 'Handheld sway', 'Tilt in sway', 'Sway speed', 'Breathing (m)', 'Breath length (s)']);
+  const CUE_TEXT = {
+    'Parallax (m)': 'how far the camera slides when the viewer moves the mouse or tilts the phone',
+    'Drift (m)': 'slow sideways float on its own',
+    'Handheld sway': 'the hand-held wobble',
+    'Tilt in sway': 'how much the wobble tilts the view (keep low for 2.5D pictures)',
+    'Sway speed': 'how fast the wobble is',
+    'Breathing (m)': 'slow push in and pull back',
+    'Breath length (s)': 'seconds per push in and back',
+    'Wind (m/s)': 'arrow shows the wind', 'Wind direction (°)': 'arrow shows where the snow blows', 'Gusts': 'how much the wind swells and calms',
+    'Starts at (m)': 'green ring: fog starts', 'Full at (m)': 'white ring: fully fogged'
+  };
+  const cues = new THREE.Group(); cues.renderOrder = 110; scene.add(cues);
+  disposers.push(() => { scene.remove(cues); cueClear(); });
+  let cueTimer = 0;
+  function cueClear() { cues.traverse(o => { if (o.isMesh) o.geometry.dispose(); }); cues.clear(); }
+  const cueMats = new Map(); // reused, so a cue shows at once (no new shader each time)
+  const cueMat = (c, o) => { const k = c + ':' + o; if (!cueMats.has(k)) cueMats.set(k, flat(c, o)); return cueMats.get(k); };
+  disposers.push(() => cueMats.forEach(m => m.dispose()));
+  function cueShow(build, secs = 4) { cueClear(); build(); clearTimeout(cueTimer); cueTimer = setTimeout(cueClear, secs * 1000); }
+  const _cd = new THREE.Vector3();
+  function viewGround() { // ground point in the middle of the view
+    const g = groundPick({ clientX: innerWidth / 2 + 165, clientY: innerHeight * 0.6 }) || groundPick({ clientX: innerWidth / 2, clientY: innerHeight * 0.75 });
+    if (g) return new THREE.Vector3(g[0], ctx.groundY(g[0], g[1]) + 0.05, g[1]);
+    camera.getWorldDirection(_cd); return camera.position.clone().addScaledVector(_cd, 5);
+  }
+  function windArrow() {
+    const k = L.look, at = viewGround();
+    camera.getWorldDirection(_cd); _cd.y = 0; _cd.normalize();
+    const right = new THREE.Vector3(-_cd.z, 0, _cd.x), a = THREE.MathUtils.degToRad(k.windDir ?? 0);
+    const dir = right.multiplyScalar(Math.cos(a)).addScaledVector(_cd, Math.sin(a)).normalize();
+    const scale = camera.position.distanceTo(at) * 0.06, len = scale * (1 + (k.wind ?? 0.3) * 1.2);
+    const m = cueMat(0x9fd8ff, 0.95);
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(scale * 0.12, scale * 0.12, len, 12), m);
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(scale * 0.35, scale * 0.8, 16), m);
+    const g = new THREE.Group(); shaft.position.y = len / 2; tip.position.y = len + scale * 0.4; g.add(shaft, tip);
+    g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); g.position.copy(at).addScaledVector(dir, -len / 2).add(new THREE.Vector3(0, scale * 0.6, 0));
+    g.children.forEach(c => { c.renderOrder = 111; }); cues.add(g);
+  }
+  function fogRings(active) {
+    const k = L.look, y = ctx.groundY(camera.position.x, camera.position.z) + 0.03;
+    for (const [r, col, key] of [[k.fogNear, 0x5dff86, 'Starts at (m)'], [k.fogFar, 0xffffff, 'Full at (m)']]) {
+      if (!(r > 0)) continue;
+      const w = Math.max(0.06, r * 0.012);
+      const ring = new THREE.Mesh(new THREE.RingGeometry(r - w, r + w, 128), cueMat(col, key === active ? 0.95 : 0.45));
+      ring.rotation.x = -Math.PI / 2; ring.position.set(camera.position.x, y, camera.position.z); ring.renderOrder = 111; cues.add(ring);
+    }
+  }
+  function cue(label, value) {
+    const what = CUE_TEXT[label];
+    if (CAMERA_CUES.has(label)) {
+      if (!ctx.live().on) ctx.previewLive(8);
+      msg(`${label}: ${value} (${what}). ${ctx.live().on ? '' : 'Playing the camera motion for 8 s; ▶ Live motion keeps it on.'}`);
+      return;
+    }
+    if (label === 'Wind (m/s)' || label === 'Wind direction (°)' || label === 'Gusts') { cueShow(windArrow); msg(`${label}: ${value} (${what})`); return; }
+    if (label === 'Starts at (m)' || label === 'Full at (m)') { cueShow(() => fogRings(label), 5); msg(`${label}: ${value} (${what})`); return; }
+    msg(`${label}: ${value}${what ? ` (${what})` : ''}`);
+  }
 
   const AREA_TYPES = [
     ['walk', 'Walk area', COLORS.walk, 'Models may walk here.'],
@@ -713,7 +778,9 @@ export function initEditor(ctx) {
     const current = Object.entries(FEELS).find(([, f]) => Math.abs((feel.amount) - f.hh.amount) < 0.01 && Math.abs(feel.breathe - (f.hh.breathe || 0)) < 0.005 && Math.abs(feel.rotate - f.hh.rotate) < 0.01)?.[0];
     body.append(heading('Camera feel'),
       row(...Object.entries(FEELS).map(([k, f]) => btn(f.label, () => {
-        snapshot(); c.handheld = { ...f.hh }; c.parallax = f.parallax; c.drift = f.drift; apply('look'); msg(`Camera feel: ${f.label}. ${f.note}`);
+        snapshot(); c.handheld = { ...f.hh }; c.parallax = f.parallax; c.drift = f.drift; apply('look');
+        if (!ctx.live().on) ctx.previewLive(10);
+        msg(`Camera feel: ${f.label}. ${f.note}${ctx.live().on ? '' : ' Playing it for 10 s.'}`);
       }, { on: current === k }))),
       h('div', { class: 'muted' }, current ? FEELS[current].note : 'Custom mix. (The camera stays calm while you edit; the feel plays in the player and in story preview.)'),
       slider('Handheld sway', () => c.handheld.amount ?? feel.amount, v => { c.handheld.amount = v; }, 0, 2, 0.05, 'look'),
@@ -825,7 +892,7 @@ export function initEditor(ctx) {
     return [heading('Environment'), card, ...pictureSection(env)];
   }
   // ---------- picture -> 2.5D (depth made here in the browser)
-  let building = false;
+  let building = false, depthView = false;
   const depthOpts = () => ({ modelUrl: ctx.depth?.modelUrl || undefined, wasmPaths: ctx.depth?.wasmPaths || undefined, onProgress: m => msg(m) });
   async function putAll(files) { let n = 0; for (const [name, blob] of Object.entries(files)) { msg(`Saving ${++n}/${Object.keys(files).length}…`); await ctx.put(name, blob, blob.type || 'application/octet-stream'); } }
   function pictureSection(env) {
@@ -856,28 +923,41 @@ export function initEditor(ctx) {
         const meta = JSON.parse(t), fit = { ...DEFAULT_FIT, ...(meta.fit || {}), vfov: meta.camera.vfov, pitch: meta.camera.pitch, height: meta.camera.position[1] };
         card.textContent = '';
         if (!meta.disparity) { card.append(h('div', { class: 'muted' }, 'This backdrop was made with the world tools. To adjust its depth here, make it again from a picture.')); return; }
-        const n = (label, key, min, max, step) => numberCtl(label, () => fit[key], v => { if (v != null) fit[key] = v; }, min, max, step);
-        const chk = h('input', { type: 'checkbox' }); chk.checked = fit.ground !== false; chk.onchange = () => { fit.ground = chk.checked; };
+        // every change rebuilds by itself (short pause first, so typing is not interrupted)
+        let timer = 0, again = false;
+        const rebuild = () => {
+          if (building) { again = true; return; }
+          busy('Rebuilding the depth', async () => {
+            building = true;
+            try {
+              const { refitBackdrop } = await import('./picture.js');
+              const res = await refitBackdrop(name => fetchBlob(ctx.files.backdropDir + name), meta, fit, depthOpts());
+              await putAll(Object.fromEntries(Object.entries(res.files).map(([k, v]) => [ctx.files.backdropDir + k.replace(/^backdrop\//, ''), v])));
+              await ctx.reloadBackdrop(); redraw();
+              return `Depth rebuilt: ${fitText()}.`;
+            } finally { building = false; if (again) { again = false; rebuild(); } }
+          });
+        };
+        const fitText = () => `lens ${fit.vfov}°, camera ${fit.height} m high, tilt ${fit.pitch}°, farthest ${fit.far} m`;
+        const later = () => { clearTimeout(timer); msg('Rebuilding in a moment…'); timer = setTimeout(rebuild, 700); };
+        const n = (label, key, min, max, step) => {
+          const c = numberCtl(label, () => fit[key], v => { if (v != null) { fit[key] = v; later(); } }, min, max, step);
+          c.querySelector('input').addEventListener('input', e => { if (e.target.value !== '') { fit[key] = +e.target.value; later(); } });
+          return c;
+        };
+        const chk = h('input', { type: 'checkbox' }); chk.checked = fit.ground !== false; chk.onchange = () => { fit.ground = chk.checked; later(); };
         card.append(h('b', {}, 'Adjust the depth'),
           h('div', { class: 'muted' }, `How the depth was scaled: ${meta.fit?.how === 'ground' ? 'from the ground at the bottom of the picture' : 'nearest/farthest distance'}. Too flat or too deep? Change these and rebuild (fast, no model run).`),
           n('Lens (vertical °)', 'vfov', 10, 100, 1), n('Camera height (m)', 'height', 0.1, 50, 0.05), n('Camera tilt (°)', 'pitch', -60, 30, 0.5),
           n('Farthest (m)', 'far', 5, 65, 1),
           h('label', { class: 'ctl c2' }, h('span', {}, 'Ground at bottom'), h('span', {}, chk)),
           n('Nearest (m, no ground)', 'near', 0.3, 30, 0.1),
-          h('div', { class: 'muted' }, 'Smaller lens angle = flatter, farther picture. Taller camera = bigger, deeper world.'),
-          row(btn('Rebuild depth', () => {
-            if (building) return;
-            busy('Rebuilding', async () => {
-              building = true;
-              try {
-                const { refitBackdrop } = await import('./picture.js');
-                const res = await refitBackdrop(name => fetchBlob(ctx.files.backdropDir + name), meta, fit, depthOpts());
-                await putAll(Object.fromEntries(Object.entries(res.files).map(([k, v]) => [ctx.files.backdropDir + k.replace(/^backdrop\//, ''), v])));
-                await ctx.reloadBackdrop(); redraw();
-                return 'Depth rebuilt. Save the scene to keep any other changes.';
-              } finally { building = false; }
-            });
-          })));
+          h('div', { class: 'muted' }, 'Changes rebuild by themselves. Smaller lens angle = flatter, farther picture. Taller camera = bigger, deeper world.'),
+          h('b', { style: 'display:block;margin-top:8px' }, 'See the depth'),
+          row(btn(depthView ? 'Show the picture' : 'Show depth colours', () => { depthView = !depthView; ctx.depthView(depthView); msg(depthView ? 'Depth colours: red = near, yellow/green = middle, blue = far. Smooth bands are good; sudden colour jumps are cuts.' : 'Showing the picture.'); }, { on: depthView }),
+            btn('Look from the side', () => { ctx.lookFromSide(); redraw(); msg('Side view: the picture as a 3D relief. Right-drag to orbit, wheel to zoom. “Hero” goes back.'); }),
+            btn('Back to camera', () => { ctx.setView('hero'); redraw(); })),
+          h('div', { class: 'muted' }, 'Tip: turn on depth colours and look from the side, then change the numbers: the relief updates as you go.'));
       }).catch(err => { card.textContent = 'Could not read the depth settings: ' + err.message; });
     }
     return out;

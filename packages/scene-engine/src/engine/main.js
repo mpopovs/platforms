@@ -125,17 +125,24 @@ function setupHero() {
   camera.position.copy(hero.base); camera.lookAt(hero.base.clone().add(hero.dir));
   hero.cam.copy(camera); hero.cam.updateMatrixWorld();
 }
-const _look = new THREE.Vector3();
+const _look = new THREE.Vector3(), _zero2 = new THREE.Vector2();
+// Editor: the camera keeps still while you edit, unless "Live motion" is on
+// (or a camera setting was just changed: then it plays for a few seconds).
+const live = { on: false, until: 0 };
+const calmEdit = () => EDIT && !live.on && performance.now() > live.until;
 function updateHero(dt, t) {
-  const still = EDIT; // no parallax or drift while editing
+  const still = calmEdit();
   // nobody moving the mouse or the phone (a display, a phone on the table):
-  // the view wanders slowly by itself so the 2.5D parallax still shows
-  if (!still && performance.now() - hero.input > 4000) {
-    const w = (L.camera.handheld?.speed ?? (envMode === 'depth' ? 0.6 : 1)) * 0.12;
+  // the view wanders slowly by itself so the 2.5D parallax still shows.
+  // In the editor preview it always wanders (the mouse is busy with the panel), a bit faster.
+  if (!still && (EDIT || performance.now() - hero.input > 4000)) {
+    const w = (L.camera.handheld?.speed ?? (envMode === 'depth' ? 0.6 : 1)) * (EDIT ? 0.45 : 0.12);
     hero.aim.set(Math.sin(t * w) * 0.8, Math.sin(t * w * 0.63 + 1.3) * 0.5);
     hero.cur.lerp(hero.aim, Math.min(1, dt * 0.8));
-  } else if (still) hero.cur.set(0, 0); else hero.cur.lerp(hero.aim, Math.min(1, dt * 2.5));
-  const par = still ? 0 : L.camera.parallax, dr = still ? 0 : L.camera.drift;
+  } else if (still) hero.cur.lerp(_zero2, Math.min(1, dt * 2)); else hero.cur.lerp(hero.aim, Math.min(1, dt * 2.5));
+  // fade the motion in and out (no jump when an editor preview ends)
+  hero.fade = (hero.fade ?? (still ? 0 : 1)) + ((still ? 0 : 1) - (hero.fade ?? 0)) * Math.min(1, dt * 2);
+  const par = L.camera.parallax * hero.fade, dr = L.camera.drift * hero.fade;
   const ox = hero.cur.x * par + Math.sin(t * 0.13) * dr, oy = -hero.cur.y * par * 0.4 + Math.sin(t * 0.21) * dr * 0.5;
   camera.position.set(hero.base.x + ox, hero.base.y + oy, hero.base.z);
   _look.copy(hero.base).addScaledVector(hero.dir, 9);
@@ -207,7 +214,7 @@ const _fwd = new THREE.Vector3();
 function applyHandheld(t) {
   const f = cameraFeel();
   const amount = f.amount * (director.on ? director.op?.shake ?? 1 : 1);
-  if ((amount <= 0 && f.breathe <= 0) || (EDIT && view !== 'story')) return false; // calm while editing; live in the player and story preview
+  if ((amount <= 0 && f.breathe <= 0) || (EDIT && view !== 'story' && (view !== 'hero' || calmEdit()))) return false; // calm while editing unless previewing
   const st = t * f.speed;
   _shakePos.copy(camera.position); _shakeQuat.copy(camera.quaternion);
   const p = 0.018 * amount, r = THREE.MathUtils.degToRad(0.55) * amount * f.rotate;
@@ -1014,12 +1021,48 @@ const putJSON = (name, data) => putFile(name, JSON.stringify(data, null, 2), 'ap
 
 // ---------------------------------------------------------------- swap files at runtime (editor Files tab)
 let bdGroup = null, sceneInfoRef = null;
+// editor: show the backdrop coloured by distance (red near, blue far) instead of the picture
+let depthViewOn = false;
+async function setDepthView(on) {
+  depthViewOn = on;
+  if (!bdGroup) return false;
+  for (const m of [bdGroup.userData.front, bdGroup.userData.back]) {
+    if (!m) continue;
+    m.userData.picture = m.userData.picture || m.material.map;
+    if (on && !m.userData.depthTex) m.userData.depthTex = depthColours(m);
+    m.material.map = on ? m.userData.depthTex : m.userData.picture; m.material.needsUpdate = true;
+  }
+  return true;
+}
+function depthColours(mesh) {
+  // colour each grid vertex by its distance from the picture's camera, painted into a small texture
+  const pos = mesh.geometry.attributes.position, uv = mesh.geometry.attributes.uv;
+  const W = 256, H = Math.max(2, Math.round(256 * (backdropMeta.height / backdropMeta.width)));
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d'), im = g.createImageData(W, H), o = new THREE.Vector3().fromArray(backdropMeta.camera.position), p = new THREE.Vector3();
+  // colours stretched over this picture's own range (2nd..98th percentile, log scale)
+  const dist = new Float32Array(pos.count);
+  for (let i = 0; i < pos.count; i++) dist[i] = Math.log(p.fromBufferAttribute(pos, i).distanceTo(o) + 0.01);
+  const sorted = Float32Array.from(dist).sort(), lo = sorted[Math.floor(sorted.length * 0.02)], hi = Math.max(lo + 0.01, sorted[Math.floor(sorted.length * 0.98)]);
+  for (let i = 0; i < pos.count; i++) {
+    const x = Math.min(W - 1, Math.floor(uv.getX(i) * W)), y = Math.min(H - 1, Math.floor((1 - uv.getY(i)) * H)), k = (y * W + x) * 4;
+    const t = Math.min(1, Math.max(0, (dist[i] - lo) / (hi - lo))); // 0 near .. 1 far
+    const col = new THREE.Color().setHSL(0.02 + t * 0.62, 0.85, 0.55 - t * 0.1);
+    im.data[k] = col.r * 255; im.data[k + 1] = col.g * 255; im.data[k + 2] = col.b * 255; im.data[k + 3] = 255;
+  }
+  // fill pixels no vertex landed on
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const k = (y * W + x) * 4; if (!im.data[k + 3]) { const j = x > 0 ? k - 4 : y > 0 ? k - W * 4 : k; im.data[k] = im.data[j]; im.data[k + 1] = im.data[j + 1]; im.data[k + 2] = im.data[j + 2]; im.data[k + 3] = 255; } }
+  g.putImageData(im, 0, 0);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
 async function reloadBackdrop() {
   if (!bdGroup) return;
   const bd = await loadDepthBackdrop(`${WORLD}/${sceneInfoRef.files.backdrop}`, { phone: IS_PHONE, bust: Date.now() });
   scene.remove(bdGroup);
   bdGroup.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.map?.dispose(); o.material.dispose(); } });
   bdGroup = bd.group; backdropMeta = bd.meta; scene.add(bdGroup);
+  bdGroup.userData.front = bd.front; bdGroup.userData.back = bd.back;
+  if (depthViewOn) setDepthView(true);
   hf = buildHeightField(bd.front); buildNav();
   setupHero(); if (view === 'hero') updateHero(0, 0);
   for (const c of active()) placeAtStart(c);
@@ -1125,6 +1168,7 @@ async function boot() {
   if (mode === 'depth') {
     const bd = await loadDepthBackdrop(`${WORLD}/${sceneInfo.files.backdrop}`, { phone: IS_PHONE });
     backdropMeta = bd.meta; scene.add(bd.group); bdGroup = bd.group;
+    bdGroup.userData.front = bd.front; bdGroup.userData.back = bd.back;
     hf = buildHeightField(bd.front); // capybaras stand on the image's own ground
     if (Q.get('parallax') == null && L.camera.parallax > 0.15) L.camera.parallax = 0.15;
   }
@@ -1236,6 +1280,18 @@ async function boot() {
       reloadBackdrop, reloadSky,
       importLayout: l => { L = deepMerge(L, l); applyLayout(); buildSnow(); if (view === 'hero') setupHero(); return L; },
       put: putFile,
+      live: () => ({ on: live.on, left: Math.max(0, live.until - performance.now()) / 1000 }),
+      setLive: on => { live.on = on; live.until = 0; },
+      previewLive: (sec = 8) => { if (view === 'free' || view === 'top') setView('hero'); live.until = performance.now() + sec * 1000; },
+      depthView: on => setDepthView(on),
+      lookFromSide: () => {
+        if (view !== 'free') setView('free');
+        const tgt = hero.base.clone().addScaledVector(hero.dir, 6);
+        const side = new THREE.Vector3(-hero.dir.z, 0, hero.dir.x).normalize();
+        controls.target.copy(tgt);
+        camera.position.copy(tgt).addScaledVector(side, 9).addScaledVector(hero.dir, -3).add(new THREE.Vector3(0, 3, 0));
+        controls.update();
+      },
       propObject: i => propsGroup.children.find(g => g.userData.prop === i) || null,
       propGround: (x, z) => nav ? nav.height(x, z) : groundY(x, z),
       objectSize: file => loadObject(file).then(o => o?.userData.size || null),
