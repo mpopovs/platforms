@@ -46,12 +46,14 @@ async function getSession({ modelUrl = DEFAULT_DEPTH_MODEL, wasmPaths = ORT_CDN,
   if (session && sessionKey === key) return session;
   const ort = await import('onnxruntime-web/webgpu');
   ort.env.wasm.wasmPaths = wasmPaths;
+  // only real errors: its warnings go to console.error, which Next.js dev shows as an error overlay
+  ort.env.logLevel = 'error';
   ort.env.wasm.numThreads = globalThis.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 2) : 1;
   const bytes = await fetchCached(modelUrl, onProgress);
   onProgress?.('Starting the depth model…');
   let s = null, ep = 'wasm';
-  if (navigator.gpu) { try { s = await ort.InferenceSession.create(bytes, { executionProviders: ['webgpu'] }); ep = 'webgpu'; } catch (e) { console.warn('[picture] WebGPU depth failed, using WebAssembly', e); } }
-  if (!s) s = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] });
+  if (navigator.gpu) { try { s = await ort.InferenceSession.create(bytes, { executionProviders: ['webgpu'], logSeverityLevel: 3 }); ep = 'webgpu'; } catch (e) { console.warn('[picture] WebGPU depth failed, using WebAssembly', e); } }
+  if (!s) s = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'], logSeverityLevel: 3 });
   session = { ort, s, ep }; sessionKey = key;
   return session;
 }
