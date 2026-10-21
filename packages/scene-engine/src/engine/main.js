@@ -518,7 +518,7 @@ function applyWaterLook() {
   waterU.color.value.set(w.color); waterU.size.value = 1 / Math.max(0.1, w.ripple.size);
   waterU.speed.value = w.ripple.speed; waterU.strength.value = 0.04 * w.ripple.strength;
   if (waterMesh) { waterMesh.material.opacity = w.opacity; waterMesh.position.y = w.y + (backdropMeta ? 0.015 : 0); }
-  const want = Math.round((IS_PHONE ? 18 : 30) * w.steam.amount);
+  const want = (w.polygon?.length ?? 0) >= 3 ? Math.round((IS_PHONE ? 18 : 30) * w.steam.amount) : 0;
   if (want !== steamCount) buildSteam();
 }
 const waterY = () => zones.water?.y ?? 0;
@@ -541,7 +541,8 @@ function steamSprite() {
 }
 function buildSteam() {
   steamGroup.clear(); steam.length = 0;
-  steamCount = Math.round((IS_PHONE ? 18 : 30) * zones.water.steam.amount);
+  // ambient steam rises from the water; no water drawn, no ambient steam
+  steamCount = (zones.water.polygon?.length ?? 0) >= 3 ? Math.round((IS_PHONE ? 18 : 30) * zones.water.steam.amount) : 0;
   for (let i = 0; i < steamCount; i++) steamSprite();
   // steam vents placed as props: a few extra puffs each
   for (const pr of zones.props || []) if (pr.type === 'steam') for (let i = 0; i < 6; i++) { const s = steamSprite(); s.userData.vent = pr; }
@@ -948,6 +949,8 @@ async function reloadBackdrop() {
   bdGroup.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.map?.dispose(); o.material.dispose(); } });
   bdGroup = bd.group; backdropMeta = bd.meta; scene.add(bdGroup);
   hf = buildHeightField(bd.front); buildNav();
+  setupHero(); if (view === 'hero') updateHero(0, 0);
+  for (const c of active()) placeAtStart(c);
 }
 async function reloadSky() {
   if (!sceneInfoRef.files.pano) return;
@@ -1054,7 +1057,8 @@ async function boot() {
     if (Q.get('parallax') == null && L.camera.parallax > 0.15) L.camera.parallax = 0.15;
   }
   setupHero();
-  setView(Q.get('camera') === 'orbit' || L.camera.mode === 'orbit' ? 'free' : 'hero');
+  // a 2.5D picture only works from its own camera: always start there
+  setView(Q.get('camera') === 'orbit' || (L.camera.mode === 'orbit' && mode !== 'depth') ? 'free' : 'hero');
   if (mode === 'splat') {
     const set = pickSplatSet(sceneInfo.files);
     if (sceneInfo.files.splats?.['100k'] && !set.includes(sceneInfo.files.splats['100k'])) await loadSplats([sceneInfo.files.splats['100k']]);
@@ -1160,6 +1164,8 @@ async function boot() {
       reloadBackdrop, reloadSky,
       importLayout: l => { L = deepMerge(L, l); applyLayout(); buildSnow(); if (view === 'hero') setupHero(); return L; },
       put: putFile,
+      depth: { modelUrl: opts.depthModelUrl, wasmPaths: opts.ortWasmPaths },
+      startHint: sceneInfo.start || null,
       container,
       save: async () => {
         const a = await putJSON('zones.json', zones);

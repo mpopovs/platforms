@@ -10,6 +10,7 @@ import * as THREE from 'three/webgpu';
 import { polyContains, polyCentroid } from './nav.js';
 import { encodeGray16, decodePNG } from './png16.js';
 import { STEP_TYPES } from './story.js';
+import { DEFAULT_FIT } from './picture.js';
 
 const COLORS = { water: 0x38c8ff, walk: 0x5dff86, terrace: 0xffc94a, blocked: 0xff4f5e, start: 0xffffff, rest: 0xffe066, entry: 0x38c8ff, route: 0xff6fd8, prop: 0xff9a3c, capy: 0xffe066 };
 const BEHAVIOUR = [['walk', 'Walk around'], ['swim', 'Swim'], ['soak', 'Soak (sit in water)'], ['rest', 'Rest / graze'], ['nap', 'Nap'], ['surprise', 'Surprise move'], ['route', 'Walk a route']];
@@ -27,7 +28,7 @@ export function initEditor(ctx) {
   const { scene, camera, renderer, controls } = ctx;
   const L = ctx.layout();
   let zones = ctx.getZones();
-  let tab = 'draw', tool = 'select', drawKind = null, spotType = null, propType = null;
+  let tab = ctx.startHint === 'picture' && ctx.backdrop !== 'depth' ? 'files' : 'draw', tool = 'select', drawKind = null, spotType = null, propType = null;
   let draft = [], sel = null, drag = null, capySel = null;
   const undo = [];
   let story = ctx.getStory();
@@ -739,7 +740,65 @@ export function initEditor(ctx) {
         n('Scale', 'scale', 0.001, 1000, 0.01), n('Turn (°)', 'rotY', -180, 180, 1), n('Lift (m)', 'y', -50, 50, 0.05),
         n('Shift X (m)', 'x', -100, 100, 0.1), n('Shift Z (m)', 'z', -100, 100, 0.1));
     }
-    return [heading('Environment'), card];
+    return [heading('Environment'), card, ...pictureSection(env)];
+  }
+  // ---------- picture -> 2.5D (depth made here in the browser)
+  let building = false;
+  const depthOpts = () => ({ modelUrl: ctx.depth?.modelUrl || undefined, wasmPaths: ctx.depth?.wasmPaths || undefined, onProgress: m => msg(m) });
+  async function putAll(files) { let n = 0; for (const [name, blob] of Object.entries(files)) { msg(`Saving ${++n}/${Object.keys(files).length}…`); await ctx.put(name, blob, blob.type || 'application/octet-stream'); } }
+  function pictureSection(env) {
+    const start = ctx.startHint === 'picture' && env.mode !== 'depth';
+    const out = [heading('2.5D from a picture')];
+    out.push(h('div', { class: 'card', style: start ? 'border-color:#5b8fc0;box-shadow:0 0 0 2px rgba(91,143,192,.35)' : '' },
+      h('div', { class: 'muted' }, start
+        ? 'Start here: pick a picture (JPG/PNG, landscape works best). Its depth is worked out right here in the browser, the picture is split into a front layer and a filled-in background, and the scene becomes a 2.5D world with a little parallax. Takes ~30 s – 2 min; the depth model (~100 MB) downloads once.'
+        : 'Turn a picture into a 2.5D world: depth is made here in the browser (no server, no Python). The ground at the bottom of the picture becomes the floor models walk on.'),
+      row(fileInput(env.mode === 'depth' ? 'New picture…' : 'Make from a picture…', 'image/jpeg,image/png,image/webp', f => {
+        if (building) return;
+        if (!start && !confirm(env.mode === 'depth' ? 'Replace the picture and its depth? Your changes are saved first and the editor reloads.' : 'Switch this scene to a 2.5D picture world? Your changes are saved first and the editor reloads.')) return;
+        busy('Reading the picture', async () => {
+          building = true;
+          try {
+            const { pictureToBackdrop } = await import('./picture.js');
+            const res = await pictureToBackdrop(f, DEFAULT_FIT, depthOpts());
+            await putAll(res.files);
+            await ctx.updateSceneFiles({ files: { backdrop: 'backdrop/backdrop.json', environment: null, splats: null, collider: null }, top: { environment: null, start: null } }, { reload: true });
+            return res.how === 'ground' ? 'Done. Reloading…' : 'Done (no clear ground at the bottom: used near/far instead). Reloading…';
+          } finally { building = false; }
+        });
+      }))));
+    if (env.mode === 'depth' && ctx.files.backdropDir) {
+      const card = h('div', { class: 'card' }, h('div', { class: 'muted' }, 'Loading depth settings…'));
+      out.push(card);
+      fetchBlob(ctx.files.backdropDir + 'backdrop.json').then(b => b.text()).then(t => {
+        const meta = JSON.parse(t), fit = { ...DEFAULT_FIT, ...(meta.fit || {}), vfov: meta.camera.vfov, pitch: meta.camera.pitch, height: meta.camera.position[1] };
+        card.textContent = '';
+        if (!meta.disparity) { card.append(h('div', { class: 'muted' }, 'This backdrop was made with the world tools. To adjust its depth here, make it again from a picture.')); return; }
+        const n = (label, key, min, max, step) => numberCtl(label, () => fit[key], v => { if (v != null) fit[key] = v; }, min, max, step);
+        const chk = h('input', { type: 'checkbox' }); chk.checked = fit.ground !== false; chk.onchange = () => { fit.ground = chk.checked; };
+        card.append(h('b', {}, 'Adjust the depth'),
+          h('div', { class: 'muted' }, `How the depth was scaled: ${meta.fit?.how === 'ground' ? 'from the ground at the bottom of the picture' : 'nearest/farthest distance'}. Too flat or too deep? Change these and rebuild (fast, no model run).`),
+          n('Lens (vertical °)', 'vfov', 10, 100, 1), n('Camera height (m)', 'height', 0.1, 50, 0.05), n('Camera tilt (°)', 'pitch', -60, 30, 0.5),
+          n('Farthest (m)', 'far', 5, 65, 1),
+          h('label', { class: 'ctl c2' }, h('span', {}, 'Ground at bottom'), h('span', {}, chk)),
+          n('Nearest (m, no ground)', 'near', 0.3, 30, 0.1),
+          h('div', { class: 'muted' }, 'Smaller lens angle = flatter, farther picture. Taller camera = bigger, deeper world.'),
+          row(btn('Rebuild depth', () => {
+            if (building) return;
+            busy('Rebuilding', async () => {
+              building = true;
+              try {
+                const { refitBackdrop } = await import('./picture.js');
+                const res = await refitBackdrop(name => fetchBlob(ctx.files.backdropDir + name), meta, fit, depthOpts());
+                await putAll(Object.fromEntries(Object.entries(res.files).map(([k, v]) => [ctx.files.backdropDir + k.replace(/^backdrop\//, ''), v])));
+                await ctx.reloadBackdrop(); redraw();
+                return 'Depth rebuilt. Save the scene to keep any other changes.';
+              } finally { building = false; }
+            });
+          })));
+      }).catch(err => { card.textContent = 'Could not read the depth settings: ' + err.message; });
+    }
+    return out;
   }
   // one stored file: download it, replace it (same name, so references stay), or add it
   function fileCard(title, note, name, accept, { upload, remove, extra = [] } = {}) {

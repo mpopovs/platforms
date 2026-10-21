@@ -19,6 +19,10 @@ export interface MountOptions {
   params?: Record<string, string | number | boolean | undefined>;
   /** Save a file of the scene (editor Files tab and Save). Returns a time label. */
   saveFile?: (name: string, body: Blob | string, type: string) => Promise<string>;
+  /** Depth model for "2.5D from a picture" (ONNX, Depth Anything V2 Small); defaults to Hugging Face */
+  depthModelUrl?: string;
+  /** Where onnxruntime-web loads its .wasm/.mjs files from; defaults to jsDelivr */
+  ortWasmPaths?: string;
 }
 
 export interface SceneHandle {

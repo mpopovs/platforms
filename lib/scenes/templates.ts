@@ -5,6 +5,8 @@
  * - fashion-show: a lit catwalk (procedural stage), Model 1-4 (capsules until
  *   they get GLBs) and a story: each walks the catwalk, poses and walks back
  *   while several camera operators film it (Director camera) with handheld sway.
+ * - picture: start from one picture; the editor makes it a 2.5D world (depth
+ *   worked out in the browser) with a calm, gently moving camera.
  * - stage: an empty lit stage for any story.
  * - hot-spring: nothing; upload the world folder.
  */
@@ -12,6 +14,7 @@ import { emptyManifest, type SceneManifest } from '@claypixels/scene-engine/mani
 
 export const TEMPLATES = [
   { id: 'fashion-show', name: 'Fashion show', note: 'Catwalk, 4 models, a ready story' },
+  { id: 'picture', name: 'From a picture (2.5D)', note: 'One picture becomes a 2.5D world' },
   { id: 'stage', name: 'Empty stage', note: 'Lit stage for any story' },
   { id: 'hot-spring', name: 'From a world folder', note: 'Upload a Marble / hot spring world' }
 ] as const;
@@ -99,9 +102,29 @@ function emptyStage(): Record<string, unknown> {
   };
 }
 
+function pictureScene(): Record<string, unknown> {
+  // a lit stage stands in until the picture is made into a 2.5D world (Files tab opens first)
+  return {
+    'scene.json': { caption: 'Picture scene', environment: 'stage', stage: { runwayLength: 0, wallDistance: 8, spotlights: 3 }, start: 'picture' },
+    'layout.json': {
+      capy: { height: 1.6, speed: 1, facing: 0, count: 8, personal: 0.6 },
+      look: { exposure: 1, fog: '#cdd6e0', fogNear: 40, fogFar: 120, snow: 0, steam: 0, warmIntensity: 0 },
+      camera: { mode: 'hero', fov: 40, parallax: 0.08, drift: 0.02, handheld: { amount: 0.25, rotate: 0.25, speed: 0.6, breathe: 0.04, breathePeriod: 18 } }
+    },
+    'zones.json': {
+      water: { polygon: [], steam: { amount: 0 } },
+      walk: [], blocked: [], props: [], spots: [], routes: [],
+      behaviour: { walk: 2, swim: 0, soak: 0, rest: 3, nap: 0, surprise: 1, route: 0 }
+    },
+    'cast.json': { characters: [] },
+    'story.json': { autoplay: true, loop: true, startDelay: 1, steps: [] }
+  };
+}
+
 export function templateManifest(id: string): SceneManifest {
   const m = emptyManifest();
   if (id === 'fashion-show') m.json = fashionShow();
   else if (id === 'stage') m.json = emptyStage();
+  else if (id === 'picture') m.json = pictureScene();
   return m;
 }
