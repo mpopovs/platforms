@@ -149,3 +149,23 @@ behaviour). *Start next step together* lets two things happen at once.
   the Files tab swaps single layers; **Publish** freezes the working copy as
   the next version. Players of `/scene/<id>` load a fixed version, so a new
   publish never mixes files for someone already watching.
+
+## 2.5D scene from a picture
+
+New scene → **From a picture (2.5D)** (or, in any scene, Files → *2.5D from a picture*). Pick a JPG/PNG:
+
+1. The depth is worked out **in the browser** with Depth Anything V2 Small (Apache-2.0, ~100 MB, downloaded once and kept in the browser cache). Graphics card (WebGPU) when available, otherwise the processor: ~15 s – 2 min.
+2. The bottom of the picture is taken as ground under a camera 1.6 m high, 40° lens, tilted 5° down. That sets the real-world scale, so models walk on the picture's ground.
+3. The picture is split into a front layer, cut at depth edges, and a filled-in background layer, so the small camera movement never shows holes.
+
+Files → **Adjust the depth** changes lens, camera height, tilt and farthest distance, then rebuilds in a second (no model run). Each layer can still be downloaded, retouched and uploaded again.
+
+Optional: host the model yourself (e.g. on the Hetzner bucket) and set `NEXT_PUBLIC_DEPTH_MODEL_URL` to its URL. Without it, the model comes from Hugging Face and the runtime from jsDelivr.
+
+## Objects
+
+Editor → **Objects**: upload any GLB (it lands in the middle of the view), then move / turn / size it with the handles (W / E / R) or exact numbers (X, Z, lift, turn, tilt, size). Objects can be duplicated, dropped to the ground, and marked **Blocks walking** so models go around them. Stored in `zones.json` → `props` as `{ type: "model", file, x, z, y, rot, rx, rz, scale, size, blocks }`.
+
+## Snow
+
+Look → Snowfall: amount, fall speed, flake size, wind (m/s), wind direction and gusts. Flakes fill a box that travels with the camera, so the snow never runs out.

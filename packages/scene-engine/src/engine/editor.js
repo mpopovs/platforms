@@ -2,11 +2,13 @@
 //   Draw     walk areas, terraces, blocked areas, spots (start / rest / water entry), layers list
 //   Water    edge, level, colour, opacity, ripples, steam, how deep capybaras swim
 //   Capys    on/off, size, speed, start spot, route, behaviour mix, drag them, send them somewhere
-//   Routes   walking routes they follow; props (mandarins, lanterns, steam vents)
+//   Routes   walking routes they follow
+//   Objects  uploaded GLB objects and small props: move / turn / size with handles
 //   Look     camera parallax, light, snow, fog, colour grade
 // One Save writes zones.json (scene content) and layout.json (look) into the world folder.
 
 import * as THREE from 'three/webgpu';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { polyContains, polyCentroid } from './nav.js';
 import { encodeGray16, decodePNG } from './png16.js';
 import { STEP_TYPES } from './story.js';
@@ -40,7 +42,7 @@ export function initEditor(ctx) {
   #ed{position:fixed;left:12px;top:12px;width:330px;max-height:calc(100vh - 24px);display:flex;flex-direction:column;background:rgba(20,26,34,.92);color:#e8eef5;
       font:12.5px/1.35 system-ui,sans-serif;border-radius:12px;z-index:20;box-shadow:0 6px 24px rgba(0,0,0,.3)}
   #ed .tabs{display:flex;gap:2px;padding:8px 8px 0}
-  #ed .tabs button{flex:1;background:transparent;border:0;border-bottom:2px solid transparent;border-radius:0;padding:6px 2px;color:#9fb2c6;font-weight:600}
+  #ed .tabs button{flex:1 1 auto;min-width:0;background:transparent;border:0;border-bottom:2px solid transparent;border-radius:0;padding:6px 1px;font-size:11.5px;color:#9fb2c6;font-weight:600}
   #ed .tabs button.on{color:#fff;border-bottom-color:#5b8fc0;background:transparent}
   #ed .body{overflow:auto;padding:4px 12px 8px;flex:1}
   #ed .foot{border-top:1px solid #2f3b4a;padding:8px 12px;display:flex;flex-direction:column;gap:6px}
@@ -70,7 +72,7 @@ export function initEditor(ctx) {
   document.head.appendChild(css);
   const disposers = [() => css.remove()];
   const el = document.createElement('div'); el.id = 'ed';
-  el.innerHTML = `<div class="tabs">${[['draw', 'Draw'], ['water', 'Water'], ['capys', 'Models'], ['routes', 'Routes'], ['story', 'Story'], ['look', 'Look'], ['files', 'Files']].map(([k, t]) => `<button data-tab="${k}">${t}</button>`).join('')}</div>
+  el.innerHTML = `<div class="tabs">${[['draw', 'Draw'], ['water', 'Water'], ['capys', 'Models'], ['routes', 'Routes'], ['objects', 'Objects'], ['story', 'Story'], ['look', 'Look'], ['files', 'Files']].map(([k, t]) => `<button data-tab="${k}">${t}</button>`).join('')}</div>
     <div class="body"></div>
     <div class="foot"><div class="hint"></div><div class="row"><button data-a="undo">Undo</button><button data-a="save" class="save">Save scene</button></div><div class="msg"></div></div>`;
   (ctx.container || document.body).appendChild(el);
@@ -123,6 +125,7 @@ export function initEditor(ctx) {
     if (scope === 'look' || scope === 'snow' || scope === 'camera') ctx.applyLook(scope);
     else ctx.setZones(structuredClone(zones), scope);
     redraw(); msg('Unsaved changes');
+    if (scope === 'props' || scope === 'nav' || scope === 'all') queueMicrotask(attachGizmo); // objects were rebuilt
   }
 
   function updateBanner() {
@@ -153,7 +156,8 @@ export function initEditor(ctx) {
     el.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
     el.querySelector('.hint').textContent = HINT[tool] || '';
     body.innerHTML = '';
-    ({ draw: tabDraw, water: tabWater, capys: tabCapys, routes: tabRoutes, story: tabStory, look: tabLook, files: tabFiles })[tab]();
+    ({ draw: tabDraw, water: tabWater, capys: tabCapys, routes: tabRoutes, objects: tabObjects, story: tabStory, look: tabLook, files: tabFiles })[tab]();
+    queueMicrotask(attachGizmo);
   }
   el.querySelector('.tabs').addEventListener('click', e => { const b = e.target.closest('[data-tab]'); if (b) { tab = b.dataset.tab; refresh(); } });
   el.querySelector('[data-a=undo]').onclick = doUndo;
@@ -599,14 +603,88 @@ export function initEditor(ctx) {
     (zones.routes || []).forEach((r, i) => rl.append(h('div', { class: 'item' + (sel?.kind === 'route' && sel.i === i ? ' on' : ''), onclick: () => { sel = { kind: 'route', list: 'routes', i }; tool = 'select'; refresh(); redraw(); } }, h('span', { class: 'dot', style: 'background:#ff6fd8' }), h('span', { class: 'grow' }, r.name), h('span', { class: 'muted' }, `${r.points.length} pts`))));
     body.append(rl);
     if (sel?.kind === 'route' && zones.routes[sel.i]) body.append(h('div', { class: 'card' }, ...routeCtls(zones.routes[sel.i]), row(btn('Delete route', deleteSel, { cls: 'warn' }))));
-    body.append(heading('Props'),
-      row(btn('Mandarins', () => setTool('prop', { propType: 'mandarins' }), { on: tool === 'prop' && propType === 'mandarins', dot: 0xff8a1f }),
-        btn('Stone lantern', () => setTool('prop', { propType: 'lantern' }), { on: tool === 'prop' && propType === 'lantern', dot: 0xb0aba3 }),
-        btn('Steam vent', () => setTool('prop', { propType: 'steam' }), { on: tool === 'prop' && propType === 'steam', dot: 0xffffff })));
+    body.append(h('div', { class: 'muted', style: 'margin-top:10px' }, 'Props and 3D objects are in the Objects tab.'));
+  }
+
+  // ============================================================ objects (zones.props): GLBs + built-in props
+  const PROP_NAMES = { mandarins: 'Mandarins', lantern: 'Stone lantern', steam: 'Steam vent' };
+  const propLabel = (p, i) => p.type === 'model' ? (p.name || p.file?.split('/').pop().replace(/\.glb$/i, '') || 'Object') : `${PROP_NAMES[p.type] || p.type} ${i + 1}`;
+  let gizmoMode = 'translate';
+  const tc = new TransformControls(camera, renderer.domElement);
+  tc.setSize(0.9);
+  const tcHelper = tc.getHelper(); scene.add(tcHelper);
+  disposers.push(() => { tc.detach(); scene.remove(tcHelper); tc.dispose(); });
+  let tcBefore = null;
+  tc.addEventListener('dragging-changed', ev => {
+    controls.enabled = !ev.value && ctx.view() !== 'hero';
+    if (ev.value) { snapshot(); tcBefore = true; return; }
+    if (tcBefore) { tcBefore = null; const p = zones.props?.[sel?.i]; apply(p?.blocks ? 'nav' : 'props'); attachGizmo(); refresh(); }
+  });
+  tc.addEventListener('objectChange', () => {
+    const p = zones.props?.[sel?.i], o = tc.object; if (!p || !o) return;
+    if (gizmoMode === 'scale') { const s = Math.max(0.01, (o.scale.x + o.scale.y + o.scale.z) / 3); o.scale.setScalar(s); p.scale = +s.toFixed(3); }
+    p.x = +o.position.x.toFixed(3); p.z = +o.position.z.toFixed(3);
+    p.y = +(o.position.y - ctx.propGround(p.x, p.z)).toFixed(3); if (Math.abs(p.y) < 0.002) delete p.y;
+    const deg = THREE.MathUtils.radToDeg;
+    p.rot = +deg(o.rotation.y).toFixed(1); p.rx = +deg(o.rotation.x).toFixed(1); p.rz = +deg(o.rotation.z).toFixed(1);
+    if (!p.rx) delete p.rx; if (!p.rz) delete p.rz;
+    redraw(); msg('Unsaved changes');
+  });
+  function attachGizmo() {
+    const show = tab === 'objects' && sel?.kind === 'prop' && zones.props?.[sel.i];
+    const o = show ? ctx.propObject(sel.i) : null;
+    if (o) { o.rotation.order = 'YXZ'; tc.attach(o); tc.setMode(gizmoMode); tc.setSpace(gizmoMode === 'scale' ? 'local' : 'world'); tc.showY = true; }
+    else tc.detach();
+  }
+  const selectProp = i => { sel = i == null ? null : { kind: 'prop', list: 'props', i }; tool = 'select'; refresh(); redraw(); };
+  async function addObject(f) {
+    const name = `objects/${slug(f.name)}.glb`;
+    await ctx.put(name, f, 'model/gltf-binary');
+    const size = await ctx.objectSize(name);
+    if (!size) throw new Error('could not read that GLB');
+    // drop it on the ground in the middle of the view
+    const g = groundPick({ clientX: innerWidth / 2, clientY: innerHeight * 0.62 }) || [0, 0];
+    snapshot(); zones.props = zones.props || [];
+    zones.props.push({ type: 'model', file: name, name: f.name.replace(/\.glb$/i, ''), x: g[0], z: g[1], rot: 0, scale: 1, size });
+    apply('props'); selectProp(zones.props.length - 1);
+    const big = Math.max(...size);
+    return big > 20 ? `Added ${f.name}: it is ${big.toFixed(0)} m big, use Size to shrink it. Save to keep it.` : `Added ${f.name}. Drag the arrows to move it. Save to keep it.`;
+  }
+  function tabObjects() {
+    body.append(...viewRow(),
+      heading('Add'),
+      h('div', { class: 'card' }, h('div', { class: 'muted' }, 'Upload any GLB (a bench, a tree, a lamp, a sign). It lands in the middle of the view; then move, turn and size it with the handles.'),
+        row(fileInput('Upload 3D object (GLB)…', '.glb,model/gltf-binary', f => busy('Uploading ' + f.name, () => addObject(f))))),
+      row(...Object.entries(PROP_NAMES).map(([k, t]) => btn(t, () => setTool('prop', { propType: k }), { on: tool === 'prop' && propType === k, cls: 'mini' }))));
+    const list = zones.props || [];
+    body.append(heading(`In the scene (${list.length})`));
     const pl = h('div', { class: 'list' });
-    (zones.props || []).forEach((p, i) => pl.append(h('div', { class: 'item' + (sel?.kind === 'prop' && sel.i === i ? ' on' : ''), onclick: () => { sel = { kind: 'prop', list: 'props', i }; tool = 'select'; refresh(); redraw(); } }, h('span', { class: 'dot', style: 'background:#ff9a3c' }), h('span', { class: 'grow' }, `${p.type} ${i + 1}`))));
+    list.forEach((p, i) => pl.append(h('div', { class: 'item' + (sel?.kind === 'prop' && sel.i === i ? ' on' : ''), onclick: () => selectProp(i) },
+      h('span', { class: 'dot', style: `background:${p.type === 'model' ? '#5b8fc0' : '#ff9a3c'}` }), h('span', { class: 'grow' }, propLabel(p, i)),
+      p.blocks ? h('span', { class: 'muted' }, 'blocks') : '')));
+    if (!list.length) pl.append(h('div', { class: 'muted' }, 'Nothing yet. Click an object in the scene to select it.'));
     body.append(pl);
-    if (sel?.kind === 'prop' && zones.props[sel.i]) body.append(h('div', { class: 'card' }, ...propCtls(zones.props[sel.i]), row(btn('Delete prop', deleteSel, { cls: 'warn' }))));
+    const p = sel?.kind === 'prop' ? list[sel.i] : null;
+    if (p) {
+      const num = (label, get, set, min, max, step) => numberCtl(label, get, v => { snapshot(); set(v); apply(p.blocks ? 'nav' : 'props'); attachGizmo(); }, min, max, step);
+      const mode = (m, label, key) => btn(`${label} (${key})`, () => { gizmoMode = m; attachGizmo(); }, { on: gizmoMode === m });
+      body.append(h('div', { class: 'card' },
+        p.type === 'model' ? textCtl('Name', () => p.name, v => { p.name = v; }) : h('b', {}, propLabel(p, sel.i)),
+        row(mode('translate', 'Move', 'W'), mode('rotate', 'Turn', 'E'), mode('scale', 'Size', 'R')),
+        h('div', { class: 'muted' }, 'Drag the handles in the scene. Arrows move along one direction, squares in a plane.'),
+        num('X (m)', () => p.x, v => { p.x = v ?? 0; }, -500, 500, 0.05),
+        num('Z (m)', () => p.z, v => { p.z = v ?? 0; }, -500, 500, 0.05),
+        num('Lift (m)', () => p.y || 0, v => { p.y = v || 0; }, -50, 50, 0.01),
+        num('Turn (°)', () => p.rot || 0, v => { p.rot = v ?? 0; }, -360, 360, 1),
+        num('Tilt fwd (°)', () => p.rx || 0, v => { p.rx = v || 0; }, -180, 180, 1),
+        num('Tilt side (°)', () => p.rz || 0, v => { p.rz = v || 0; }, -180, 180, 1),
+        num('Size', () => p.scale || 1, v => { p.scale = Math.max(0.001, v ?? 1); }, 0.001, 1000, 0.05),
+        p.size ? h('div', { class: 'muted' }, `Real size: ${p.size.map(v => (v * (p.scale || 1)).toFixed(2)).join(' × ')} m (W × H × D)`) : '',
+        checkCtl('Blocks walking', () => p.blocks, v => { p.blocks = v || undefined; if (v && !p.size) p.size = [0.5, 0.5, 0.5]; }, 'nav'),
+        row(btn('Drop to ground', () => { snapshot(); delete p.y; delete p.rx; delete p.rz; apply(p.blocks ? 'nav' : 'props'); attachGizmo(); }),
+          btn('Duplicate', () => { snapshot(); const c = structuredClone(p); c.x += 0.6; zones.props.push(c); apply(c.blocks ? 'nav' : 'props'); selectProp(zones.props.length - 1); }),
+          btn('Delete', () => { tc.detach(); deleteSel(); }, { cls: 'warn' }))));
+    }
   }
 
   function tabLook() {
@@ -650,7 +728,11 @@ export function initEditor(ctx) {
       slider('Window glow', () => k.warmIntensity ?? 6, v => { k.warmIntensity = v; }, 0, 20, 0.5, 'look'),
       heading('Snowfall'),
       slider('Amount', () => k.snow, v => { k.snow = v; }, 0, 3, 0.05, 'snow'),
-      slider('Speed', () => k.snowSpeed ?? 1, v => { k.snowSpeed = v; }, 0.1, 3, 0.05, 'look'),
+      slider('Fall speed', () => k.snowSpeed ?? 1, v => { k.snowSpeed = v; }, 0.1, 3, 0.05, 'look'),
+      slider('Flake size', () => k.snowSize ?? 1, v => { k.snowSize = v; }, 0.3, 3, 0.05, 'look'),
+      slider('Wind (m/s)', () => k.wind ?? 0.3, v => { k.wind = v; }, 0, 6, 0.05, 'look'),
+      slider('Wind direction (°)', () => k.windDir ?? 0, v => { k.windDir = v; }, -180, 180, 5, 'look'),
+      slider('Gusts', () => k.gusts ?? 0.4, v => { k.gusts = v; }, 0, 1, 0.05, 'look'),
       heading('Fog'),
       colorCtl('Colour', () => k.fog, v => { k.fog = v; }, 'look'),
       slider('Starts at (m)', () => k.fogNear, v => { k.fogNear = v; }, 0, 60, 0.5, 'look'),
@@ -998,6 +1080,11 @@ export function initEditor(ctx) {
   const dom = renderer.domElement;
   dom.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
+    if (tc.object && (tc.dragging || tc.axis)) return; // using the move/turn/size handles
+    if (tool === 'select' && (tab === 'objects' || !hitHandle(e))) {
+      const i = ctx.propsAt((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+      if (i != null) { tab = 'objects'; selectProp(i); return; }
+    }
     if (tool === 'select') {
       const hd = hitHandle(e);
       if (hd) {
@@ -1033,7 +1120,7 @@ export function initEditor(ctx) {
     } else if (tool === 'prop') {
       const g = groundPick(e); if (!g) return;
       snapshot(); zones.props = zones.props || []; zones.props.push({ type: propType, x: g[0], z: g[1], rot: 0, scale: 1 });
-      sel = { kind: 'prop', list: 'props', i: zones.props.length - 1 }; tool = 'select'; apply('props'); refresh();
+      tool = 'select'; apply('props'); tab = 'objects'; selectProp(zones.props.length - 1);
     } else if (tool === 'send') {
       const g = groundPick(e); if (!g || !capySel) return;
       ctx.sendCapy(capySel, g[0], g[1]); tool = 'select'; refresh();
@@ -1059,6 +1146,10 @@ export function initEditor(ctx) {
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
     if (e.key === 'Enter' && (tool === 'draw' || tool === 'route')) finishDraw();
     if (e.key === 'Escape') cancelTool();
+    if (tab === 'objects' && sel?.kind === 'prop' && !e.metaKey && !e.ctrlKey) {
+      const m = { w: 'translate', e: 'rotate', r: 'scale' }[e.key.toLowerCase()];
+      if (m) { gizmoMode = m; attachGizmo(); refresh(); }
+    }
     if ((e.key === 'Backspace' || e.key === 'Delete') && sel) { e.preventDefault(); deleteSel(); }
     if (e.key === 'z' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); doUndo(); }
     if (e.key === 's' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(); }

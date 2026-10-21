@@ -480,7 +480,8 @@ function buildNav() {
   // without drawn walk areas: flat-ish ground the hero camera can see, not right at the lens
   const fallbackWalk = (x, z, g) => Math.abs(g) < L.walk.maxSlope && inHeroView(x, g, z) &&
     Math.hypot(x - hero.base.x, z - hero.base.z) > L.walk.minDist;
-  nav = new Nav(zones, groundY, { fallbackWalk });
+  const fp = objectFootprints();
+  nav = new Nav(fp.length ? { ...zones, blocked: [...(zones.blocked || []), ...fp] } : zones, groundY, { fallbackWalk });
   for (const c of capys) { c.path = null; c.state = 'idle'; }
   buildWater(); buildProps(); if (navViz) showGrid(true);
 }
@@ -562,24 +563,61 @@ function updateSteam(dt) {
     s.material.opacity = Math.sin(u.life * Math.PI) * st.opacity;
   }
 }
+// Snowfall: soft round flakes in a box that travels with the camera (so it never
+// runs out), each with its own size, weight and flutter; wind with slow gusts.
+// layout.json look: snow (amount 0..3), snowSpeed, snowSize, wind (m/s),
+// windDir (degrees, 0 = to the right of the hero view), gusts (0..1).
 let snow = null; const snowData = [];
+const snowTex = softTexture('rgba(255,255,255,1)');
+const SNOW_BOX = [11, 5.5, 11];
 function buildSnow() {
-  if (snow) { scene.remove(snow); snow.geometry.dispose(); }
-  const n = Math.round((IS_PHONE ? 700 : 1800) * L.look.snow);
+  if (snow) { scene.remove(snow); snow.geometry.dispose(); snow.material.dispose(); }
+  const n = Math.round((IS_PHONE ? 700 : 1800) * (L.look.snow || 0));
   if (!n) { snow = null; return; }
-  snow = new THREE.InstancedMesh(new THREE.SphereGeometry(0.012, 5, 4), new THREE.MeshBasicNodeMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false }), n);
+  snow = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicNodeMaterial({ map: snowTex, color: 0xffffff, transparent: true, opacity: 0.95, depthWrite: false, fog: true }), n);
   snow.frustumCulled = false; snow.renderOrder = 9; snowData.length = 0;
-  for (let i = 0; i < n; i++) snowData.push({ x: (Math.random() - 0.5) * 18, y: Math.random() * 8, z: -Math.random() * 16, s: 0.25 + Math.random() * 0.35, p: Math.random() * 6 });
+  const c = snowCentre();
+  for (let i = 0; i < n; i++) {
+    const k = Math.random();
+    snowData.push({
+      p: new THREE.Vector3(c.x + (Math.random() * 2 - 1) * SNOW_BOX[0], c.y + (Math.random() * 2 - 1) * SNOW_BOX[1], c.z + (Math.random() * 2 - 1) * SNOW_BOX[2]),
+      k, size: 0.022 + k * k * 0.05,          // bigger flakes are rarer
+      fall: 0.45 + (1 - k) * 0.35 + Math.random() * 0.25, // big flakes float slower
+      f1: 0.6 + Math.random() * 1.4, f2: 0.5 + Math.random() * 1.2, ph: Math.random() * 100, sway: 0.15 + Math.random() * 0.35
+    });
+  }
   scene.add(snow);
+}
+const _sc = new THREE.Vector3(), _sf = new THREE.Vector3(), _ss = new THREE.Vector3();
+function snowCentre() {
+  camera.getWorldDirection(_sf); _sf.y = 0; if (_sf.lengthSq() < 1e-6) _sf.set(0, 0, -1); _sf.normalize();
+  return _sc.copy(camera.position).addScaledVector(_sf, SNOW_BOX[2] * 0.7).add(new THREE.Vector3(0, 1.5, 0));
 }
 const _m = new THREE.Matrix4();
 function updateSnow(dt, t) {
   if (!snow) return;
-  const sp = L.look.snowSpeed ?? 1;
+  const k = L.look, sp = k.snowSpeed ?? 1, size = k.snowSize ?? 1, gustAmt = k.gusts ?? 0.4;
+  const dir = THREE.MathUtils.degToRad((k.windDir ?? 0) + (hero.yaw || 0));
+  // gusts: slow swell and fade of the wind, never below calm
+  const g = Math.max(0, 1 + gustAmt * (Math.sin(t * 0.31) + 0.6 * Math.sin(t * 0.77 + 1.7) + 0.4 * Math.sin(t * 1.9 + 4.2)) * 0.6);
+  const wind = (k.wind ?? 0.3) * g, wx = Math.cos(dir) * wind, wz = -Math.sin(dir) * wind;
+  const c = snowCentre(), B = SNOW_BOX;
   for (let i = 0; i < snowData.length; i++) {
-    const d = snowData[i]; d.y -= d.s * dt * sp;
-    if (d.y < -0.5) { d.y = 8; d.x = (Math.random() - 0.5) * 18; d.z = -Math.random() * 16; }
-    _m.makeTranslation(hero.base.x + d.x + Math.sin(t * 0.7 + d.p) * 0.3, d.y, hero.base.z + d.z + Math.cos(t * 0.5 + d.p) * 0.2);
+    const d = snowData[i], p = d.p, light = 0.6 + d.k * 0.8; // light flakes follow the wind more
+    p.x += (wx * light + Math.sin(t * d.f1 + d.ph) * d.sway) * dt;
+    p.z += (wz * light + Math.cos(t * d.f2 + d.ph) * d.sway) * dt;
+    p.y -= d.fall * sp * dt * (1 - 0.15 * gustAmt * (g - 1)); // a gust lifts them a little
+    // wrap inside the box around the camera
+    for (let a = 0; a < 3; a++) {
+      const lo = c.getComponent(a) - B[a], span = B[a] * 2;
+      let v = p.getComponent(a);
+      if (v < lo || v > lo + span) { v = lo + ((((v - lo) % span) + span) % span); p.setComponent(a, v); }
+    }
+    // shrink to nothing near the box walls, so wrapping is never seen
+    let e = 1;
+    for (let a = 0; a < 3; a++) e = Math.min(e, (B[a] - Math.abs(p.getComponent(a) - c.getComponent(a))) / 1.5);
+    const s = d.size * size * Math.max(0, Math.min(1, e));
+    _m.compose(p, camera.quaternion, _ss.set(s, s, s));
     snow.setMatrixAt(i, _m);
   }
   snow.instanceMatrix.needsUpdate = true;
@@ -601,6 +639,7 @@ function updateRipples(dt) {
 
 // ---------------------------------------------------------------- props (mandarins, lanterns, steam vents)
 const propsGroup = new THREE.Group(); scene.add(propsGroup);
+const _rc = new THREE.Raycaster();
 const propMat = {
   orange: new THREE.MeshStandardNodeMaterial({ color: 0xff8a1f, roughness: 0.55 }),
   leaf: new THREE.MeshStandardNodeMaterial({ color: 0x2f5a2a, roughness: 0.7 }),
@@ -625,17 +664,50 @@ function makeProp(pr) {
     part(new THREE.BoxGeometry(0.12, 0.09, 0.18), propMat.glow, 0.52);
     part(new THREE.ConeGeometry(0.22, 0.14, 4), propMat.stone, 0.66).rotation.y = Math.PI / 4;
     part(new THREE.ConeGeometry(0.2, 0.06, 4), propMat.snow, 0.72).rotation.y = Math.PI / 4;
+  } else if (pr.type === 'model' && pr.file) { // an uploaded GLB object
+    loadObject(pr.file).then(src => { if (src) { const m = src.clone(true); m.userData.object = true; g.add(m); } else if (EDIT) g.add(missingMarker()); });
   } else if (pr.type === 'steam') { // a marker only; the puffs come from buildSteam
     const m = new THREE.Mesh(new THREE.CircleGeometry(0.12, 16).rotateX(-Math.PI / 2), new THREE.MeshBasicNodeMaterial({ color: 0xffffff, transparent: true, opacity: EDIT ? 0.25 : 0, depthWrite: false }));
     m.position.y = 0.02; g.add(m);
   }
-  g.position.set(pr.x, nav ? nav.height(pr.x, pr.z) : groundY(pr.x, pr.z), pr.z);
-  g.rotation.y = THREE.MathUtils.degToRad(pr.rot || 0); g.scale.setScalar(pr.scale || 1);
+  g.position.set(pr.x, propGround(pr) + (pr.y || 0), pr.z);
+  g.rotation.set(THREE.MathUtils.degToRad(pr.rx || 0), THREE.MathUtils.degToRad(pr.rot || 0), THREE.MathUtils.degToRad(pr.rz || 0), 'YXZ');
+  g.scale.setScalar(pr.scale || 1);
   return g;
+}
+// ground under an object; the object's own blocked footprint must not lift it
+const propGround = pr => nav ? nav.height(pr.x, pr.z) : groundY(pr.x, pr.z);
+// uploaded objects: loaded once per file, shadows on, centred on their footprint with the base at y = 0
+const objectCache = new Map();
+function loadObject(file) {
+  if (!objectCache.has(file)) objectCache.set(file, loader.loadAsync(`${WORLD}/${file}`).then(gl => {
+    const root = gl.scene, box = new THREE.Box3().setFromObject(root), c = box.getCenter(new THREE.Vector3());
+    root.position.set(-c.x, -box.min.y, -c.z);
+    root.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+    const wrap = new THREE.Group(); wrap.add(root);
+    wrap.userData.size = box.getSize(new THREE.Vector3()).toArray().map(v => +v.toFixed(3));
+    return wrap;
+  }).catch(e => { console.warn('[scene] object', file, e); return null; }));
+  return objectCache.get(file);
+}
+function missingMarker() {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), new THREE.MeshBasicNodeMaterial({ color: 0xff4f5e, wireframe: true }));
+  m.position.y = 0.2; return m;
+}
+// footprints of objects marked "blocks walking": rotated rectangles for the nav grid
+function objectFootprints() {
+  const out = [];
+  for (const pr of zones.props || []) {
+    if (!pr.blocks) continue;
+    const [w, , d] = pr.size || [0.4, 0, 0.4], s = pr.scale || 1, a = THREE.MathUtils.degToRad(pr.rot || 0), ca = Math.cos(a), sa = Math.sin(a);
+    const hw = w * s / 2, hd = d * s / 2;
+    out.push({ name: 'object', polygon: [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(([x, z]) => [+(pr.x + x * ca + z * sa).toFixed(3), +(pr.z - x * sa + z * ca).toFixed(3)]) });
+  }
+  return out;
 }
 function buildProps() {
   propsGroup.clear();
-  for (const pr of zones.props || []) propsGroup.add(makeProp(pr));
+  (zones.props || []).forEach((pr, i) => { const g = makeProp(pr); g.userData.prop = i; propsGroup.add(g); });
   buildSteam();
 }
 
@@ -1164,6 +1236,15 @@ async function boot() {
       reloadBackdrop, reloadSky,
       importLayout: l => { L = deepMerge(L, l); applyLayout(); buildSnow(); if (view === 'hero') setupHero(); return L; },
       put: putFile,
+      propObject: i => propsGroup.children.find(g => g.userData.prop === i) || null,
+      propGround: (x, z) => nav ? nav.height(x, z) : groundY(x, z),
+      objectSize: file => loadObject(file).then(o => o?.userData.size || null),
+      propsAt: (ndcX, ndcY) => { // index of the object under the pointer
+        _rc.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+        const hit = _rc.intersectObject(propsGroup, true)[0]; let o = hit?.object;
+        while (o && o.userData.prop == null) o = o.parent;
+        return o ? o.userData.prop : null;
+      },
       depth: { modelUrl: opts.depthModelUrl, wasmPaths: opts.ortWasmPaths },
       startHint: sceneInfo.start || null,
       container,
