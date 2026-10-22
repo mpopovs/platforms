@@ -1454,6 +1454,8 @@ export function initEditor(ctx) {
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), P = new THREE.Vector3();
   function groundPick(e) {
     ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+    const onPic = ctx.view() === 'hero' && ctx.backdrop === 'depth' && ctx.pickBackdrop?.(ndc.x, ndc.y); // draw on what you see
+    if (onPic) return [+onPic[0].toFixed(3), +onPic[1].toFixed(3)];
     ray.setFromCamera(ndc, camera);
     const o = ray.ray.origin, d = ray.ray.direction; let prev = null;
     for (let t = 0.3; t < 80; t += Math.max(0.03, t * 0.012)) {

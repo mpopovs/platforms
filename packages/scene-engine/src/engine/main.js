@@ -426,10 +426,14 @@ async function loadSplats(list) {
 // ---------------------------------------------------------------- ground height field (Marble collider)
 let hf = null;
 const HF_CELL = 0.25;
+// the area the ground height field and walk grid cover; pictures reach far, so they get a wider one
+const AREA_NEAR = { x0: -16, x1: 16, z0: -26, z1: 6 }, AREA_WIDE = { x0: -40, x1: 40, z0: -64, z1: 8 };
+let AREA = AREA_NEAR, HF_TOP = 1.2;
+function wideArea(on) { AREA = on ? AREA_WIDE : AREA_NEAR; HF_TOP = on ? 2.5 : 1.2; }
 function buildHeightField(obj) {
   // rasterise the collider's triangles; per cell keep the highest surface below 1.2 m
   obj.updateWorldMatrix(true, true);
-  const R = { x0: -16, x1: 16, z0: -26, z1: 6 };
+  const R = AREA;
   const W = Math.ceil((R.x1 - R.x0) / HF_CELL), H = Math.ceil((R.z1 - R.z0) / HF_CELL);
   const h = new Float32Array(W * H).fill(NaN), v = new THREE.Vector3();
   obj.traverse(o => {
@@ -440,7 +444,7 @@ function buildHeightField(obj) {
     for (let t = 0; t < tri; t++) {
       const a = (idx ? idx.getX(t * 3) : t * 3) * 3, b = (idx ? idx.getX(t * 3 + 1) : t * 3 + 1) * 3, c = (idx ? idx.getX(t * 3 + 2) : t * 3 + 2) * 3;
       const ax = P[a], ay = P[a + 1], az = P[a + 2], bx = P[b], by = P[b + 1], bz = P[b + 2], cx = P[c], cy = P[c + 1], cz = P[c + 2];
-      if (Math.min(ay, by, cy) > 1.2 || Math.max(ay, by, cy) < -3) continue;
+      if (Math.min(ay, by, cy) > HF_TOP || Math.max(ay, by, cy) < -3) continue;
       const minx = Math.max(R.x0, Math.min(ax, bx, cx)), maxx = Math.min(R.x1, Math.max(ax, bx, cx));
       const minz = Math.max(R.z0, Math.min(az, bz, cz)), maxz = Math.min(R.z1, Math.max(az, bz, cz));
       if (minx > maxx || minz > maxz) continue;
@@ -454,7 +458,7 @@ function buildHeightField(obj) {
         const l2 = ((cz - az) * (px - cx) + (ax - cx) * (pz - cz)) / den, l3 = 1 - l1 - l2;
         if (l1 < -0.01 || l2 < -0.01 || l3 < -0.01) continue;
         const y = l1 * ay + l2 * by + l3 * cy;
-        if (y > 1.2 || y < -3) continue;
+        if (y > HF_TOP || y < -3) continue;
         const k = zi * W + xi;
         if (!(h[k] >= y)) h[k] = y;
       }
@@ -497,7 +501,7 @@ function buildNav() {
   const fallbackWalk = (x, z, g) => Math.abs(g) < L.walk.maxSlope && inHeroView(x, g, z) &&
     Math.hypot(x - hero.base.x, z - hero.base.z) > L.walk.minDist;
   const fp = objectFootprints();
-  nav = new Nav(fp.length ? { ...zones, blocked: [...(zones.blocked || []), ...fp] } : zones, groundY, { fallbackWalk });
+  nav = new Nav(fp.length ? { ...zones, blocked: [...(zones.blocked || []), ...fp] } : zones, groundY, { fallbackWalk, bounds: AREA });
   for (const c of capys) { c.path = null; c.state = 'idle'; }
   buildWater(); buildProps(); if (navViz) showGrid(true);
 }
@@ -1084,7 +1088,7 @@ async function reloadBackdrop() {
   bdGroup = bd.group; backdropMeta = bd.meta; scene.add(bdGroup);
   bdGroup.userData.front = bd.front; bdGroup.userData.back = bd.back;
   if (depthViewOn) setDepthView(true);
-  hf = buildHeightField(bd.front); buildNav();
+  wideArea(true); hf = buildHeightField(bd.front); buildNav();
   setupHero(); if (view === 'hero') updateHero(0, 0);
   for (const c of active()) placeAtStart(c);
 }
@@ -1192,7 +1196,7 @@ async function boot() {
     const bd = await loadDepthBackdrop(`${WORLD}/${sceneInfo.files.backdrop}`, { phone: IS_PHONE });
     backdropMeta = bd.meta; scene.add(bd.group); bdGroup = bd.group;
     bdGroup.userData.front = bd.front; bdGroup.userData.back = bd.back;
-    hf = buildHeightField(bd.front); // capybaras stand on the image's own ground
+    wideArea(true); hf = buildHeightField(bd.front); // capybaras stand on the image's own ground
     if (Q.get('parallax') == null && L.camera.parallax > 0.15) L.camera.parallax = 0.15;
   }
   if (mode === 'layers') {
@@ -1336,6 +1340,12 @@ async function boot() {
       propObject: i => propsGroup.children.find(g => g.userData.prop === i) || null,
       propGround: (x, z) => nav ? nav.height(x, z) : groundY(x, z),
       objectSize: file => loadObject(file).then(o => o?.userData.size || null),
+      pickBackdrop: (ndcX, ndcY) => { // the point of the 2.5D picture under the pointer
+        const f = bdGroup?.userData.front; if (!f) return null;
+        _rc.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+        const hit = _rc.intersectObject(f, false)[0];
+        return hit && hit.point.y < 3 ? [hit.point.x, hit.point.z] : null;
+      },
       propsAt: (ndcX, ndcY) => { // index of the object under the pointer
         _rc.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
         const hit = _rc.intersectObject(propsGroup, true)[0]; let o = hit?.object;
