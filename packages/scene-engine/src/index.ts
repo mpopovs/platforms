@@ -21,6 +21,8 @@ export interface MountOptions {
   saveFile?: (name: string, body: Blob | string, type: string) => Promise<string>;
   /** Depth model for "2.5D from a picture" (ONNX, Depth Anything V2 Small); defaults to Hugging Face */
   depthModelUrl?: string;
+  /** AI fill model (LaMa ONNX, 512 x 512) for what is hidden behind objects; defaults to Hugging Face */
+  inpaintModelUrl?: string;
   /** Where onnxruntime-web loads its .wasm/.mjs files from; defaults to jsDelivr */
   ortWasmPaths?: string;
 }

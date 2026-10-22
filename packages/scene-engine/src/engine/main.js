@@ -1342,7 +1342,7 @@ async function boot() {
         while (o && o.userData.prop == null) o = o.parent;
         return o ? o.userData.prop : null;
       },
-      depth: { modelUrl: opts.depthModelUrl, wasmPaths: opts.ortWasmPaths },
+      depth: { modelUrl: opts.depthModelUrl, inpaintModelUrl: opts.inpaintModelUrl, wasmPaths: opts.ortWasmPaths },
       startHint: sceneInfo.start || null,
       container,
       save: async () => {

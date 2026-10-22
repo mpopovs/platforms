@@ -28,7 +28,7 @@ function cameraBasis(c) {
 }
 
 // build a displaced grid; step = take every n-th depth sample; cut = log-depth jump that splits the mesh
-function layerMesh(dep, cam, { step = 1, cut = 0, map, renderOrder = 0 }) {
+function layerMesh(dep, cam, { step = 1, cut = 0, map, alphaMap = null, renderOrder = 0 }) {
   const { fwd, right, up } = cameraBasis(cam);
   const W = Math.floor((dep.w - 1) / step) + 1, H = Math.floor((dep.h - 1) / step) + 1;
   const fy = (dep.h / 2) / Math.tan(THREE.MathUtils.degToRad(cam.vfov) / 2);
@@ -58,7 +58,8 @@ function layerMesh(dep, cam, { step = 1, cut = 0, map, renderOrder = 0 }) {
   g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   g.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
   g.computeBoundingSphere();
-  const m = new THREE.Mesh(g, new THREE.MeshBasicNodeMaterial({ map, toneMapped: false, fog: false }));
+  // soft outline (alpha map, made in the editor): blended, still writes depth so models go behind
+  const m = new THREE.Mesh(g, new THREE.MeshBasicNodeMaterial(alphaMap ? { map, alphaMap, transparent: true, alphaTest: 0.02, depthWrite: true, toneMapped: false, fog: false } : { map, toneMapped: false, fog: false }));
   m.renderOrder = renderOrder; m.frustumCulled = false;
   return m;
 }
@@ -69,10 +70,11 @@ export async function loadDepthBackdrop(url, { phone = false, bust = '' } = {}) 
   const meta = await (await fetch(url + q)).json();
   const tl = new THREE.TextureLoader();
   const tex = async f => { const t = await tl.loadAsync(base + f + q); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.generateMipmaps = true; return t; };
-  const [front, back, cf, cb] = await Promise.all([readDepth(base + 'depth.png' + q), readDepth(base + 'depth_bg.png' + q), tex('color.jpg'), tex('color_bg.jpg')]);
+  const [front, back, cf, cb, ca] = await Promise.all([readDepth(base + 'depth.png' + q), readDepth(base + 'depth_bg.png' + q), tex('color.jpg'), tex('color_bg.jpg'),
+    meta.alpha ? tl.loadAsync(base + meta.alpha + q).catch(() => null) : null]);
   const step = phone ? 2 : 1;
   const group = new THREE.Group();
-  const frontMesh = layerMesh(front, meta.camera, { step, cut: 0.05 * step, map: cf });
+  const frontMesh = layerMesh(front, meta.camera, { step, cut: 0.05 * step, map: cf, alphaMap: ca });
   const backMesh = layerMesh(back, meta.camera, { step: step * 2, map: cb, renderOrder: -1 });
   group.add(backMesh, frontMesh);
   return { group, front: frontMesh, back: backMesh, meta };

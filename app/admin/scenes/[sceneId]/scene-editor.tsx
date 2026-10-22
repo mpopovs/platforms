@@ -99,6 +99,7 @@ export function SceneEditor(props: {
         base: `/api/scenes/${sceneId}/files/draft`,
         edit: true,
         depthModelUrl: process.env.NEXT_PUBLIC_DEPTH_MODEL_URL || undefined,
+        inpaintModelUrl: process.env.NEXT_PUBLIC_INPAINT_MODEL_URL || undefined,
         saveFile: async (name, body, type) => {
           const blob = typeof body === 'string' ? new Blob([body], { type }) : body;
           const at = await saveItems([{ name, blob }]);

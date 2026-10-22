@@ -126,6 +126,7 @@ export function initEditor(ctx) {
   }
   // push changes into the scene; scope decides how much has to be rebuilt
   function apply(scope) {
+    if (scope === 'none') return;
     if (scope === 'layers') { ctx.setLayers(ldef); msg('Unsaved changes'); return; }
     if (scope === 'look' || scope === 'snow' || scope === 'camera') ctx.applyLook(scope);
     else ctx.setZones(structuredClone(zones), scope);
@@ -997,7 +998,8 @@ export function initEditor(ctx) {
     if (L1.kind === 'image') {
       const [w, h] = await imgSize(f), [cw, ch] = cur;
       if (Math.abs(w / h - cw / ch) > 0.01) throw new Error(`aspect ${w}x${h} does not match the backdrop (${cw}x${ch}); keep the same framing`);
-      blob = await toJpeg(f, L1.key === 'color_bg' ? Math.round(cw / 2) : null, L1.key === 'color_bg' ? Math.round(ch / 2) : null);
+      const bgw = Math.min(2048, cw); // background layer: picture resolution, up to 2048 px
+      blob = await toJpeg(f, L1.key === 'color_bg' ? bgw : null, L1.key === 'color_bg' ? Math.round(bgw * ch / cw) : null);
     } else {
       const d = await readDepthMM(f), ref = await readDepthMM(await fetchBlob(ctx.files.backdropDir + 'depth.png'));
       if (Math.abs(d.w / d.h - ref.w / ref.h) > 0.01) throw new Error(`aspect ${d.w}x${d.h} does not match the depth map (${ref.w}x${ref.h})`);
@@ -1033,8 +1035,8 @@ export function initEditor(ctx) {
     return [heading('Environment'), card, ...layersSection(env), ...pictureSection(env)];
   }
   // ---------- picture -> 2.5D (depth made here in the browser)
-  let building = false, depthView = false;
-  const depthOpts = () => ({ modelUrl: ctx.depth?.modelUrl || undefined, wasmPaths: ctx.depth?.wasmPaths || undefined, onProgress: m => msg(m) });
+  let building = false, depthView = false, splitCount = 4;
+  const depthOpts = () => ({ modelUrl: ctx.depth?.modelUrl || undefined, inpaintModelUrl: ctx.depth?.inpaintModelUrl || undefined, wasmPaths: ctx.depth?.wasmPaths || undefined, onProgress: m => msg(m) });
   async function putAll(files) { let n = 0; for (const [name, blob] of Object.entries(files)) { msg(`Saving ${++n}/${Object.keys(files).length}…`); await ctx.put(name, blob, blob.type || 'application/octet-stream'); } }
   // ---------- layered 2.5D: your own PNGs (with transparency) at chosen distances
   function fileInputMulti(label, accept, onFiles) {
@@ -1094,12 +1096,43 @@ export function initEditor(ctx) {
     l.disp = name; if (!(l.relief > 0)) l.relief = 0.5;
     await ctx.setLayers(ldef, { forget: [name] });
   }
+  // automatic layers: save the files, switch the scene to layers and reload
+  async function useLayers(res, label) {
+    await putAll(res.files);
+    await ctx.put('layers/layers.json', new Blob([JSON.stringify(res.def, null, 2)], { type: 'application/json' }), 'application/json');
+    await ctx.updateSceneFiles({ files: { layers: 'layers/layers.json', backdrop: null, environment: null, splats: null, collider: null }, top: { environment: null, start: null } }, { reload: true });
+    return `${label}: ${res.def.layers.length} layers. Reloading…`;
+  }
+  function splitIntoLayers(meta, fit) {
+    if (building) return;
+    if (!confirm(`Split this picture into ${splitCount} layers? It takes a while (AI fill for each layer). Your changes are saved first and the editor reloads with the layers.`)) return;
+    busy('Splitting into layers', async () => {
+      building = true;
+      try {
+        const { backdropToLayers } = await import('./picture.js');
+        const res = await backdropToLayers(name => fetchBlob(ctx.files.backdropDir + name), meta, fit, { ...depthOpts(), count: splitCount });
+        return useLayers(res, 'Split');
+      } finally { building = false; }
+    });
+  }
   function layersSection(env) {
     const start = ctx.startHint === 'layers' && env.mode !== 'layers';
     const out = [heading('2.5D from your own layers')];
     if (env.mode !== 'layers') {
       out.push(h('div', { class: 'card', style: start ? 'border-color:#5b8fc0;box-shadow:0 0 0 2px rgba(91,143,192,.35)' : '' },
-        h('div', { class: 'muted' }, 'Pick several prepared pictures at once (PNG with transparency): sky, hills, house, bushes… Each becomes a layer at its own distance, like flats on a stage. Pictures the size of the whole composition fill the frame (the first by name is the farthest); smaller ones become pieces you place by hand.'),
+        h('div', { class: 'muted' }, 'Layers stand at their own distances, like flats on a stage. Make them automatically from one picture (depth + AI fill behind each layer, a minute or more), then move, retouch or replace them one by one.'),
+        row(fileInput('Make layers from one picture…', 'image/jpeg,image/png,image/webp', f => {
+          if (building) return;
+          if (!start && !confirm(`Turn this picture into ${splitCount} editable layers? Depth and AI fill run here in the browser (a minute or more). Your changes are saved first and the editor reloads.`)) return;
+          busy('Reading the picture', async () => {
+            building = true;
+            try {
+              const { pictureToLayers } = await import('./picture.js');
+              return useLayers(await pictureToLayers(f, DEFAULT_FIT, { ...depthOpts(), count: splitCount }), 'Made');
+            } finally { building = false; }
+          });
+        }), selectCtl('Layers', [[3, '3'], [4, '4'], [5, '5']], () => splitCount, v => { splitCount = +v; }, 'none')),
+        h('div', { class: 'muted' }, 'Or use your own prepared images (PNG/WebP with transparency): sky, hills, house, bushes… Pictures the size of the whole composition fill the frame (the first by name is the farthest); smaller ones become pieces you place by hand.'),
         row(fileInputMulti(start ? 'Choose layer images…' : 'Make from layer images…', 'image/png,image/webp,image/jpeg', fs => {
           if (building) return;
           if (!start && !confirm('Switch this scene to picture layers? Your changes are saved first and the editor reloads.')) return;
@@ -1185,7 +1218,7 @@ export function initEditor(ctx) {
             const res = await pictureToBackdrop(f, DEFAULT_FIT, depthOpts());
             await putAll(res.files);
             await ctx.updateSceneFiles({ files: { backdrop: 'backdrop/backdrop.json', environment: null, splats: null, collider: null }, top: { environment: null, start: null } }, { reload: true });
-            return res.how === 'ground' ? 'Done. Reloading…' : 'Done (no clear ground at the bottom: used near/far instead). Reloading…';
+            return `Done${res.filled === 'ai' ? ' (AI fill behind objects)' : ' (quick fill: AI fill was not available)'}${res.how === 'ground' ? '' : '; no clear ground at the bottom, used near/far instead'}. Reloading…`;
           } finally { building = false; }
         });
       }))));
@@ -1198,16 +1231,17 @@ export function initEditor(ctx) {
         if (!meta.disparity) { card.append(h('div', { class: 'muted' }, 'This backdrop was made with the world tools. To adjust its depth here, make it again from a picture.')); return; }
         // every change rebuilds by itself (short pause first, so typing is not interrupted)
         let timer = 0, again = false;
-        const rebuild = () => {
+        const rebuild = (ai = false) => {
           if (building) { again = true; return; }
-          busy('Rebuilding the depth', async () => {
+          busy(ai ? 'AI fill behind objects' : 'Rebuilding the depth', async () => {
             building = true;
             try {
               const { refitBackdrop } = await import('./picture.js');
-              const res = await refitBackdrop(name => fetchBlob(ctx.files.backdropDir + name), meta, fit, depthOpts());
+              const res = await refitBackdrop(name => fetchBlob(ctx.files.backdropDir + name), meta, fit, { ...depthOpts(), ...(ai ? { fill: 'ai' } : {}) });
               await putAll(Object.fromEntries(Object.entries(res.files).map(([k, v]) => [ctx.files.backdropDir + k.replace(/^backdrop\//, ''), v])));
+              Object.assign(meta, res.meta);
               await ctx.reloadBackdrop(); redraw();
-              return `Depth rebuilt: ${fitText()}.`;
+              return ai ? (res.filled === 'ai' ? 'AI fill done: what is hidden behind objects is painted in.' : 'AI fill was not available; quick fill used.') : `Depth rebuilt: ${fitText()}.`;
             } finally { building = false; if (again) { again = false; rebuild(); } }
           });
         };
@@ -1230,7 +1264,14 @@ export function initEditor(ctx) {
           row(btn(depthView ? 'Show the picture' : 'Show depth colours', () => { depthView = !depthView; ctx.depthView(depthView); msg(depthView ? 'Depth colours: red = near, yellow/green = middle, blue = far. Smooth bands are good; sudden colour jumps are cuts.' : 'Showing the picture.'); }, { on: depthView }),
             btn('Look from the side', () => { ctx.lookFromSide(); redraw(); msg('Side view: the picture as a 3D relief. Right-drag to orbit, wheel to zoom. “Hero” goes back.'); }),
             btn('Back to camera', () => { ctx.setView('hero'); redraw(); })),
-          h('div', { class: 'muted' }, 'Tip: turn on depth colours and look from the side, then change the numbers: the relief updates as you go.'));
+          h('div', { class: 'muted' }, 'Tip: turn on depth colours and look from the side, then change the numbers: the relief updates as you go.'),
+          h('b', { style: 'display:block;margin-top:8px' }, 'Behind objects'),
+          h('div', { class: 'muted' }, meta.fill === 'ai' ? 'Filled by AI (LaMa). After big depth changes, run it again for new gaps.' : 'Quick fill (smudged). The AI fill paints believable background behind objects.'),
+          row(btn(meta.fill === 'ai' ? 'Run AI fill again' : 'AI fill behind objects', () => rebuild(true))),
+          h('b', { style: 'display:block;margin-top:8px' }, 'Editable layers'),
+          h('div', { class: 'muted' }, 'Split this picture into separate layers (far to near), each filled behind, so you can move, retouch or replace them one by one.'),
+          row(selectCtl('Layers', [[3, '3'], [4, '4'], [5, '5']], () => splitCount, v => { splitCount = +v; }, 'none'),
+            btn('Split into layers', () => splitIntoLayers(meta, fit))));
       }).catch(err => { card.textContent = 'Could not read the depth settings: ' + err.message; });
     }
     return out;

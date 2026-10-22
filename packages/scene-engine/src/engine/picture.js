@@ -167,6 +167,38 @@ function pushPull(rgb, wt, w, h) {
     wt[i] = 1;
   }
 }
+// box mean via an integral image (radius r), used by the guided filter
+function boxMean(src, w, h, r) {
+  const I = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += src[y * w + x]; I[(y + 1) * (w + 1) + x + 1] = I[y * (w + 1) + x + 1] + row; } }
+  const out = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - r), y1 = Math.min(h, y + r + 1);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - r), x1 = Math.min(w, x + r + 1);
+      out[y * w + x] = (I[y1 * (w + 1) + x1] - I[y0 * (w + 1) + x1] - I[y1 * (w + 1) + x0] + I[y0 * (w + 1) + x0]) / ((x1 - x0) * (y1 - y0));
+    }
+  }
+  return out;
+}
+// guided filter (He et al.): smooths p while keeping the edges of guide g (both w*h)
+function guidedFilter(g, p, w, h, r, eps) {
+  const mI = boxMean(g, w, h, r), mP = boxMean(p, w, h, r);
+  const gp = new Float32Array(w * h), gg = new Float32Array(w * h);
+  for (let i = 0; i < gp.length; i++) { gp[i] = g[i] * p[i]; gg[i] = g[i] * g[i]; }
+  const mIP = boxMean(gp, w, h, r), mII = boxMean(gg, w, h, r), a = new Float32Array(w * h), b = new Float32Array(w * h);
+  for (let i = 0; i < a.length; i++) { const v = mII[i] - mI[i] * mI[i]; a[i] = (mIP[i] - mI[i] * mP[i]) / (v + eps); b[i] = mP[i] - a[i] * mI[i]; }
+  const mA = boxMean(a, w, h, r), mB = boxMean(b, w, h, r), out = new Float32Array(w * h);
+  for (let i = 0; i < out.length; i++) out[i] = mA[i] * g[i] + mB[i];
+  return out;
+}
+const grayOf = im => { const n = im.width * im.height, g = new Float32Array(n); for (let i = 0; i < n; i++) g[i] = (im.data[i * 4] * 0.299 + im.data[i * 4 + 1] * 0.587 + im.data[i * 4 + 2] * 0.114) / 255; return g; };
+async function alphaPNG(a, w, h) {
+  const c = new OffscreenCanvas(w, h), g = c.getContext('2d'), im = g.createImageData(w, h);
+  for (let i = 0; i < a.length; i++) { const v = Math.round(a[i] * 255); im.data[i * 4] = im.data[i * 4 + 1] = im.data[i * 4 + 2] = v; im.data[i * 4 + 3] = 255; }
+  g.putImageData(im, 0, 0);
+  return c.convertToBlob({ type: 'image/png' });
+}
 async function bitmapRGB(bmp, w, h) {
   const c = new OffscreenCanvas(w, h), g = c.getContext('2d', { willReadFrequently: true });
   g.imageSmoothingQuality = 'high'; g.drawImage(bmp, 0, 0, w, h);
@@ -180,15 +212,30 @@ async function depthPNG(z, w, h, mul = 1) {
   return c.convertToBlob({ type: 'image/png' });
 }
 
+// metric depth at gw x gh, edge-aware: near depth jumps the depth snaps to the
+// picture's own edges (guided filter on log depth, guided by the picture)
+async function shapedDepth(bmp, m, gw, gh) {
+  const zf = resizeF(m.z, m.w, m.h, gw, gh);
+  const guide = grayOf(await bitmapRGB(bmp, gw, gh));
+  const lz0 = zf.map(Math.log), jump = new Float32Array(gw * gh);
+  for (let y = 1; y < gh - 1; y++) for (let x = 1; x < gw - 1; x++) {
+    const i = y * gw + x; jump[i] = Math.max(Math.abs(lz0[i + 1] - lz0[i - 1]), Math.abs(lz0[i + gw] - lz0[i - gw])) > 0.05 ? 1 : 0;
+  }
+  const near = boxMean(jump, gw, gh, Math.max(3, Math.round(gw / 200))), gf = guidedFilter(guide, lz0, gw, gh, Math.max(4, Math.round(gw / 160)), 4e-4);
+  for (let i = 0; i < zf.length; i++) { const t = Math.min(1, near[i] * 6); zf[i] = Math.exp(lz0[i] * (1 - t) + gf[i] * t); }
+  return zf;
+}
+
 // ---------------------------------------------------------------- layers
 /** Build all backdrop files from a picture and its disparity. */
-export async function buildBackdrop(bmp, disp, fit = DEFAULT_FIT, { onProgress, grid = 1280, tex = 4096 } = {}) {
+export async function buildBackdrop(bmp, disp, fit = DEFAULT_FIT, opts = {}) {
+  const { onProgress, grid = 1280, tex = 4096, fill = 'ai', prevFill = null } = opts;
   const F = { ...DEFAULT_FIT, ...fit };
   onProgress?.('Shaping the depth…'); await tick();
   const m = fitDepth(disp, F);
   const W0 = bmp.width, H0 = bmp.height;
   const gw = Math.min(grid, W0), gh = Math.round(gw * H0 / W0);
-  const zf = resizeF(m.z, m.w, m.h, gw, gh);
+  const zf = await shapedDepth(bmp, m, gw, gh);
   // depth edges: big jumps of log depth between neighbours
   const lz = zf.map(Math.log), edge = new Uint8Array(gw * gh);
   for (let y = 1; y < gh - 1; y++) for (let x = 1; x < gw - 1; x++) {
@@ -197,32 +244,63 @@ export async function buildBackdrop(bmp, disp, fit = DEFAULT_FIT, { onProgress, 
     const gy = Math.abs(L(-1, 1) + 2 * L(0, 1) + L(1, 1) - L(-1, -1) - 2 * L(0, -1) - L(1, -1)) / 8;
     if (Math.max(gx, gy) > 0.04) edge[y * gw + x] = 1;
   }
+  // 2. soft outline: the near side of every depth jump fades out over ~2 grid pixels,
+  //    so the front layer has a smooth edge instead of jagged steps (backdrop.js alpha map)
+  const nearSide = new Float32Array(gw * gh);
+  for (let y = 1; y < gh - 1; y++) for (let x = 1; x < gw - 1; x++) {
+    const i = y * gw + x;
+    if (lz[i - 1] - lz[i] > 0.05 || lz[i + 1] - lz[i] > 0.05 || lz[i - gw] - lz[i] > 0.05 || lz[i + gw] - lz[i] > 0.05) nearSide[i] = 1;
+  }
+  const near1 = maxFilter(nearSide, gw, gh, 1), alpha = new Float32Array(gw * gh);
+  for (let i = 0; i < alpha.length; i++) alpha[i] = nearSide[i] ? 0.25 : near1[i] ? 0.7 : 1;
   onProgress?.('Making the background layer…'); await tick();
   const r = Math.max(2, Math.round(gw / 240));
   const zDil = maxFilter(zf, gw, gh, r), eDil = maxFilter(Float32Array.from(edge), gw, gh, r);
   const zb = new Float32Array(gw * gh), occl = new Uint8Array(gw * gh);
   for (let i = 0; i < zb.length; i++) { const ne = eDil[i] > 0; zb[i] = ne ? zDil[i] : zf[i]; occl[i] = ne && zb[i] > zf[i] * 1.04 ? 1 : 0; }
-  // background colour: hidden pixels filled from their surroundings
-  const tw = Math.min(tex, W0), th = Math.round(tw * H0 / W0), bw = Math.max(64, tw >> 1), bh = Math.round(bw * H0 / W0);
-  const bgIm = await bitmapRGB(bmp, bw, bh), rgb = new Float32Array(bw * bh * 3), wt = new Float32Array(bw * bh);
-  const occBig = maxFilter(resizeF(Float32Array.from(occl), gw, gh, bw, bh), bw, bh, 2);
-  for (let i = 0; i < bw * bh; i++) { rgb[i * 3] = bgIm.data[i * 4]; rgb[i * 3 + 1] = bgIm.data[i * 4 + 1]; rgb[i * 3 + 2] = bgIm.data[i * 4 + 2]; wt[i] = occBig[i] > 0.01 ? 0 : 1; }
-  pushPull(rgb, wt, bw, bh);
-  for (let i = 0; i < bw * bh; i++) { bgIm.data[i * 4] = rgb[i * 3]; bgIm.data[i * 4 + 1] = rgb[i * 3 + 1]; bgIm.data[i * 4 + 2] = rgb[i * 3 + 2]; }
+  // background colour: what is hidden behind objects gets filled in
+  // background at the picture's own resolution (up to 2048 px): what the AI fills stays sharp
+  const tw = Math.min(tex, W0), th = Math.round(tw * H0 / W0), bw = Math.max(64, Math.min(2048, W0)), bh = Math.round(bw * H0 / W0);
+  const bgIm = await bitmapRGB(bmp, bw, bh);
+  const occBig = maxFilter(resizeF(Float32Array.from(occl), gw, gh, bw, bh), bw, bh, 3);
+  const mask = new Uint8Array(bw * bh); for (let i = 0; i < mask.length; i++) mask[i] = occBig[i] > 0.01 ? 1 : 0;
+  let filled = 'fast';
+  if (fill === 'ai') {
+    try {
+      const { inpaint } = await import('./inpaint.js');
+      await inpaint(bgIm, mask, opts); filled = 'ai';
+    } catch (e) { console.warn('[picture] AI fill failed, using the quick fill', e); onProgress?.('AI fill not available (' + e.message + '); using the quick fill…'); }
+  }
+  if (filled !== 'ai') {
+    // quick fill; where an earlier AI fill covered the same spot, keep it
+    const rgb = new Float32Array(bw * bh * 3), wt = new Float32Array(bw * bh);
+    const prev = prevFill && prevFill.im.width === bw && prevFill.im.height === bh ? prevFill : null;
+    for (let i = 0; i < bw * bh; i++) {
+      const usePrev = prev && mask[i] && prev.mask[i];
+      const src = usePrev ? prev.im.data : bgIm.data;
+      rgb[i * 3] = src[i * 4]; rgb[i * 3 + 1] = src[i * 4 + 1]; rgb[i * 3 + 2] = src[i * 4 + 2]; wt[i] = mask[i] && !usePrev ? 0 : 1;
+    }
+    pushPull(rgb, wt, bw, bh);
+    for (let i = 0; i < bw * bh; i++) { bgIm.data[i * 4] = rgb[i * 3]; bgIm.data[i * 4 + 1] = rgb[i * 3 + 1]; bgIm.data[i * 4 + 2] = rgb[i * 3 + 2]; }
+    if (prev) filled = 'ai-reused';
+  }
   onProgress?.('Saving the layers…'); await tick();
   const meta = {
     image: 'source.jpg', width: gw, height: gh, depth_scale: 0.001, far: F.far,
     camera: { position: [0, F.height, 0], vfov: F.vfov, pitch: F.pitch, yaw: 0, roll: 0 },
-    edge_threshold: 0.04, model: 'Depth Anything V2 Small (Apache-2.0)', made: 'in the editor',
+    edge_threshold: 0.04, model: 'Depth Anything V2 Small (Apache-2.0)', made: 'in the editor', alpha: 'alpha.png',
+    fill: filled === 'fast' ? 'quick' : 'ai', fillMask: 'fillmask.png',
     fit: { ...F, how: m.how }
   };
   return {
-    meta, how: m.how,
+    meta, how: m.how, filled,
     files: {
       'backdrop/color.jpg': await jpeg(await bitmapRGB(bmp, tw, th), 0.9),
-      'backdrop/color_bg.jpg': await jpeg(bgIm, 0.85),
+      'backdrop/color_bg.jpg': await jpeg(bgIm, 0.9),
       'backdrop/depth.png': await depthPNG(zf, gw, gh),
       'backdrop/depth_bg.png': await depthPNG(zb, gw, gh, 1.02), // a little behind the front: no z-fighting
+      'backdrop/alpha.png': await alphaPNG(alpha, gw, gh),
+      'backdrop/fillmask.png': await alphaPNG(Float32Array.from(mask), bw, bh),
       'backdrop/backdrop.json': new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json' })
     }
   };
@@ -261,8 +339,147 @@ export async function refitBackdrop(getBlob, meta, fit, opts = {}) {
   if (!meta.disparity) throw new Error('This backdrop was not made in the editor; make it again from a picture.');
   const [src, dpng] = await Promise.all([getBlob('source.jpg'), getBlob(meta.disparity.file)]);
   const bmp = await createImageBitmap(src), disp = await readDisparity(dpng, meta.disparity.range);
-  const out = await buildBackdrop(bmp, disp, fit, opts); bmp.close();
+  let prevFill = null;
+  if (opts.fill !== 'ai' && meta.fill === 'ai') { // keep the AI fill made before; only new gaps get the quick fill
+    try {
+      const [cb, fm] = await Promise.all([getBlob('color_bg.jpg'), getBlob(meta.fillMask || 'fillmask.png')]);
+      const read = async b => { const bm = await createImageBitmap(b); const im = await bitmapRGB(bm, bm.width, bm.height); bm.close(); return im; };
+      const im = await read(cb), mi = await read(fm), mask = new Uint8Array(mi.width * mi.height);
+      for (let i = 0; i < mask.length; i++) mask[i] = mi.data[i * 4] > 127 ? 1 : 0;
+      if (mi.width === im.width) prevFill = { im, mask };
+    } catch { prevFill = null; }
+  }
+  const out = await buildBackdrop(bmp, disp, fit, { fill: 'fast', ...opts, prevFill }); bmp.close();
   out.meta.disparity = meta.disparity;
   out.files['backdrop/backdrop.json'] = new Blob([JSON.stringify(out.meta, null, 2)], { type: 'application/json' });
+  return out;
+}
+
+// ---------------------------------------------------------------- automatic layers
+// 1-D k-means on log depth: where the picture naturally separates into planes
+function depthClusters(lz, k) {
+  const sorted = Float32Array.from(lz).sort();
+  let c = Array.from({ length: k }, (_, i) => sorted[Math.floor((i + 0.5) / k * (sorted.length - 1))]);
+  const step = Math.max(1, Math.floor(lz.length / 200000));
+  for (let it = 0; it < 15; it++) {
+    const sum = new Float64Array(k), n = new Float64Array(k);
+    for (let i = 0; i < lz.length; i += step) { let b = 0; for (let j = 1; j < k; j++) if (Math.abs(lz[i] - c[j]) < Math.abs(lz[i] - c[b])) b = j; sum[b] += lz[i]; n[b]++; }
+    c = c.map((v, j) => n[j] ? sum[j] / n[j] : v);
+  }
+  c.sort((a, b) => b - a); // far first
+  const cuts = []; for (let j = 0; j < k - 1; j++) cuts.push((c[j] + c[j + 1]) / 2);
+  return cuts; // descending log-depth boundaries
+}
+const encodeLayer = async im => {
+  const c = new OffscreenCanvas(im.width, im.height); c.getContext('2d').putImageData(im, 0, 0);
+  const b = await c.convertToBlob({ type: 'image/webp', quality: 0.92 }); // smaller than PNG; PNG where WebP can't be written
+  return b.type === 'image/webp' ? b : c.convertToBlob({ type: 'image/png' });
+};
+
+/**
+ * Split a picture into `count` layers far -> near, each filled (AI) behind the
+ * nearer layers in a band, so the camera can move without showing holes.
+ * Returns { def (layers.json), files: { 'layers/...': Blob } }.
+ */
+export async function splitLayers(bmp, disp, fit = DEFAULT_FIT, opts = {}) {
+  const { onProgress, count = 4, width = 2048, fill = 'ai' } = opts;
+  const F = { ...DEFAULT_FIT, ...fit };
+  const W = Math.min(width, bmp.width), H = Math.round(W * bmp.height / bmp.width);
+  onProgress?.('Shaping the depth…'); await tick();
+  const m = fitDepth(disp, F), z = await shapedDepth(bmp, m, W, H), lz = z.map(Math.log), N = W * H;
+  const cuts = depthClusters(lz, count);
+  const label = new Uint8Array(N);
+  for (let i = 0; i < N; i++) { let k = 0; while (k < cuts.length && lz[i] < cuts[k]) k++; label[i] = k; } // 0 = farthest
+  // tidy speckles: 3x3 majority, twice
+  for (let pass = 0; pass < 2; pass++) {
+    const nl = label.slice();
+    for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+      const cnt = new Uint8Array(count); for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) cnt[label[(y + dy) * W + x + dx]]++;
+      let b = label[y * W + x]; for (let j = 0; j < count; j++) if (cnt[j] > cnt[b] + 1) b = j; nl[y * W + x] = b;
+    }
+    label.set(nl);
+  }
+  const src = await bitmapRGB(bmp, W, H), band = Math.round(W * 0.06), feather = Math.max(4, Math.round(band / 6));
+  const files = {}, layers = [], stamp = Date.now().toString(36);
+  for (let k = 0; k < count; k++) {
+    onProgress?.(`Layer ${k + 1} of ${count}…`); await tick();
+    const own = new Float32Array(N), nearer = new Uint8Array(N);
+    let nOwn = 0; for (let i = 0; i < N; i++) { if (label[i] === k) { own[i] = 1; nOwn++; } else if (label[i] > k) nearer[i] = 1; }
+    if (nOwn < N * 0.002) continue; // (almost) empty: skip
+    // band: hidden pixels (behind nearer layers) close to this layer's own pixels
+    const reach = boxMean(own, W, H, band), reachWide = boxMean(own, W, H, band + 32);
+    const im = new ImageData(new Uint8ClampedArray(src.data), W, H), mask = new Uint8Array(N), alpha = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      if (own[i]) { alpha[i] = 1; continue; }
+      if (nearer[i] && reachWide[i] > 0) mask[i] = 1; // filled (with some extra context around the band)
+      if (nearer[i] && reach[i] > 0) alpha[i] = Math.min(1, reach[i] * band / feather); // fades out at the band's outer edge
+    }
+    const bandPx = mask.reduce((a, v) => a + v, 0);
+    if (k === 0 && bandPx) { // the farthest layer is the backdrop: everything behind nearer layers becomes opaque
+      for (let i = 0; i < N; i++) if (nearer[i]) { mask[i] = 1; alpha[i] = 1; }
+    }
+    if (bandPx) {
+      let done = false;
+      if (fill === 'ai') {
+        try {
+          const { inpaint } = await import('./inpaint.js');
+          // the deep inside of big holes (back layer) is never seen: quick fill there, AI along the edges
+          const aiMask = k === 0 ? Uint8Array.from(mask, (v, i) => v && reachWide[i] > 0 ? 1 : 0) : mask;
+          await inpaint(im, aiMask, { ...opts, onProgress: t => onProgress?.(`Layer ${k + 1} of ${count}: ${t}`) });
+          if (k === 0) quickFill(im, Uint8Array.from(mask, (v, i) => v && !aiMask[i] ? 1 : 0));
+          done = true;
+        } catch (e) { console.warn('[picture] AI fill failed, using the quick fill', e); onProgress?.('AI fill not available (' + e.message + '); using the quick fill…'); }
+      }
+      if (!done) quickFill(im, mask);
+    }
+    // soft outline where this layer is in front of farther ones
+    for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+      const i = y * W + x; if (!own[i]) continue;
+      if (label[i - 1] < k || label[i + 1] < k || label[i - W] < k || label[i + W] < k) alpha[i] = Math.min(alpha[i], 0.55);
+    }
+    for (let i = 0; i < N; i++) im.data[i * 4 + 3] = Math.round(alpha[i] * 255);
+    // distance and relief from the layer's own depth; the filled band continues it
+    const zs = []; for (let i = 0; i < N; i += 7) if (own[i]) zs.push(z[i]);
+    zs.sort((a, b) => a - b);
+    const z0 = zs[Math.floor(zs.length * 0.05)], z1 = zs[Math.floor(zs.length * 0.95)], D = (z0 + z1) / 2;
+    const relief = Math.min(1, Math.max(0, (z1 / D - 1) / 0.35));
+    const zl = new Float32Array(N), wt = new Float32Array(N);
+    for (let i = 0; i < N; i++) { zl[i] = own[i] ? z[i] : 0; wt[i] = own[i]; }
+    pushPull1(zl, wt, W, H);
+    const dw = Math.min(512, W), dh = Math.round(dw * H / W), zsmall = resizeF(zl, W, H, dw, dh), q = new Uint16Array(dw * dh);
+    for (let i = 0; i < q.length; i++) q[i] = Math.round(Math.min(1, Math.max(0, (z1 - zsmall[i]) / Math.max(1e-6, z1 - z0))) * 65535); // 1 = nearest
+    const base = `layers/auto_${stamp}_${k + 1}`, img = await encodeLayer(im), ext = img.type === 'image/webp' ? 'webp' : 'png';
+    files[`${base}.${ext}`] = img;
+    files[`${base}_disp.png`] = await encodeGray16(dw, dh, q);
+    layers.push({ id: `layer_${stamp}_${k + 1}`, name: `Layer ${k + 1} (${z0.toFixed(1)}–${z1.toFixed(1)} m)`, file: `${base}.${ext}`, fit: 'frame',
+      distance: +D.toFixed(2), relief: +relief.toFixed(2), disp: `${base}_disp.png`, visible: true });
+  }
+  const def = { camera: { position: [0, F.height, 0], vfov: F.vfov, pitch: F.pitch, yaw: 0, roll: 0 }, width: W, height: H, layers, made: 'split from one picture', fit: F };
+  return { def, files };
+}
+function quickFill(im, mask) {
+  const n = mask.length, rgb = new Float32Array(n * 3), wt = new Float32Array(n);
+  for (let i = 0; i < n; i++) { for (let c = 0; c < 3; c++) rgb[i * 3 + c] = im.data[i * 4 + c]; wt[i] = mask[i] ? 0 : 1; }
+  pushPull(rgb, wt, im.width, im.height);
+  for (let i = 0; i < n; i++) if (mask[i]) for (let c = 0; c < 3; c++) im.data[i * 4 + c] = rgb[i * 3 + c];
+}
+function pushPull1(v, wt, w, h) { // one channel
+  const rgb = new Float32Array(v.length * 3); for (let i = 0; i < v.length; i++) rgb[i * 3] = v[i];
+  pushPull(rgb, wt, w, h); for (let i = 0; i < v.length; i++) v[i] = rgb[i * 3];
+}
+
+/** Picture file -> layers (depth model + split). */
+export async function pictureToLayers(file, fit = DEFAULT_FIT, opts = {}) {
+  const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  const disp = await estimateDisparity(bmp, opts);
+  const out = await splitLayers(bmp, disp, fit, opts); bmp.close();
+  return out;
+}
+/** Split a picture backdrop made earlier in the editor (no depth model run). */
+export async function backdropToLayers(getBlob, meta, fit, opts = {}) {
+  if (!meta.disparity) throw new Error('This backdrop was not made in the editor; make it again from a picture.');
+  const [src, dpng] = await Promise.all([getBlob('source.jpg'), getBlob(meta.disparity.file)]);
+  const bmp = await createImageBitmap(src), disp = await readDisparity(dpng, meta.disparity.range);
+  const out = await splitLayers(bmp, disp, fit, opts); bmp.close();
   return out;
 }
