@@ -47,7 +47,7 @@ async function main() {
           Effect: 'Allow',
           Principal: '*',
           Action: ['s3:GetObject'],
-          Resource: [`arn:aws:s3:::${cfg.bucket}/scenes/*`]
+          Resource: [`arn:aws:s3:::${cfg.bucket}/scenes/*`, `arn:aws:s3:::${cfg.bucket}/models/*`]
         }]
       })
     }));
