@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { getAdminUser } from '@/lib/auth/server';
 
 /**
  * GET /api/model-textures/[modelId]
@@ -21,9 +22,9 @@ export async function GET(
     }
 
     // Check authentication
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const user = await getAdminUser(supabase);
     
-    if (authError || !user) {
+    if (!user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
@@ -139,9 +140,9 @@ export async function DELETE(
     }
 
     // Check authentication
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const user = await getAdminUser(supabase);
     
-    if (authError || !user) {
+    if (!user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
+import { getAdminUser } from '@/lib/auth/server';
 
 /**
  * POST /api/upload-uv-map
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getAdminUser(supabase);
     if (!user || (model.viewers as any).user_id !== user.id) {
       return NextResponse.json(
         { error: 'Unauthorized' },
@@ -150,7 +151,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getAdminUser(supabase);
     if (!user || (model.viewers as any).user_id !== user.id) {
       return NextResponse.json(
         { error: 'Unauthorized' },

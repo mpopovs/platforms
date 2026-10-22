@@ -1,5 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { canAccessAdminPath } from '@/lib/auth/roles';
+import { resolveClaims } from '@/lib/auth/claims';
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -54,6 +56,20 @@ export async function updateSession(request: NextRequest) {
       redirectResponse.cookies.set(cookie.name, cookie.value, cookie as never)
     );
     return redirectResponse;
+  }
+
+  // Signed in but without a staff role (or a sub-admin outside their
+  // capabilities): show the forbidden page, keep the URL.
+  if (isProtected && user && !canAccessAdminPath(await resolveClaims(user), pathname)) {
+    const forbiddenUrl = request.nextUrl.clone();
+    forbiddenUrl.pathname = '/forbidden';
+    forbiddenUrl.search = '';
+    forbiddenUrl.searchParams.set('email', user.email ?? '');
+    const forbiddenResponse = NextResponse.rewrite(forbiddenUrl, { status: 403 });
+    supabaseResponse.cookies.getAll().forEach((cookie) =>
+      forbiddenResponse.cookies.set(cookie.name, cookie.value, cookie as never)
+    );
+    return forbiddenResponse;
   }
 
   return supabaseResponse;
