@@ -8,7 +8,12 @@
 import * as THREE from 'three/webgpu';
 
 async function readDepth(url) {
-  const blob = await (await fetch(url)).blob();
+  let r;
+  try { r = await fetch(url); } catch (e) {
+    throw new Error(`could not load ${url.split('/').pop().split('?')[0]}: no answer from the file storage (connection, or the bucket's CORS / public read; run scripts/check-bucket.ts)`);
+  }
+  if (!r.ok) throw new Error(`could not load ${url.split('/').pop().split('?')[0]} (${r.status})`);
+  const blob = await r.blob();
   const bmp = await createImageBitmap(blob, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
   const c = new OffscreenCanvas(bmp.width, bmp.height), g = c.getContext('2d', { willReadFrequently: true });
   g.drawImage(bmp, 0, 0);
