@@ -82,7 +82,11 @@ function basis(pitchDeg) {
   const p = pitchDeg * Math.PI / 180;
   return { fwd: [0, Math.sin(p), -Math.cos(p)], up: [0, Math.cos(p), Math.sin(p)] }; // right = +x
 }
-/** disparity -> metres along the view axis, using the camera guess. */
+/**
+ * disparity -> metres along the view axis, using the camera guess.
+ * @param {{d: Float32Array, w: number, h: number}} disp
+ * @param {Partial<typeof DEFAULT_FIT>} [fit]
+ */
 export function fitDepth(disp, fit = DEFAULT_FIT) {
   const { d, w, h } = disp, F = { ...DEFAULT_FIT, ...fit };
   const fy = (h / 2) / Math.tan(F.vfov * Math.PI / 360), { fwd, up } = basis(F.pitch);
