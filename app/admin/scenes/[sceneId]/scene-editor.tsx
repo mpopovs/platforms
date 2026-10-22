@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SceneHandle } from '@claypixels/scene-engine';
 import { sha256Hex, uploadToTarget } from '@/lib/scenes/upload-client';
+import { InstallAppButton } from '../editor-app';
 import {
   prepareUploadsAction,
   publishSceneAction,
@@ -175,6 +176,7 @@ export function SceneEditor(props: {
           <button className={btn(panel === 'files')} onClick={() => setPanel(panel === 'files' ? null : 'files')}>Files</button>
           <button className={btn(panel === 'consumer')} onClick={() => setPanel(panel === 'consumer' ? null : 'consumer')}>Consumer</button>
           <a href={previewUrl} target="_blank" className={btn(false)}>Preview ↗</a>
+          <InstallAppButton className={btn(false)} />
           <button
             disabled={busy || !hasScene}
             className="rounded-md bg-[#2f7d4f] px-3 py-1.5 font-semibold hover:bg-[#3f9a64] disabled:opacity-50"

@@ -3,6 +3,16 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   serverExternalPackages: ['puppeteer'],
   transpilePackages: ['@claypixels/scene-engine'],
+  // scene editor app (PWA): its service worker lives at the root but controls only /admin/scenes
+  async headers() {
+    return [{
+      source: '/editor-sw.js',
+      headers: [
+        { key: 'Service-Worker-Allowed', value: '/admin/scenes' },
+        { key: 'Cache-Control', value: 'no-cache' }
+      ]
+    }];
+  },
   compiler: {
     removeConsole: false,
   },

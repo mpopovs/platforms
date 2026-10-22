@@ -5,6 +5,7 @@ import { scenesDb, type SceneRow } from '@/lib/scenes/server';
 import { createSceneAction } from './actions';
 import { TEMPLATES } from '@/lib/scenes/templates';
 import { SceneRowActions } from './scene-row-actions';
+import { InstallAppButton } from './editor-app';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'Scene editor' };
@@ -20,7 +21,10 @@ export default async function ScenesPage() {
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-8">
       <div className="mx-auto max-w-4xl">
-        <h1 className="text-2xl font-bold text-gray-900">Scene editor</h1>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold text-gray-900">Scene editor</h1>
+          <InstallAppButton className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700" />
+        </div>
         <p className="mt-1 text-gray-600">
           3D scenes and their stories for the consumer player: a hot spring, a fashion show, any environment. Edit the working copy, then publish a version.
         </p>

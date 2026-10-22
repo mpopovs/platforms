@@ -193,3 +193,12 @@ New scene → **From picture layers (2.5D)** (or, in any scene, Files → *2.5D 
 - **Look from the side** shows the stack like stage flats. The camera lens, height and tilt can be changed too.
 
 Stored in `layers/layers.json` (see `engine/layers.js` for the format).
+
+## Editor as an app (PWA)
+
+The scene editor (`/admin/scenes`) can be installed as an app: in Chrome or Edge use **Install app** (Scenes page or editor top bar) or the install icon in the address bar; on iPhone or iPad use Share → Add to Home Screen. It opens in its own window with its own icon.
+- Manifest: `/scene-editor.webmanifest`, named after the brand. Icons are in `public/icons/scene-editor-*`; `scripts/make-editor-icons.ts` makes them.
+- Service worker: `public/editor-sw.js`, scope `/admin/scenes`, separate from the TV viewer's `/sw.js`. It's only registered in production builds.
+  - It caches build files, the onnxruntime files and the last copy of pages and scene files, so a scene still opens without a connection.
+  - Saving and publishing always need a connection.
+  - The AI models are cached by the editor itself (Cache API `claypixels-models-v1`).
