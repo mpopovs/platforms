@@ -19,7 +19,7 @@ import { encodeGray16, decodePNG } from './png16.js';
 
 export const DEFAULT_DEPTH_MODEL = 'https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx';
 const ORT_CDN = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/';
-export const DEFAULT_FIT = { vfov: 40, pitch: -5, height: 1.6, far: 60, near: 2, ground: true };
+export const DEFAULT_FIT = { vfov: 40, pitch: -5, height: 1.6, far: 60, near: 2, ground: true, soft: 0.5 };
 const MAX_MM = 65000;
 const tick = () => new Promise(r => setTimeout(r, 0));
 
@@ -226,6 +226,18 @@ async function shapedDepth(bmp, m, gw, gh) {
   return zf;
 }
 
+
+// soft edge: 1 away from the seeds, fading to 0 on them over about `soft` x w/160 pixels
+// (soft 0 = hard cut). Blurred twice so the ramp has no visible steps.
+function featherAlpha(seed, w, h, soft) {
+  const out = new Float32Array(w * h).fill(1);
+  if (!(soft > 0)) { for (let i = 0; i < out.length; i++) if (seed[i]) out[i] = 0.25; return out; }
+  const r = Math.max(1, Math.round(soft * w / 160)), rb = Math.max(1, r >> 1);
+  const s = boxMean(boxMean(maxFilter(seed, w, h, r), w, h, rb), w, h, rb);
+  for (let i = 0; i < out.length; i++) { const t = Math.min(1, s[i] * 1.15); out[i] = 1 - t * t * (3 - 2 * t); }
+  return out;
+}
+
 // ---------------------------------------------------------------- layers
 /** Build all backdrop files from a picture and its disparity. */
 export async function buildBackdrop(bmp, disp, fit = DEFAULT_FIT, opts = {}) {
@@ -251,8 +263,7 @@ export async function buildBackdrop(bmp, disp, fit = DEFAULT_FIT, opts = {}) {
     const i = y * gw + x;
     if (lz[i - 1] - lz[i] > 0.05 || lz[i + 1] - lz[i] > 0.05 || lz[i - gw] - lz[i] > 0.05 || lz[i + gw] - lz[i] > 0.05) nearSide[i] = 1;
   }
-  const near1 = maxFilter(nearSide, gw, gh, 1), alpha = new Float32Array(gw * gh);
-  for (let i = 0; i < alpha.length; i++) alpha[i] = nearSide[i] ? 0.25 : near1[i] ? 0.7 : 1;
+  const alpha = featherAlpha(nearSide, gw, gh, F.soft);
   onProgress?.('Making the background layer…'); await tick();
   const r = Math.max(2, Math.round(gw / 240));
   const zDil = maxFilter(zf, gw, gh, r), eDil = maxFilter(Float32Array.from(edge), gw, gh, r);
@@ -383,7 +394,7 @@ const encodeLayer = async im => {
  */
 export async function splitLayers(bmp, disp, fit = DEFAULT_FIT, opts = {}) {
   const { onProgress, count = 4, width = 2048, fill = 'ai' } = opts;
-  const F = { ...DEFAULT_FIT, ...fit };
+  const F = { ...DEFAULT_FIT, ...fit }, softL = F.soft;
   const W = Math.min(width, bmp.width), H = Math.round(W * bmp.height / bmp.width);
   onProgress?.('Shaping the depth…'); await tick();
   const m = fitDepth(disp, F), z = await shapedDepth(bmp, m, W, H), lz = z.map(Math.log), N = W * H;
@@ -433,10 +444,12 @@ export async function splitLayers(bmp, disp, fit = DEFAULT_FIT, opts = {}) {
       if (!done) quickFill(im, mask);
     }
     // soft outline where this layer is in front of farther ones
+    const seedL = new Float32Array(N);
     for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
       const i = y * W + x; if (!own[i]) continue;
-      if (label[i - 1] < k || label[i + 1] < k || label[i - W] < k || label[i + W] < k) alpha[i] = Math.min(alpha[i], 0.55);
+      if (label[i - 1] < k || label[i + 1] < k || label[i - W] < k || label[i + W] < k) seedL[i] = 1;
     }
+    { const fa = featherAlpha(seedL, W, H, softL); for (let i = 0; i < N; i++) if (own[i]) alpha[i] = Math.min(alpha[i], fa[i]); }
     for (let i = 0; i < N; i++) im.data[i * 4 + 3] = Math.round(alpha[i] * 255);
     // distance and relief from the layer's own depth; the filled band continues it
     const zs = []; for (let i = 0; i < N; i += 7) if (own[i]) zs.push(z[i]);

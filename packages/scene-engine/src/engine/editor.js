@@ -1257,6 +1257,7 @@ export function initEditor(ctx) {
           h('div', { class: 'muted' }, `How the depth was scaled: ${meta.fit?.how === 'ground' ? 'from the ground at the bottom of the picture' : 'nearest/farthest distance'}. Too flat or too deep? Change these and rebuild (fast, no model run).`),
           n('Lens (vertical °)', 'vfov', 10, 100, 1), n('Camera height (m)', 'height', 0.1, 50, 0.05), n('Camera tilt (°)', 'pitch', -60, 30, 0.5),
           n('Farthest (m)', 'far', 5, 65, 1),
+          n('Edge softness (0 = sharp cut)', 'soft', 0, 2, 0.1),
           h('label', { class: 'ctl c2' }, h('span', {}, 'Ground at bottom'), h('span', {}, chk)),
           n('Nearest (m, no ground)', 'near', 0.3, 30, 0.1),
           h('div', { class: 'muted' }, 'Changes rebuild by themselves. Smaller lens angle = flatter, farther picture. Taller camera = bigger, deeper world.'),
