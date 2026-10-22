@@ -1382,6 +1382,18 @@ export function initEditor(ctx) {
       const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.25));
       for (let s = 0; s < n; s++) add(ax + (bx - ax) * s / n, az + (bz - az) * s / n);
     }
+    // the picture's depth is bumpy (reflections, snow, rocks): smooth the outline's height so it does not spike
+    if (kind !== 'water' && !(it && it.y != null) && pts.length > 4) {
+      const n = pts.length, K = 8;
+      for (let pass = 0; pass < 3; pass++) {
+        const ys = pts.map(p => p.y);
+        for (let i = 0; i < n; i++) {
+          let s = 0, c = 0;
+          for (let d = -K; d <= K; d++) { const j = closed ? (i + d + n * 4) % n : i + d; if (j >= 0 && j < n) { s += ys[j]; c++; } }
+          pts[i].y = s / c;
+        }
+      }
+    }
     if (closed && pts.length) pts.push(pts[0].clone());
     for (let i = pts.length - 1; i > 0; i--) if (pts[i].distanceToSquared(pts[i - 1]) < 1e-8) pts.splice(i, 1);
     if (pts.length < 2) return new THREE.Group();
