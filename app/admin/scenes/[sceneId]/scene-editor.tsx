@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SceneHandle } from '@claypixels/scene-engine';
 import { sha256Hex, uploadToTarget } from '@/lib/scenes/upload-client';
+import { InstallAppButton } from '../editor-app';
 import {
   prepareUploadsAction,
   publishSceneAction,
@@ -98,6 +99,8 @@ export function SceneEditor(props: {
       handle = await mountScene(host, {
         base: `/api/scenes/${sceneId}/files/draft`,
         edit: true,
+        depthModelUrl: process.env.NEXT_PUBLIC_DEPTH_MODEL_URL || undefined,
+        inpaintModelUrl: process.env.NEXT_PUBLIC_INPAINT_MODEL_URL || undefined,
         saveFile: async (name, body, type) => {
           const blob = typeof body === 'string' ? new Blob([body], { type }) : body;
           const at = await saveItems([{ name, blob }]);
@@ -131,7 +134,7 @@ export function SceneEditor(props: {
         ? folderItems(list, (rel) => rel)
         : folderItems(list, (rel) => (/^[^/]+\/[^/]+_capy_v2\.glb$/.test(rel) ? `capys/${rel}` : null));
     if (!items.length) {
-      setStatus(kind === 'capys' ? 'No <tag>/<tag>_capy_v2.glb files in that folder' : 'That folder is empty');
+      setStatus(kind === 'capys' ? 'No <name>/<name>_capy_v2.glb model files in that folder' : 'That folder is empty');
       return;
     }
     if (kind === 'world' && !items.some((i) => i.name === 'scene.json')) {
@@ -157,7 +160,7 @@ export function SceneEditor(props: {
           <div className="max-w-md rounded-2xl bg-white p-6 shadow">
             <h2 className="text-lg font-semibold text-gray-900">{props.name} has no files yet</h2>
             <p className="mt-2 text-sm text-gray-600">
-              Upload a world folder (the one with <code>scene.json</code>, the backdrop and splats), then the capybaras folder.
+              Upload a world folder (the one with <code>scene.json</code>, the backdrop and splats), then the models folder. For a GLB place, create the scene from a template and use Files → Environment in the editor.
             </p>
             <FolderButton label="Upload world folder" disabled={busy} onPick={(l) => uploadFolder(l, 'world')} />
             {status && <p className="mt-3 text-sm text-gray-700">{status}</p>}
@@ -173,6 +176,7 @@ export function SceneEditor(props: {
           <button className={btn(panel === 'files')} onClick={() => setPanel(panel === 'files' ? null : 'files')}>Files</button>
           <button className={btn(panel === 'consumer')} onClick={() => setPanel(panel === 'consumer' ? null : 'consumer')}>Consumer</button>
           <a href={previewUrl} target="_blank" className={btn(false)}>Preview ↗</a>
+          <InstallAppButton className={btn(false)} />
           <button
             disabled={busy || !hasScene}
             className="rounded-md bg-[#2f7d4f] px-3 py-1.5 font-semibold hover:bg-[#3f9a64] disabled:opacity-50"
@@ -194,8 +198,8 @@ export function SceneEditor(props: {
           <div className="w-80 rounded-xl bg-[rgba(20,26,34,.92)] p-3 text-[#e8eef5] shadow-lg">
             <p className="text-[#9fb2c6]">Replace or add files in the working copy. Unchanged files are not uploaded again.</p>
             <FolderButton label="Upload world folder" disabled={busy} onPick={(l) => uploadFolder(l, 'world')} dark />
-            <FolderButton label="Upload capybaras folder" disabled={busy} onPick={(l) => uploadFolder(l, 'capys')} dark />
-            <p className="mt-2 text-xs text-[#9fb2c6]">Capybaras: pick the animations folder; only &lt;tag&gt;/&lt;tag&gt;_capy_v2.glb files are taken. Single layers can be swapped in the editor’s own Files tab.</p>
+            <FolderButton label="Upload models folder" disabled={busy} onPick={(l) => uploadFolder(l, 'capys')} dark />
+            <p className="mt-2 text-xs text-[#9fb2c6]">Models folder: pick the animations folder; &lt;name&gt;/&lt;name&gt;_capy_v2.glb files are taken. Add other models (any GLB) in the editor’s Models tab, and the place itself (GLB) in its Files tab.</p>
           </div>
         )}
 

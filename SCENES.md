@@ -94,6 +94,46 @@ pnpm tsx scripts/import-scene.ts \
 
 Files with the same content are stored once, so re-running only uploads what changed.
 
+## Different scenes and stories
+
+A scene is any environment plus a cast plus an optional story. Pick a
+starting point when you create it:
+
+| Template | What you get |
+|---|---|
+| Fashion show | Lit catwalk, four models, and a story: each walks out, poses for a close shot, walks back; captions; loops |
+| Empty stage | A lit stage with no cast, for any story |
+| From a world folder | Nothing yet; upload a Marble / hot spring world folder |
+
+**Environment** (`scene.json`): a Marble splat or the 2.5D image backdrop (as
+before), `"environment": "stage"` (procedural stage, settings under `"stage"`),
+or a GLB room (`"files": { "environment": "env/room.glb" }`).
+
+**Cast tab** (`cast.json`): any rigged GLB with animations. *Add character
+(GLB)*, then set its height and walk speed, which clip is idle / walk / pose /
+swim, and the **outfit mesh**: the mesh that wears the child's drawing (its
+UVs must match the worksheet). *Try a drawing* previews any image on it.
+Scenes without cast.json still get the eight capybaras.
+
+**Story tab** (`story.json`): steps played in order like a short film:
+camera shot (frame it in Free view, *Use current view*, optional follow),
+walk (route or spot), place, animation, caption, wait, show / hide, outfit
+(the child's drawing or an image), music, and free (back to their own
+behaviour). *Start next step together* lets two things happen at once.
+*Plays by itself* starts it in the player; *Loop* repeats it.
+
+**Files tab** (no serve.py needed: files go to the scene's storage):
+
+| Card | Download | Upload / replace |
+|---|---|---|
+| Environment GLB | yes | switch the scene to a GLB place; scale / turn / lift / shift |
+| 360° background image | yes | JPG/PNG panorama (also lights the scene); remove |
+| Image backdrop layers | yes | front image, background fill, both 16-bit depth maps |
+| 3D Gaussian splats (.spz) | yes | replace a set, or switch the scene to a splat world |
+| Collision surface (GLB) | yes | ground mesh for splat worlds |
+| Models | yes | replace a model's GLB or give a stand-in a real file |
+| Scene settings | zones / look JSON | load zones / look JSON |
+
 ## How it fits together
 
 - The engine is `packages/scene-engine` (three.js r186, WebGPU with WebGL
@@ -109,3 +149,56 @@ Files with the same content are stored once, so re-running only uploads what cha
   the Files tab swaps single layers; **Publish** freezes the working copy as
   the next version. Players of `/scene/<id>` load a fixed version, so a new
   publish never mixes files for someone already watching.
+
+## 2.5D scene from a picture
+
+New scene → **From a picture (2.5D)** (or, in any scene, Files → *2.5D from a picture*). Pick a JPG/PNG:
+
+1. The depth is worked out **in the browser** with Depth Anything V2 Small (Apache-2.0, ~100 MB, downloaded once and kept in the browser cache). Graphics card (WebGPU) when available, otherwise the processor: ~15 s – 2 min.
+2. The bottom of the picture is taken as ground under a camera 1.6 m high, 40° lens, tilted 5° down. That sets the real-world scale, so models walk on the picture's ground.
+3. The picture is split into a front layer, cut at depth edges, and a filled-in background layer, so the small camera movement never shows holes.
+
+Files → **Adjust the depth** changes lens, camera height, tilt and farthest distance, then rebuilds in a second (no model run). Each layer can still be downloaded, retouched and uploaded again.
+
+Optional: host the model yourself (e.g. on the Hetzner bucket) and set `NEXT_PUBLIC_DEPTH_MODEL_URL` to its URL. Without it, the model comes from Hugging Face and the runtime from jsDelivr.
+
+## Objects
+
+Editor → **Objects**: upload any GLB (it lands in the middle of the view), then move / turn / size it with the handles (W / E / R) or exact numbers (X, Z, lift, turn, tilt, size). Objects can be duplicated, dropped to the ground, and marked **Blocks walking** so models go around them. Stored in `zones.json` → `props` as `{ type: "model", file, x, z, y, rot, rx, rz, scale, size, blocks }`.
+
+## Snow
+
+Look → Snowfall: amount, fall speed, flake size, wind (m/s), wind direction and gusts. Flakes fill a box that travels with the camera, so the snow never runs out.
+
+## Lights
+
+Editor → **Lights**:
+- **Mood presets:** Day, Golden hour, Blue hour, Night, Show and Studio. Each sets sky, sun, fog and picture tint together.
+- **Sun:** direction and height. A sun disc shows in the scene while you drag.
+- **Sky light:** sky colour, ground bounce and strength.
+- **Picture tint:** for 2.5D pictures, which the lights don't light.
+- **Lights you add:** spotlights, lamps or a set of three "show lights". Move a light and its aim point with the on-screen handles. Each has colour, strength, reach, beam width, soft edge, shadows and an animation (pulse, flicker, sweep, colour cycle, follow a model).
+
+Story → **Light / mood** step fades the whole mood, or switches, recolours and dims lights. These changes last only while the story plays; the saved lights stay as set.
+Saved in `layout.json` → `look` (mood values) and `lights` (placed lights).
+
+## 2.5D from your own layers
+
+New scene → **From picture layers (2.5D)** (or, in any scene, Files → *2.5D from your own layers*). Pick several prepared images at once (PNG with transparency):
+- Images the size of the whole composition **fill the frame**. Sorted by file name, the first is the farthest, so name them `1_sky.png`, `2_hills.png`, `3_house.png`, … They're spread from 40 m to 4 m.
+- Smaller images become **pieces** you place by hand: drag them in the view, use the mouse wheel to resize (Alt + wheel moves them nearer or farther), or use the sliders.
+- **Distance** changes only how much a layer shifts as the camera moves; seen from the camera, it always looks as you composed it.
+- **Make depth for this layer** + **Relief** gives one layer some roundness using its own depth (0 = flat cut-out).
+- **Ground (lies flat):** below the horizon that layer lies on the floor, and models walk on it.
+- **Look from the side** shows the stack like stage flats. The camera lens, height and tilt can be changed too.
+
+Stored in `layers/layers.json` (see `engine/layers.js` for the format).
+
+## Editor as an app (PWA)
+
+The scene editor (`/admin/scenes`) can be installed as an app: in Chrome or Edge use **Install app** (Scenes page or editor top bar) or the install icon in the address bar; on iPhone or iPad use Share → Add to Home Screen. It opens in its own window with its own icon.
+- Manifest: `/scene-editor.webmanifest`, named after the brand. Icons are in `public/icons/scene-editor-*`; `scripts/make-editor-icons.ts` makes them.
+- Service worker: `public/editor-sw.js`, scope `/admin/scenes`, separate from the TV viewer's `/sw.js`. It's only registered in production builds.
+  - It caches build files, the onnxruntime files and the last copy of pages and scene files, so a scene still opens without a connection.
+  - Saving and publishing always need a connection.
+  - The AI models are cached by the editor itself (Cache API `claypixels-models-v1`).

@@ -26,6 +26,10 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Nav, KIND, CELL, polyContains, polyCentroid } from './nav.js';
 import { loadDepthBackdrop } from './backdrop.js';
 import { createUi } from './ui.js';
+import { buildStage } from './stage.js';
+import { createStoryRunner } from './story.js';
+import { createLighting } from './lights.js';
+import { buildLayers, pickLayer, forgetLayerFile } from './layers.js';
 
 /**
  * Mount the scene into `container`. Returns { ready, destroy }.
@@ -46,12 +50,19 @@ const IS_PHONE = matchMedia('(pointer: coarse)').matches && Math.min(innerWidth,
 const statusEl = ui.status;
 const say = t => { statusEl.textContent = t; };
 
-const TAGS = ['baby', 'explorer_boy', 'four_legged', 'girl_child', 'mother', 'sporty_boy', 'teen_girl_be', 'teen_girl_ho'];
+// Default cast when a scene has no cast.json: the eight capybaras.
+const LEGACY_TAGS = ['baby', 'explorer_boy', 'four_legged', 'girl_child', 'mother', 'sporty_boy', 'teen_girl_be', 'teen_girl_ho'];
+const LEGACY_NAMES = { baby: 'Baby', explorer_boy: 'Explorer boy', four_legged: 'Four-legged', girl_child: 'Girl child', mother: 'Mother', sporty_boy: 'Sporty boy', teen_girl_be: 'Teen girl (beanie)', teen_girl_ho: 'Teen girl (hoodie)' };
 const SURPRISE = {
   baby: 'surprise_popcorn', explorer_boy: 'surprise_lookout', four_legged: 'surprise_chill_flop',
   girl_child: 'surprise_pirouette', mother: 'surprise_piggyback_offer', sporty_boy: 'surprise_backflip',
   teen_girl_be: 'surprise_runway_strut', teen_girl_ho: 'surprise_dance'
 };
+const legacyCast = () => LEGACY_TAGS.map((tag, i) => ({ id: tag, name: `Model ${i + 1}`, file: `capys/${tag}/${tag}_capy_v2.glb`, clips: { pose: SURPRISE[tag] }, sizeFactor: tag === 'baby' ? 0.72 : 1 }));
+// cast.json: { characters: [{ id, name, file, height?, speed?, clips?: { idle, walk, swim, pose, ... }, outfit?: { mesh: name | [names] }, enabled? }] }
+let cast = [];
+let TAGS = [];
+const castUrl = ch => ch.file?.startsWith('capys/') && opts.capysBase ? `${CAPYS}/${ch.file.slice(6)}` : `${WORLD}/${ch.file}`;
 
 // ---------------------------------------------------------------- layout (look + camera)
 const DEFAULT_LAYOUT = {
@@ -83,16 +94,18 @@ controls.enableDamping = true;
 
 // ---------------------------------------------------------------- hero camera
 let view = 'hero';
-const hero = { base: new THREE.Vector3(), dir: new THREE.Vector3(), aim: new THREE.Vector2(), cur: new THREE.Vector2(), cam: new THREE.PerspectiveCamera() };
+const hero = { base: new THREE.Vector3(), dir: new THREE.Vector3(), aim: new THREE.Vector2(), cur: new THREE.Vector2(), cam: new THREE.PerspectiveCamera(), input: -1e9 };
 on(window, 'resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   hero.cam.aspect = camera.aspect; hero.cam.updateProjectionMatrix();
   if (view === 'hero' && typeof splatRoot !== 'undefined') setupHero();
   renderer.setSize(innerWidth, innerHeight);
 });
-on(window, 'pointermove', e => hero.aim.set((e.clientX / innerWidth) * 2 - 1, (e.clientY / innerHeight) * 2 - 1));
-on(window, 'deviceorientation', e => { if (e.gamma != null) hero.aim.set(THREE.MathUtils.clamp(e.gamma / 25, -1, 1), THREE.MathUtils.clamp((e.beta - 45) / 25, -1, 1)); });
+on(window, 'pointermove', e => (hero.input = performance.now()) && hero.aim.set((e.clientX / innerWidth) * 2 - 1, (e.clientY / innerHeight) * 2 - 1));
+on(window, 'deviceorientation', e => { if (e.gamma != null) hero.input = performance.now(), hero.aim.set(THREE.MathUtils.clamp(e.gamma / 25, -1, 1), THREE.MathUtils.clamp((e.beta - 45) / 25, -1, 1)); });
 let backdropMeta = null; // set when the 2.5D image backdrop is used
+let envMode = 'splat';
+const isPictureWorld = () => envMode === 'depth' || envMode === 'layers';
 function setupHero() {
   // the generation camera sits at the splat's own origin; the image backdrop has its own camera
   let fov = L.camera.fov, pitchDeg = L.camera.pitch, yawDeg = L.camera.yaw;
@@ -103,6 +116,10 @@ function setupHero() {
     const imgV = THREE.MathUtils.degToRad(c.vfov), imgH = 2 * Math.atan(Math.tan(imgV / 2) * backdropMeta.width / backdropMeta.height);
     const margin = 0.9;
     fov = THREE.MathUtils.radToDeg(Math.min(imgV * margin, 2 * Math.atan(Math.tan(imgH / 2) * margin / camera.aspect)));
+  } else if (envMode === 'stage' || envMode === 'glb') {
+    hero.base.fromArray(L.camera.pos);
+    const d = new THREE.Vector3().fromArray(L.camera.target).sub(hero.base).normalize();
+    pitchDeg = THREE.MathUtils.radToDeg(Math.asin(d.y)); yawDeg = THREE.MathUtils.radToDeg(Math.atan2(-d.x, -d.z));
   } else hero.base.copy(splatRoot.position);
   hero.fov = fov; hero.pitch = pitchDeg; hero.yaw = yawDeg;
   const pitch = THREE.MathUtils.degToRad(pitchDeg), yaw = THREE.MathUtils.degToRad(yawDeg);
@@ -111,18 +128,230 @@ function setupHero() {
   camera.position.copy(hero.base); camera.lookAt(hero.base.clone().add(hero.dir));
   hero.cam.copy(camera); hero.cam.updateMatrixWorld();
 }
-const _look = new THREE.Vector3();
+const _look = new THREE.Vector3(), _zero2 = new THREE.Vector2();
+// Editor: the camera keeps still while you edit, unless "Live motion" is on
+// (or a camera setting was just changed: then it plays for a few seconds).
+const live = { on: false, until: 0 };
+const calmEdit = () => EDIT && !live.on && performance.now() > live.until;
 function updateHero(dt, t) {
-  const still = EDIT; // no parallax or drift while editing
-  if (still) hero.cur.set(0, 0); else hero.cur.lerp(hero.aim, Math.min(1, dt * 2.5));
-  const par = still ? 0 : L.camera.parallax, dr = still ? 0 : L.camera.drift;
+  const still = calmEdit();
+  // nobody moving the mouse or the phone (a display, a phone on the table):
+  // the view wanders slowly by itself so the 2.5D parallax still shows.
+  // In the editor preview it always wanders (the mouse is busy with the panel), a bit faster.
+  if (!still && (EDIT || performance.now() - hero.input > 4000)) {
+    const w = (L.camera.handheld?.speed ?? (isPictureWorld() ? 0.6 : 1)) * (EDIT ? 0.45 : 0.12);
+    hero.aim.set(Math.sin(t * w) * 0.8, Math.sin(t * w * 0.63 + 1.3) * 0.5);
+    hero.cur.lerp(hero.aim, Math.min(1, dt * 0.8));
+  } else if (still) hero.cur.lerp(_zero2, Math.min(1, dt * 2)); else hero.cur.lerp(hero.aim, Math.min(1, dt * 2.5));
+  // fade the motion in and out (no jump when an editor preview ends)
+  hero.fade = (hero.fade ?? (still ? 0 : 1)) + ((still ? 0 : 1) - (hero.fade ?? 0)) * Math.min(1, dt * 2);
+  const par = L.camera.parallax * hero.fade, dr = L.camera.drift * hero.fade;
   const ox = hero.cur.x * par + Math.sin(t * 0.13) * dr, oy = -hero.cur.y * par * 0.4 + Math.sin(t * 0.21) * dr * 0.5;
   camera.position.set(hero.base.x + ox, hero.base.y + oy, hero.base.z);
   _look.copy(hero.base).addScaledVector(hero.dir, 9);
   camera.lookAt(_look);
 }
+// Story camera. Modes (camera step "mode"):
+//   fixed   go to shot { pos, target, fov }
+//   look    stay at shot.pos (or where it is) and keep aiming at a character
+//   follow  move with a character, keeping `offset` from it (world axes, or
+//           the character's own when frame = "character"): a tracking shot
+//   orbit   circle a character at `radius` / `height`, `speed` degrees per second
+//   drift   a slow, calm camera move for still or 2.5D scenes: from shot (or
+//           where the camera is) glide `move` [right, up, forward] metres over
+//           `driftSeconds`, then back again (`pingpong`, default true)
+// Every change blends from the current view over `seconds`.
+const storyCam = { mode: 'fixed', c: null, elapsed: 0, drift: null, shot: null, offset: new THREE.Vector3(0, 1, 2.5), frame: 'world',
+  radius: 2.5, height: 1.2, speed: 20, angle: 0, fov: 42,
+  fromPos: new THREE.Vector3(), fromT: new THREE.Vector3(), fromFov: 42, t: 1, dur: 0, done: null,
+  target: new THREE.Vector3() };
+const _cp = new THREE.Vector3(), _ct = new THREE.Vector3(), _off = new THREE.Vector3();
+const charAim = (c, out) => out.set(c.root.position.x, c.root.position.y + c.h * 0.55, c.root.position.z);
+function desiredCam(dt, pos, target) {
+  const m = storyCam.mode, c = storyCam.c;
+  if (m === 'drift') {
+    storyCam.elapsed += dt;
+    const D = storyCam.drift, T = Math.max(1, D.seconds);
+    let p = storyCam.elapsed / T;
+    p = D.pingpong ? (Math.floor(p) % 2 ? 1 - (p % 1) : p % 1) : Math.min(1, p);
+    const e = p * p * (3 - 2 * p);
+    pos.copy(D.pos).addScaledVector(D.right, D.move[0] * e).addScaledVector(D.up, D.move[1] * e).addScaledVector(D.fwd, D.move[2] * e);
+    target.copy(D.target).addScaledVector(D.right, D.move[0] * e * 0.6).addScaledVector(D.up, D.move[1] * e * 0.6);
+    return;
+  }
+  if (m === 'fixed' || !c) { pos.fromArray(storyCam.shot?.pos || camera.position.toArray()); target.fromArray(storyCam.shot?.target || storyCam.target.toArray()); return; }
+  charAim(c, target);
+  if (m === 'look') { pos.fromArray(storyCam.shot?.pos || storyCam.fromPos.toArray()); return; }
+  if (m === 'follow') {
+    _off.copy(storyCam.offset);
+    if (storyCam.frame === 'character') _off.applyAxisAngle(THREE.Object3D.DEFAULT_UP, c.root.rotation.y);
+    pos.copy(c.root.position).add(_off); return;
+  }
+  if (m === 'orbit') {
+    storyCam.angle += THREE.MathUtils.degToRad(storyCam.speed) * dt;
+    pos.set(c.root.position.x + Math.sin(storyCam.angle) * storyCam.radius, c.root.position.y + storyCam.height, c.root.position.z + Math.cos(storyCam.angle) * storyCam.radius);
+  }
+}
+// ---------------------------------------------------------------- live camera
+// Handheld: a smooth, never-repeating sway (sum of sines at unrelated
+// frequencies) added on top of whatever the camera does, every frame, in
+// every view except free editing. Applied just for rendering, so it never
+// feeds back into the camera's own movement. layout.json camera.handheld:
+// { amount 0..2 (default 0.5), speed 0.2..3 (default 1) }.
+const SWAY = [[0.31, 1.7], [0.53, 0.4], [0.87, 2.9], [1.37, 5.1], [2.11, 3.3]];
+function sway(t, seed) { let v = 0, a = 1, n = 0; for (const [f, p] of SWAY) { v += a * Math.sin(t * f * (1 + seed * 0.13) + p + seed * 7.1); n += a; a *= 0.6; } return v / n; }
+const _shakePos = new THREE.Vector3(), _shakeQuat = new THREE.Quaternion(), _shakeE = new THREE.Euler();
+// Defaults depend on the world: 2.5D picture backdrops get a calm, gentle
+// camera (little tilt so the picture edges never show), others a livelier one.
+function cameraFeel() {
+  const hh = L.camera.handheld || {}, calm = isPictureWorld();
+  return {
+    amount: hh.amount ?? (calm ? 0.25 : 0.5),
+    speed: hh.speed ?? (calm ? 0.6 : 1),
+    rotate: hh.rotate ?? (calm ? 0.25 : 1),           // share of the sway that tilts the view
+    breathe: hh.breathe ?? (calm ? 0.04 : 0),          // slow push in / pull back, metres
+    period: hh.breathePeriod ?? 18                     // seconds per breath
+  };
+}
+const _fwd = new THREE.Vector3();
+function applyHandheld(t) {
+  const f = cameraFeel();
+  const amount = f.amount * (director.on ? director.op?.shake ?? 1 : 1);
+  if ((amount <= 0 && f.breathe <= 0) || (EDIT && view !== 'story' && (view !== 'hero' || calmEdit()))) return false; // calm while editing unless previewing
+  const st = t * f.speed;
+  _shakePos.copy(camera.position); _shakeQuat.copy(camera.quaternion);
+  const p = 0.018 * amount, r = THREE.MathUtils.degToRad(0.55) * amount * f.rotate;
+  camera.position.x += sway(st, 1) * p; camera.position.y += sway(st, 2) * p * 0.8; camera.position.z += sway(st, 3) * p * 0.6;
+  if (f.breathe > 0) { camera.getWorldDirection(_fwd); camera.position.addScaledVector(_fwd, Math.sin((t / f.period) * Math.PI * 2) * f.breathe); }
+  if (r > 0) { _shakeE.set(sway(st * 1.1, 4) * r, sway(st * 0.9, 5) * r, sway(st * 0.7, 6) * r * 0.5); camera.quaternion.multiply(new THREE.Quaternion().setFromEuler(_shakeE)); }
+  camera.updateMatrixWorld();
+  return true;
+}
+function undoHandheld() { camera.position.copy(_shakePos); camera.quaternion.copy(_shakeQuat); camera.updateMatrixWorld(); }
+
+// Director: several virtual camera operators cover the performer and the
+// show cuts between them at unpredictable moments (camera mode "director").
+const OPERATORS = {
+  front: { label: 'Front tracking', shake: 1.0, fov: 40, pose: (s, h, f, u) => ({ off: [Math.sin(f) * (3.4 + u * 1.0) + Math.cos(f) * 0.6, h * (0.55 + u * 0.3), Math.cos(f) * (3.4 + u * 1.0) - Math.sin(f) * 0.6], track: true }) },
+  side: { label: 'Side dolly', shake: 0.8, fov: 42, pose: (s, h, f, u) => ({ off: [Math.cos(f) * (u > 0.5 ? 2.6 : -2.6), h * 0.55, -Math.sin(f) * (u > 0.5 ? 2.6 : -2.6)], track: true }) },
+  low: { label: 'Low angle', shake: 1.3, fov: 46, pose: (s, h, f, u) => ({ off: [Math.sin(f + 0.5) * 2.0, 0.25, Math.cos(f + 0.5) * 2.0], aim: h * 0.75, track: true }) },
+  close: { label: 'Close-up', shake: 1.6, fov: 28, pose: (s, h, f, u) => ({ orbit: { radius: 1.6 + u * 0.4, height: h * 0.7, speed: u > 0.5 ? 14 : -14 }, aim: h * 0.6 }) },
+  crane: { label: 'Crane', shake: 0.5, fov: 40, pose: (s, h, f, u) => ({ off: [Math.sin(f + 2.4) * 3.5, h + 2.6 + u, Math.cos(f + 2.4) * 3.5], rise: 0.25, track: true }) },
+  wide: { label: 'Wide (hero)', shake: 0.6, fov: null, pose: () => ({ hero: true }) },
+  back: { label: 'Behind', shake: 1.1, fov: 44, pose: (s, h, f, u) => ({ off: [-Math.sin(f) * 2.6, h * 0.9, -Math.cos(f) * 2.6], track: true }) }
+};
+const director = { on: false, ops: Object.keys(OPERATORS), who: 'auto', min: 2.5, max: 6, next: 0, op: null, opName: '', plan: null, u: 0, t: 0 };
+let lastPerformer = null; // set by the story runner
+function directorSubject() {
+  if (director.who && director.who !== 'auto') return findChar(director.who) || null;
+  if (lastPerformer && lastPerformer.enabled) return lastPerformer;
+  return capys.find(c => c.enabled && c.state === 'move') || capys.find(c => c.enabled) || null;
+}
+function directorCut(first = false) {
+  const pool = director.ops.filter(n => OPERATORS[n] && (n !== director.opName || director.ops.length === 1));
+  director.opName = pool[Math.floor(Math.random() * pool.length)] || 'wide';
+  director.op = OPERATORS[director.opName];
+  director.u = Math.random();
+  director.t = 0;
+  director.next = director.min + Math.random() * Math.max(0, director.max - director.min);
+  const s = directorSubject();
+  director.plan = s ? director.op.pose(s, s.h, s.root.rotation.y, director.u) : { hero: true };
+  // most cuts are hard cuts, some are quick glides (like a live vision mixer)
+  storyCam.fromPos.copy(camera.position); storyCam.fromT.copy(storyCam.target); storyCam.fromFov = camera.fov;
+  storyCam.t = first || Math.random() < 0.7 ? 1 : 0; storyCam.dur = 0.6;
+  if (director.plan.orbit && s) storyCam.angle = Math.atan2(camera.position.x - s.root.position.x, camera.position.z - s.root.position.z) + (Math.random() - 0.5);
+  if (storyCam.t >= 1) { directorPose(0, _cp, _ct); camera.position.copy(_cp); storyCam.target.copy(_ct); camera.fov = director.op.fov || L.camera.fov; }
+}
+function directorPose(dt, pos, target) {
+  const s = directorSubject(), plan = director.plan || { hero: true };
+  director.t += dt;
+  if (!s || plan.hero) {
+    pos.fromArray(L.camera.pos || [0, 1.6, 4]);
+    if (s) target.set(s.root.position.x, s.root.position.y + s.h * 0.55, s.root.position.z); else target.fromArray(L.camera.target || [0, 0.8, 0]);
+    return;
+  }
+  const P = s.root.position;
+  target.set(P.x, P.y + (plan.aim ?? s.h * 0.55), P.z);
+  if (plan.orbit) {
+    storyCam.angle += THREE.MathUtils.degToRad(plan.orbit.speed) * dt;
+    pos.set(P.x + Math.sin(storyCam.angle) * plan.orbit.radius, P.y + plan.orbit.height, P.z + Math.cos(storyCam.angle) * plan.orbit.radius);
+    return;
+  }
+  pos.set(P.x + plan.off[0], P.y + plan.off[1] + (plan.rise || 0) * director.t, P.z + plan.off[2]);
+}
+
+function cameraTo(step = {}) {
+  const shot = step.shot ?? 'hero';
+  const mode = step.mode || (step.follow ? 'look' : 'fixed');
+  const who = step.who || step.follow;
+  director.on = mode === 'director';
+  if (director.on) {
+    director.who = who || 'auto';
+    director.ops = Array.isArray(step.operators) && step.operators.length ? step.operators.filter(n => OPERATORS[n]) : Object.keys(OPERATORS);
+    director.min = step.cutMin ?? 2.5; director.max = step.cutMax ?? 6;
+    view = 'story'; controls.enabled = false; storyCam.mode = 'director';
+    directorCut(true);
+    return Promise.resolve();
+  }
+  if (mode === 'fixed' && shot === 'hero') { storyCam.c = null; director.on = false; setView('hero'); return Promise.resolve(); }
+  if (view !== 'story') storyCam.target.copy(camera.position).add(camera.getWorldDirection(_ct).multiplyScalar(5));
+  view = 'story'; controls.enabled = false;
+  storyCam.mode = mode; storyCam.c = who ? findChar(who) || null : null;
+  storyCam.shot = shot && shot !== 'hero' ? shot : null;
+  if (Array.isArray(step.offset)) storyCam.offset.fromArray(step.offset);
+  storyCam.frame = step.frame === 'character' ? 'character' : 'world';
+  storyCam.radius = step.radius ?? 2.5; storyCam.height = step.height ?? 1.2; storyCam.speed = step.speed ?? 20;
+  if (mode === 'drift') {
+    const sp = storyCam.shot ? new THREE.Vector3().fromArray(storyCam.shot.pos) : camera.position.clone();
+    const tp = storyCam.shot ? new THREE.Vector3().fromArray(storyCam.shot.target) : camera.position.clone().add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(5));
+    const fwd = tp.clone().sub(sp).normalize(), right = new THREE.Vector3().crossVectors(fwd, THREE.Object3D.DEFAULT_UP).normalize(), up = new THREE.Vector3().crossVectors(right, fwd);
+    const calm = isPictureWorld();
+    storyCam.drift = { pos: sp, target: tp, fwd, right, up, move: Array.isArray(step.move) ? step.move : calm ? [0.12, 0, 0.15] : [0.6, 0, 0.5],
+      seconds: step.driftSeconds ?? (calm ? 14 : 10), pingpong: step.pingpong !== false };
+    storyCam.elapsed = 0; storyCam.c = null;
+  }
+  if (mode === 'orbit' && storyCam.c) { const p = storyCam.c.root.position; storyCam.angle = Math.atan2(camera.position.x - p.x, camera.position.z - p.z); }
+  storyCam.fov = step.fov ?? storyCam.shot?.fov ?? camera.fov;
+  storyCam.fromPos.copy(camera.position); storyCam.fromT.copy(storyCam.target); storyCam.fromFov = camera.fov;
+  storyCam.t = 0; storyCam.dur = Math.max(0, step.seconds ?? 0);
+  return new Promise(res => { storyCam.done = res; });
+}
+function updateStoryCam(dt) {
+  if (storyCam.mode === 'director') {
+    director.next -= dt;
+    if (director.next <= 0) directorCut();
+    directorPose(dt, _cp, _ct);
+    const fov = director.op?.fov || L.camera.fov || 42;
+    if (storyCam.t < 1) {
+      storyCam.t = Math.min(1, storyCam.t + dt / storyCam.dur);
+      const e = storyCam.t * storyCam.t * (3 - 2 * storyCam.t);
+      camera.position.lerpVectors(storyCam.fromPos, _cp, e); storyCam.target.lerpVectors(storyCam.fromT, _ct, e);
+      camera.fov = storyCam.fromFov + (fov - storyCam.fromFov) * e;
+    } else {
+      // operators keep the performer framed with a little lag, like a person would
+      camera.position.lerp(_cp, Math.min(1, dt * 3.5)); storyCam.target.lerp(_ct, Math.min(1, dt * 5));
+      camera.fov += (fov - camera.fov) * Math.min(1, dt * 2);
+    }
+    camera.updateProjectionMatrix(); camera.lookAt(storyCam.target);
+    return;
+  }
+  storyCam.t = storyCam.dur > 0 ? Math.min(1, storyCam.t + dt / storyCam.dur) : 1;
+  const e = storyCam.t * storyCam.t * (3 - 2 * storyCam.t);
+  desiredCam(dt, _cp, _ct);
+  if (storyCam.t < 1) {
+    camera.position.lerpVectors(storyCam.fromPos, _cp, e);
+    storyCam.target.lerpVectors(storyCam.fromT, _ct, e);
+    camera.fov = storyCam.fromFov + (storyCam.fov - storyCam.fromFov) * e;
+  } else {
+    const k = storyCam.mode === 'fixed' ? 1 : Math.min(1, dt * 6); // smooth tracking
+    camera.position.lerp(_cp, k); storyCam.target.lerp(_ct, k); camera.fov = storyCam.fov;
+  }
+  camera.updateProjectionMatrix();
+  camera.lookAt(storyCam.target);
+  if (storyCam.t >= 1 && storyCam.done) { const d = storyCam.done; storyCam.done = null; d(); }
+}
 function setView(v) {
-  view = v;
+  view = v; if (v !== 'story') director.on = false;
   controls.enabled = v !== 'hero';
   if (v === 'hero') { setupHero(); return; }
   camera.fov = 50; camera.updateProjectionMatrix();
@@ -156,6 +385,12 @@ const hemi = new THREE.HemisphereLight(0xe3ebf5, 0x8d939c, 1.6);
 const key = new THREE.DirectionalLight(0xeef3ff, 1.4); key.position.set(-6, 9, 4);
 const warm = new THREE.PointLight(0xffb066, 6, 9, 1.6);
 scene.add(hemi, key, warm);
+const lighting = createLighting({
+  scene, camera, renderer, hemi, key, warm, edit: EDIT,
+  getL: () => L, getHero: () => hero,
+  getBackdrop: () => bdGroup ? [bdGroup.userData.front, bdGroup.userData.back].filter(Boolean) : layersGroup ? layersGroup.children.flatMap(c => c.isMesh ? [c] : c.children) : [],
+  findChar: id => findChar(id), getPerformer: () => lastPerformer
+});
 
 // ---------------------------------------------------------------- splat backdrop (near + far layers)
 const splatRoot = new THREE.Group(); scene.add(splatRoot);
@@ -168,7 +403,8 @@ function pickSplatSet(files) {
     : renderer.backend?.isWebGLBackend ? ['150k', '100k', '500k']
     : IS_PHONE ? ['hero_mobile', '500k', '150k'] : ['hero', '500k', '150k', 'full_res'];
   for (const k of order) if (files.splats?.[k]) return [].concat(files.splats[k]);
-  return [];
+  const any = Object.values(files.splats || {})[0]; // e.g. only full_res uploaded
+  return any ? [].concat(any) : [];
 }
 async function loadSplats(list) {
   const loaded = await Promise.all(list.map(f => new SPZLoader().loadAsync(`${WORLD}/${f}`)));
@@ -190,10 +426,14 @@ async function loadSplats(list) {
 // ---------------------------------------------------------------- ground height field (Marble collider)
 let hf = null;
 const HF_CELL = 0.25;
+// the area the ground height field and walk grid cover; pictures reach far, so they get a wider one
+const AREA_NEAR = { x0: -16, x1: 16, z0: -26, z1: 6 }, AREA_WIDE = { x0: -40, x1: 40, z0: -64, z1: 8 };
+let AREA = AREA_NEAR, HF_TOP = 1.2;
+function wideArea(on) { AREA = on ? AREA_WIDE : AREA_NEAR; HF_TOP = on ? 2.5 : 1.2; }
 function buildHeightField(obj) {
   // rasterise the collider's triangles; per cell keep the highest surface below 1.2 m
   obj.updateWorldMatrix(true, true);
-  const R = { x0: -16, x1: 16, z0: -26, z1: 6 };
+  const R = AREA;
   const W = Math.ceil((R.x1 - R.x0) / HF_CELL), H = Math.ceil((R.z1 - R.z0) / HF_CELL);
   const h = new Float32Array(W * H).fill(NaN), v = new THREE.Vector3();
   obj.traverse(o => {
@@ -204,7 +444,7 @@ function buildHeightField(obj) {
     for (let t = 0; t < tri; t++) {
       const a = (idx ? idx.getX(t * 3) : t * 3) * 3, b = (idx ? idx.getX(t * 3 + 1) : t * 3 + 1) * 3, c = (idx ? idx.getX(t * 3 + 2) : t * 3 + 2) * 3;
       const ax = P[a], ay = P[a + 1], az = P[a + 2], bx = P[b], by = P[b + 1], bz = P[b + 2], cx = P[c], cy = P[c + 1], cz = P[c + 2];
-      if (Math.min(ay, by, cy) > 1.2 || Math.max(ay, by, cy) < -3) continue;
+      if (Math.min(ay, by, cy) > HF_TOP || Math.max(ay, by, cy) < -3) continue;
       const minx = Math.max(R.x0, Math.min(ax, bx, cx)), maxx = Math.min(R.x1, Math.max(ax, bx, cx));
       const minz = Math.max(R.z0, Math.min(az, bz, cz)), maxz = Math.min(R.z1, Math.max(az, bz, cz));
       if (minx > maxx || minz > maxz) continue;
@@ -218,7 +458,7 @@ function buildHeightField(obj) {
         const l2 = ((cz - az) * (px - cx) + (ax - cx) * (pz - cz)) / den, l3 = 1 - l1 - l2;
         if (l1 < -0.01 || l2 < -0.01 || l3 < -0.01) continue;
         const y = l1 * ay + l2 * by + l3 * cy;
-        if (y > 1.2 || y < -3) continue;
+        if (y > HF_TOP || y < -3) continue;
         const k = zi * W + xi;
         if (!(h[k] >= y)) h[k] = y;
       }
@@ -260,7 +500,8 @@ function buildNav() {
   // without drawn walk areas: flat-ish ground the hero camera can see, not right at the lens
   const fallbackWalk = (x, z, g) => Math.abs(g) < L.walk.maxSlope && inHeroView(x, g, z) &&
     Math.hypot(x - hero.base.x, z - hero.base.z) > L.walk.minDist;
-  nav = new Nav(zones, groundY, { fallbackWalk });
+  const fp = objectFootprints();
+  nav = new Nav(fp.length ? { ...zones, blocked: [...(zones.blocked || []), ...fp] } : zones, groundY, { fallbackWalk, bounds: AREA });
   for (const c of capys) { c.path = null; c.state = 'idle'; }
   buildWater(); buildProps(); if (navViz) showGrid(true);
 }
@@ -298,7 +539,7 @@ function applyWaterLook() {
   waterU.color.value.set(w.color); waterU.size.value = 1 / Math.max(0.1, w.ripple.size);
   waterU.speed.value = w.ripple.speed; waterU.strength.value = 0.04 * w.ripple.strength;
   if (waterMesh) { waterMesh.material.opacity = w.opacity; waterMesh.position.y = w.y + (backdropMeta ? 0.015 : 0); }
-  const want = Math.round((IS_PHONE ? 18 : 30) * w.steam.amount);
+  const want = (w.polygon?.length ?? 0) >= 3 ? Math.round((IS_PHONE ? 18 : 30) * w.steam.amount) : 0;
   if (want !== steamCount) buildSteam();
 }
 const waterY = () => zones.water?.y ?? 0;
@@ -321,7 +562,8 @@ function steamSprite() {
 }
 function buildSteam() {
   steamGroup.clear(); steam.length = 0;
-  steamCount = Math.round((IS_PHONE ? 18 : 30) * zones.water.steam.amount);
+  // ambient steam rises from the water; no water drawn, no ambient steam
+  steamCount = (zones.water.polygon?.length ?? 0) >= 3 ? Math.round((IS_PHONE ? 18 : 30) * zones.water.steam.amount) : 0;
   for (let i = 0; i < steamCount; i++) steamSprite();
   // steam vents placed as props: a few extra puffs each
   for (const pr of zones.props || []) if (pr.type === 'steam') for (let i = 0; i < 6; i++) { const s = steamSprite(); s.userData.vent = pr; }
@@ -341,24 +583,61 @@ function updateSteam(dt) {
     s.material.opacity = Math.sin(u.life * Math.PI) * st.opacity;
   }
 }
+// Snowfall: soft round flakes in a box that travels with the camera (so it never
+// runs out), each with its own size, weight and flutter; wind with slow gusts.
+// layout.json look: snow (amount 0..3), snowSpeed, snowSize, wind (m/s),
+// windDir (degrees, 0 = to the right of the hero view), gusts (0..1).
 let snow = null; const snowData = [];
+const snowTex = softTexture('rgba(255,255,255,1)');
+const SNOW_BOX = [11, 5.5, 11];
 function buildSnow() {
-  if (snow) { scene.remove(snow); snow.geometry.dispose(); }
-  const n = Math.round((IS_PHONE ? 700 : 1800) * L.look.snow);
+  if (snow) { scene.remove(snow); snow.geometry.dispose(); snow.material.dispose(); }
+  const n = Math.round((IS_PHONE ? 700 : 1800) * (L.look.snow || 0));
   if (!n) { snow = null; return; }
-  snow = new THREE.InstancedMesh(new THREE.SphereGeometry(0.012, 5, 4), new THREE.MeshBasicNodeMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false }), n);
+  snow = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicNodeMaterial({ map: snowTex, color: 0xffffff, transparent: true, opacity: 0.95, depthWrite: false, fog: true }), n);
   snow.frustumCulled = false; snow.renderOrder = 9; snowData.length = 0;
-  for (let i = 0; i < n; i++) snowData.push({ x: (Math.random() - 0.5) * 18, y: Math.random() * 8, z: -Math.random() * 16, s: 0.25 + Math.random() * 0.35, p: Math.random() * 6 });
+  const c = snowCentre();
+  for (let i = 0; i < n; i++) {
+    const k = Math.random();
+    snowData.push({
+      p: new THREE.Vector3(c.x + (Math.random() * 2 - 1) * SNOW_BOX[0], c.y + (Math.random() * 2 - 1) * SNOW_BOX[1], c.z + (Math.random() * 2 - 1) * SNOW_BOX[2]),
+      k, size: 0.022 + k * k * 0.05,          // bigger flakes are rarer
+      fall: 0.45 + (1 - k) * 0.35 + Math.random() * 0.25, // big flakes float slower
+      f1: 0.6 + Math.random() * 1.4, f2: 0.5 + Math.random() * 1.2, ph: Math.random() * 100, sway: 0.15 + Math.random() * 0.35
+    });
+  }
   scene.add(snow);
+}
+const _sc = new THREE.Vector3(), _sf = new THREE.Vector3(), _ss = new THREE.Vector3();
+function snowCentre() {
+  camera.getWorldDirection(_sf); _sf.y = 0; if (_sf.lengthSq() < 1e-6) _sf.set(0, 0, -1); _sf.normalize();
+  return _sc.copy(camera.position).addScaledVector(_sf, SNOW_BOX[2] * 0.7).add(new THREE.Vector3(0, 1.5, 0));
 }
 const _m = new THREE.Matrix4();
 function updateSnow(dt, t) {
   if (!snow) return;
-  const sp = L.look.snowSpeed ?? 1;
+  const k = L.look, sp = k.snowSpeed ?? 1, size = k.snowSize ?? 1, gustAmt = k.gusts ?? 0.4;
+  const dir = THREE.MathUtils.degToRad((k.windDir ?? 0) + (hero.yaw || 0));
+  // gusts: slow swell and fade of the wind, never below calm
+  const g = Math.max(0, 1 + gustAmt * (Math.sin(t * 0.31) + 0.6 * Math.sin(t * 0.77 + 1.7) + 0.4 * Math.sin(t * 1.9 + 4.2)) * 0.6);
+  const wind = (k.wind ?? 0.3) * g, wx = Math.cos(dir) * wind, wz = -Math.sin(dir) * wind;
+  const c = snowCentre(), B = SNOW_BOX;
   for (let i = 0; i < snowData.length; i++) {
-    const d = snowData[i]; d.y -= d.s * dt * sp;
-    if (d.y < -0.5) { d.y = 8; d.x = (Math.random() - 0.5) * 18; d.z = -Math.random() * 16; }
-    _m.makeTranslation(hero.base.x + d.x + Math.sin(t * 0.7 + d.p) * 0.3, d.y, hero.base.z + d.z + Math.cos(t * 0.5 + d.p) * 0.2);
+    const d = snowData[i], p = d.p, light = 0.6 + d.k * 0.8; // light flakes follow the wind more
+    p.x += (wx * light + Math.sin(t * d.f1 + d.ph) * d.sway) * dt;
+    p.z += (wz * light + Math.cos(t * d.f2 + d.ph) * d.sway) * dt;
+    p.y -= d.fall * sp * dt * (1 - 0.15 * gustAmt * (g - 1)); // a gust lifts them a little
+    // wrap inside the box around the camera
+    for (let a = 0; a < 3; a++) {
+      const lo = c.getComponent(a) - B[a], span = B[a] * 2;
+      let v = p.getComponent(a);
+      if (v < lo || v > lo + span) { v = lo + ((((v - lo) % span) + span) % span); p.setComponent(a, v); }
+    }
+    // shrink to nothing near the box walls, so wrapping is never seen
+    let e = 1;
+    for (let a = 0; a < 3; a++) e = Math.min(e, (B[a] - Math.abs(p.getComponent(a) - c.getComponent(a))) / 1.5);
+    const s = d.size * size * Math.max(0, Math.min(1, e));
+    _m.compose(p, camera.quaternion, _ss.set(s, s, s));
     snow.setMatrixAt(i, _m);
   }
   snow.instanceMatrix.needsUpdate = true;
@@ -380,6 +659,7 @@ function updateRipples(dt) {
 
 // ---------------------------------------------------------------- props (mandarins, lanterns, steam vents)
 const propsGroup = new THREE.Group(); scene.add(propsGroup);
+const _rc = new THREE.Raycaster();
 const propMat = {
   orange: new THREE.MeshStandardNodeMaterial({ color: 0xff8a1f, roughness: 0.55 }),
   leaf: new THREE.MeshStandardNodeMaterial({ color: 0x2f5a2a, roughness: 0.7 }),
@@ -404,17 +684,50 @@ function makeProp(pr) {
     part(new THREE.BoxGeometry(0.12, 0.09, 0.18), propMat.glow, 0.52);
     part(new THREE.ConeGeometry(0.22, 0.14, 4), propMat.stone, 0.66).rotation.y = Math.PI / 4;
     part(new THREE.ConeGeometry(0.2, 0.06, 4), propMat.snow, 0.72).rotation.y = Math.PI / 4;
+  } else if (pr.type === 'model' && pr.file) { // an uploaded GLB object
+    loadObject(pr.file).then(src => { if (src) { const m = src.clone(true); m.userData.object = true; g.add(m); } else if (EDIT) g.add(missingMarker()); });
   } else if (pr.type === 'steam') { // a marker only; the puffs come from buildSteam
     const m = new THREE.Mesh(new THREE.CircleGeometry(0.12, 16).rotateX(-Math.PI / 2), new THREE.MeshBasicNodeMaterial({ color: 0xffffff, transparent: true, opacity: EDIT ? 0.25 : 0, depthWrite: false }));
     m.position.y = 0.02; g.add(m);
   }
-  g.position.set(pr.x, nav ? nav.height(pr.x, pr.z) : groundY(pr.x, pr.z), pr.z);
-  g.rotation.y = THREE.MathUtils.degToRad(pr.rot || 0); g.scale.setScalar(pr.scale || 1);
+  g.position.set(pr.x, propGround(pr) + (pr.y || 0), pr.z);
+  g.rotation.set(THREE.MathUtils.degToRad(pr.rx || 0), THREE.MathUtils.degToRad(pr.rot || 0), THREE.MathUtils.degToRad(pr.rz || 0), 'YXZ');
+  g.scale.setScalar(pr.scale || 1);
   return g;
+}
+// ground under an object; the object's own blocked footprint must not lift it
+const propGround = pr => nav ? nav.height(pr.x, pr.z) : groundY(pr.x, pr.z);
+// uploaded objects: loaded once per file, shadows on, centred on their footprint with the base at y = 0
+const objectCache = new Map();
+function loadObject(file) {
+  if (!objectCache.has(file)) objectCache.set(file, loader.loadAsync(`${WORLD}/${file}`).then(gl => {
+    const root = gl.scene, box = new THREE.Box3().setFromObject(root), c = box.getCenter(new THREE.Vector3());
+    root.position.set(-c.x, -box.min.y, -c.z);
+    root.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+    const wrap = new THREE.Group(); wrap.add(root);
+    wrap.userData.size = box.getSize(new THREE.Vector3()).toArray().map(v => +v.toFixed(3));
+    return wrap;
+  }).catch(e => { console.warn('[scene] object', file, e); return null; }));
+  return objectCache.get(file);
+}
+function missingMarker() {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), new THREE.MeshBasicNodeMaterial({ color: 0xff4f5e, wireframe: true }));
+  m.position.y = 0.2; return m;
+}
+// footprints of objects marked "blocks walking": rotated rectangles for the nav grid
+function objectFootprints() {
+  const out = [];
+  for (const pr of zones.props || []) {
+    if (!pr.blocks) continue;
+    const [w, , d] = pr.size || [0.4, 0, 0.4], s = pr.scale || 1, a = THREE.MathUtils.degToRad(pr.rot || 0), ca = Math.cos(a), sa = Math.sin(a);
+    const hw = w * s / 2, hd = d * s / 2;
+    out.push({ name: 'object', polygon: [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(([x, z]) => [+(pr.x + x * ca + z * sa).toFixed(3), +(pr.z - x * sa + z * ca).toFixed(3)]) });
+  }
+  return out;
 }
 function buildProps() {
   propsGroup.clear();
-  for (const pr of zones.props || []) propsGroup.add(makeProp(pr));
+  (zones.props || []).forEach((pr, i) => { const g = makeProp(pr); g.userData.prop = i; propsGroup.add(g); });
   buildSteam();
 }
 
@@ -469,12 +782,39 @@ function capyMarker() {
   const m = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.5, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicNodeMaterial({ color: 0xffe066, transparent: true, depthTest: false, depthWrite: false, toneMapped: false, fog: false }));
   m.renderOrder = 104; m.visible = false; return m;
 }
-async function loadCapy(tag, i) {
-  const gltf = await loader.loadAsync(`${CAPYS}/${tag}/${tag}_capy_v2.glb`);
+// Stand-in figure for characters whose GLB is missing: body, head and an
+// "Outfit" mesh with UVs (so the drawing can be shown), plus idle/walk/pose clips.
+function placeholderCharacter() {
+  // a plain capsule; the whole capsule is the "Outfit" and takes the drawing
+  const model = new THREE.Group(); model.name = 'placeholder';
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.25, 0.9, 8, 24), new THREE.MeshStandardNodeMaterial({ color: 0xf4f1ec, roughness: 0.6 }));
+  body.name = 'Outfit'; body.material.name = 'Outfit'; body.position.y = 0.7;
+  model.add(body);
+  const q = (deg) => new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(deg)).toArray();
+  const clips = [
+    new THREE.AnimationClip('idle', 2, [new THREE.VectorKeyframeTrack('Outfit.scale', [0, 1, 2], [1, 1, 1, 1.02, 0.985, 1.02, 1, 1, 1])]),
+    new THREE.AnimationClip('walk', 0.5, [
+      new THREE.VectorKeyframeTrack('Outfit.position', [0, 0.25, 0.5], [0, 0.7, 0, 0, 0.76, 0, 0, 0.7, 0]),
+      new THREE.QuaternionKeyframeTrack('Outfit.quaternion', [0, 0.25, 0.5], [...q(-6), ...q(6), ...q(-6)])
+    ]),
+    new THREE.AnimationClip('pose', 1.4, [new THREE.QuaternionKeyframeTrack('Outfit.quaternion', [0, 0.7, 1.4], [...q(0), ...q(180), ...q(360)])])
+  ];
+  return { scene: model, animations: clips };
+}
+async function loadCapy(ch, i) {
+  const tag = ch.id;
+  let gltf, placeholder = false;
+  try {
+    if (!ch.file) throw new Error('no file');
+    gltf = await loader.loadAsync(castUrl(ch));
+  } catch (e) {
+    console.warn(`[scene] ${tag}: ${ch.file || 'no file'} not found, showing a stand-in figure`);
+    gltf = placeholderCharacter(); placeholder = true;
+  }
   const model = gltf.scene;
   model.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
   const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3());
-  const h0 = L.capy.height * (tag === 'baby' ? 0.72 : 1), k = h0 / size.y;
+  const h0 = (placeholder && !ch.height ? 1.6 : ch.height) || L.capy.height * (ch.sizeFactor ?? 1), k = h0 / size.y;
   const inner = new THREE.Group(); inner.add(model);
   model.scale.setScalar(k); model.position.y = -box.min.y * k;
   inner.rotation.y = THREE.MathUtils.degToRad(L.capy.facing);
@@ -486,8 +826,14 @@ async function loadCapy(tag, i) {
   proxy.position.y = h0 * 0.5; proxy.userData.capyIndex = i; root.add(proxy);
   const marker = capyMarker(); marker.scale.setScalar(h0 * 1.4); root.add(marker);
   const mixer = new THREE.AnimationMixer(model);
-  const clip = n => THREE.AnimationClip.findByName(gltf.animations, n);
-  const c = { tag, root, inner, blob, proxy, marker, mixer, clip, h0, h: h0, enabled: true, cur: null, state: 'idle', timer: 0.5 + Math.random() * 2, swimming: false, rippleT: 0, blinkT: 2 + Math.random() * 3, path: null };
+  const clip = n => THREE.AnimationClip.findByName(gltf.animations, placeholder ? n : ch.clips?.[n] || n);
+  // meshes that wear the drawing (cast.json outfit.mesh: mesh or material names)
+  const outfitNames = [].concat(ch.outfit?.mesh || (placeholder ? 'Outfit' : []));
+  const outfit = [];
+  model.traverse(o => { if (o.isMesh && (outfitNames.includes(o.name) || outfitNames.includes(o.material?.name))) outfit.push({ mesh: o, original: o.material }); });
+  const meshNames = []; model.traverse(o => { if (o.isMesh) meshNames.push(o.name || o.material?.name || ''); });
+  const c = { tag, ch, placeholder, outfit, meshNames, clipNames: gltf.animations.map(a => a.name), root, inner, blob, proxy, marker, mixer, clip, h0, h: h0, enabled: true, cur: null, state: 'idle', timer: 0.5 + Math.random() * 2, swimming: false, rippleT: 0, blinkT: 2 + Math.random() * 3, path: null };
+  proxy.userData.capy = c;
   scene.add(root); capys.push(c); play(c, 'idle');
   placeAtStart(c);
 }
@@ -500,6 +846,28 @@ function placeAtStart(c) {
   c.root.rotation.y = Math.random() * Math.PI * 2;
   c.path = null; c.goal = null; c.state = 'idle'; c.timer = 0.3 + Math.random();
 }
+const texLoader = new THREE.TextureLoader();
+async function setOutfit(c, url) {
+  if (!c?.outfit.length) return false;
+  if (!url) { for (const o of c.outfit) o.mesh.material = o.original; return true; }
+  const t = await texLoader.loadAsync(url);
+  t.colorSpace = THREE.SRGBColorSpace; t.flipY = false; t.anisotropy = 8;
+  for (const o of c.outfit) {
+    const m = o.original.clone(); m.map = t; if (m.color) m.color.set(0xffffff); m.needsUpdate = true;
+    o.mesh.material = m;
+  }
+  return true;
+}
+async function loadCast(list) {
+  for (const c of capys.splice(0)) { scene.remove(c.root); c.mixer.stopAllAction(); }
+  cast = list; TAGS = cast.map(ch => ch.id);
+  const use = cast.filter(ch => ch.enabled !== false);
+  const limit = cast === legacyList ? Math.min(L.capy.count, use.length) : use.length;
+  for (let i = 0; i < limit; i++) await loadCapy(use[i], i).catch(e => console.warn('character', use[i].id, e));
+  applyCapyConfig();
+  if (EDIT) editorHandle?.refresh?.();
+}
+let legacyList = null;
 function applyCapyConfig() {
   for (const c of capys) {
     const cfg = capCfg(c);
@@ -542,7 +910,7 @@ function decide(c) {
   if (a === 'surprise') { surprise(c); return; }
   rest(c);
 }
-function surprise(c) { c.state = 'act'; c.timer = play(c, SURPRISE[c.tag], { once: true }) + 0.2; face(c, 'expr_happy'); }
+function surprise(c) { c.state = 'act'; c.timer = play(c, 'pose', { once: true }) + 0.2; face(c, 'expr_happy'); }
 
 let paused = false;
 const _v = new THREE.Vector3();
@@ -575,7 +943,7 @@ function updateCapy(c, dt) {
       const yaw = Math.atan2(_v.x, _v.z);
       let dy = yaw - c.root.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
       c.root.rotation.y += dy * Math.min(1, dt * 5);
-      const speed = (c.swimming ? 0.8 : 1) * 0.33 * c.h * L.capy.speed * (capCfg(c).speed || 1) * (block ? 0.35 : 1);
+      const speed = (c.swimming ? 0.8 : 1) * (c.ch.speed ? c.ch.speed : 0.33 * c.h) * L.capy.speed * (capCfg(c).speed || 1) * (block ? 0.35 : 1);
       const nx = pos.x + Math.sin(c.root.rotation.y) * speed * dt, nz = pos.z + Math.cos(c.root.rotation.y) * speed * dt;
       if (nav.kind(nx, nz)) { pos.x = nx; pos.z = nz; c.stuck = Math.max(0, c.stuck - dt); }
       else { // steering pushed us off the grid: step straight along the path instead
@@ -592,7 +960,7 @@ function updateCapy(c, dt) {
     else if (c.timer <= 0) c.state = 'idle';
   } else if (c.state === 'dry') { c.state = 'act'; c.timer = play(c, 'shake_dry', { once: true }); }
   else c.timer -= dt;
-  if (c.state === 'idle' || (c.state === 'act' && c.timer <= 0)) decide(c);
+  if (!c.story && (c.state === 'idle' || (c.state === 'act' && c.timer <= 0))) decide(c);
 
   // land <-> water
   const wasWet = c.swimming;
@@ -611,11 +979,12 @@ function capyAt(e) {
   pointer.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
   picker.setFromCamera(pointer, camera);
   const hit = picker.intersectObjects(active().map(c => c.proxy), false)[0];
-  return hit ? capys[hit.object.userData.capyIndex] : null;
+  return hit ? hit.object.userData.capy : null;
 }
 renderer.domElement.addEventListener('pointerup', e => {
   if (EDIT || e.button !== 0) return;
   const c = capyAt(e);
+  if (c && c.story) return;
   if (c && !c.swimming) surprise(c); else if (c) face(c, 'expr_happy');
 });
 
@@ -653,7 +1022,7 @@ function applyLayout() {
   renderer.toneMappingExposure = L.look.exposure;
   scene.fog = new THREE.Fog(L.look.fog, L.look.fogNear, L.look.fogFar);
   warm.position.fromArray(L.look.warmLight);
-  warm.intensity = L.look.warmIntensity ?? 6; hemi.intensity = L.look.ambient ?? 1.6; key.intensity = L.look.sun ?? 1.4;
+  lighting.applyMood();
 }
 async function putFile(name, body, type) {
   if (opts.saveFile) return opts.saveFile(name, body, type);
@@ -665,13 +1034,63 @@ const putJSON = (name, data) => putFile(name, JSON.stringify(data, null, 2), 'ap
 
 // ---------------------------------------------------------------- swap files at runtime (editor Files tab)
 let bdGroup = null, sceneInfoRef = null;
+// layered 2.5D (layers.js)
+let layersDef = null, layersGroup = null, layersBuild = 0;
+async function rebuildLayers({ bust = '' } = {}) {
+  const n = ++layersBuild;
+  const res = await buildLayers(layersDef, WORLD, { bust });
+  if (n !== layersBuild) { res.group.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } }); return; } // a newer build won
+  if (layersGroup) { scene.remove(layersGroup); layersGroup.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } }); }
+  layersGroup = res.group; scene.add(layersGroup);
+  const first = !backdropMeta; backdropMeta = res.meta;
+  hf = res.floor.children.length ? buildHeightField(res.floor) : null;
+  if (!first) { setupHero(); if (view === 'hero') updateHero(0, 0); if (nav) buildNav(); }
+}
+// editor: show the backdrop coloured by distance (red near, blue far) instead of the picture
+let depthViewOn = false;
+async function setDepthView(on) {
+  depthViewOn = on;
+  if (!bdGroup) return false;
+  for (const m of [bdGroup.userData.front, bdGroup.userData.back]) {
+    if (!m) continue;
+    m.userData.picture = m.userData.picture || m.material.map;
+    if (on && !m.userData.depthTex) m.userData.depthTex = depthColours(m);
+    m.material.map = on ? m.userData.depthTex : m.userData.picture; m.material.needsUpdate = true;
+  }
+  return true;
+}
+function depthColours(mesh) {
+  // colour each grid vertex by its distance from the picture's camera, painted into a small texture
+  const pos = mesh.geometry.attributes.position, uv = mesh.geometry.attributes.uv;
+  const W = 256, H = Math.max(2, Math.round(256 * (backdropMeta.height / backdropMeta.width)));
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d'), im = g.createImageData(W, H), o = new THREE.Vector3().fromArray(backdropMeta.camera.position), p = new THREE.Vector3();
+  // colours stretched over this picture's own range (2nd..98th percentile, log scale)
+  const dist = new Float32Array(pos.count);
+  for (let i = 0; i < pos.count; i++) dist[i] = Math.log(p.fromBufferAttribute(pos, i).distanceTo(o) + 0.01);
+  const sorted = Float32Array.from(dist).sort(), lo = sorted[Math.floor(sorted.length * 0.02)], hi = Math.max(lo + 0.01, sorted[Math.floor(sorted.length * 0.98)]);
+  for (let i = 0; i < pos.count; i++) {
+    const x = Math.min(W - 1, Math.floor(uv.getX(i) * W)), y = Math.min(H - 1, Math.floor((1 - uv.getY(i)) * H)), k = (y * W + x) * 4;
+    const t = Math.min(1, Math.max(0, (dist[i] - lo) / (hi - lo))); // 0 near .. 1 far
+    const col = new THREE.Color().setHSL(0.02 + t * 0.62, 0.85, 0.55 - t * 0.1);
+    im.data[k] = col.r * 255; im.data[k + 1] = col.g * 255; im.data[k + 2] = col.b * 255; im.data[k + 3] = 255;
+  }
+  // fill pixels no vertex landed on
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const k = (y * W + x) * 4; if (!im.data[k + 3]) { const j = x > 0 ? k - 4 : y > 0 ? k - W * 4 : k; im.data[k] = im.data[j]; im.data[k + 1] = im.data[j + 1]; im.data[k + 2] = im.data[j + 2]; im.data[k + 3] = 255; } }
+  g.putImageData(im, 0, 0);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
 async function reloadBackdrop() {
   if (!bdGroup) return;
   const bd = await loadDepthBackdrop(`${WORLD}/${sceneInfoRef.files.backdrop}`, { phone: IS_PHONE, bust: Date.now() });
   scene.remove(bdGroup);
   bdGroup.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.map?.dispose(); o.material.dispose(); } });
   bdGroup = bd.group; backdropMeta = bd.meta; scene.add(bdGroup);
-  hf = buildHeightField(bd.front); buildNav();
+  bdGroup.userData.front = bd.front; bdGroup.userData.back = bd.back;
+  if (depthViewOn) setDepthView(true);
+  wideArea(true); hf = buildHeightField(bd.front); buildNav();
+  setupHero(); if (view === 'hero') updateHero(0, 0);
+  for (const c of active()) placeAtStart(c);
 }
 async function reloadSky() {
   if (!sceneInfoRef.files.pano) return;
@@ -682,11 +1101,59 @@ async function reloadSky() {
 
 // ---------------------------------------------------------------- boot
 const timer = new THREE.Timer();
+let story = { autoplay: true, loop: true, startDelay: 1, steps: [] };
+let storyStepListener = null;
+const findChar = id => capys.find(c => c.tag === id);
+const storyRunner = createStoryRunner({
+  char: findChar,
+  allChars: () => capys,
+  claim: c => { lastPerformer = c; c.story = true; if (c.state !== 'move') { c.path = null; c.state = 'act'; c.timer = 1e9; } },
+  release: c => { if (c.story) { c.story = false; c.state = 'idle'; } },
+  play: (c, name, o) => play(c, name, o),
+  walk: (c, s) => {
+    const p = c.root.position;
+    let pts = null;
+    if (s.route) { const r = (zones.routes || []).find(r => r.name === s.route); if (r?.points?.length) pts = r.loop ? [...r.points, r.points[0]] : r.points.slice(); }
+    else if (s.spot != null && zones.spots?.[s.spot]) pts = [[zones.spots[s.spot].x, zones.spots[s.spot].z]];
+    else if (Array.isArray(s.to)) pts = [s.to];
+    if (!pts) return false;
+    let x = p.x, z = p.z; const full = [[x, z]];
+    for (const [px, pz] of pts) { const leg = nav.path(x, z, px, pz) || [[x, z], [px, pz]]; full.push(...leg.slice(1)); x = px; z = pz; }
+    return startMove(c, full, pts[pts.length - 1], 'story');
+  },
+  place: (c, s) => {
+    const sp = s.spot != null ? zones.spots?.[s.spot] : null;
+    const at = sp ? [sp.x, sp.z] : Array.isArray(s.at) ? s.at : null;
+    if (at) c.root.position.set(at[0], nav.height(at[0], at[1]), at[1]);
+    if (s.turn != null) c.root.rotation.y = THREE.MathUtils.degToRad(s.turn);
+    c.path = null; c.state = 'act'; c.timer = 1e9; play(c, 'idle');
+  },
+  setVisible: (c, on) => { c.enabled = on; c.root.visible = on; },
+  outfit: (c, image) => setOutfit(c, image === 'drawing' ? opts.drawingUrl?.(c.tag) : image ? `${WORLD}/${image}` : null),
+  caption: t => ui.caption(t),
+  cameraTo: step => cameraTo(step),
+  light: s => { if (s.mood) lighting.mood(s.mood, s.seconds ?? 2); else lighting.light(s); },
+  resetLights: () => lighting.reset(),
+  url: name => `${WORLD}/${name}`,
+  reset: () => lighting.reset(),
+  onStep: i => storyStepListener?.(i)
+});
+let envGroup = null, stageBackground = null;
+// GLB environments come in any units/orientation: scale, turn and lift them
+function applyEnvTransform(t = {}) {
+  if (!envGroup || envMode !== 'glb') return;
+  envGroup.scale.setScalar(t.scale || 1);
+  envGroup.rotation.y = THREE.MathUtils.degToRad(t.rotY || 0);
+  envGroup.position.set(t.x || 0, t.y || 0, t.z || 0);
+  envGroup.updateMatrixWorld(true);
+  hf = buildHeightField(envGroup);
+}
 let editorHandle = null;
 async function boot() {
   await renderer.init();
   if (destroyed) return;
   const sceneInfo = await (await fetch(`${WORLD}/scene.json`)).json(); sceneInfoRef = sceneInfo;
+  sceneInfo.files = sceneInfo.files || {};
   try { const r = await fetch(`${WORLD}/layout.json`); if (r.ok) L = deepMerge(L, await r.json()); } catch { }
   const msf = sceneInfo.metric_scale_factor || 1;
   if (!L._scaled) { // Marble API worlds: OpenCV axes (y down), metric scale, ground offset
@@ -710,49 +1177,113 @@ async function boot() {
     ? await new THREE.TextureLoader().loadAsync(`${WORLD}/${sceneInfo.files.pano}`).then(t => { t.mapping = THREE.EquirectangularReflectionMapping; t.colorSpace = THREE.SRGBColorSpace; return t; })
     : gradientSky();
   scene.background = sky; scene.environment = sky;
-  applyLayout();
+  applyLayout(); lighting.build();
 
-  say('Loading the hot spring…');
-  const mode = Q.get('backdrop') || (sceneInfo.files.backdrop ? 'depth' : 'splat');
+  say('Loading the scene…');
+  const mode = Q.get('backdrop') || (sceneInfo.environment === 'stage' ? 'stage' : sceneInfo.files.environment ? 'glb' : sceneInfo.files.layers ? 'layers' : sceneInfo.files.backdrop ? 'depth' : 'splat');
+  envMode = mode;
+  if (mode === 'stage') {
+    const st = buildStage(sceneInfo.stage); scene.add(st.group); envGroup = st.group; stageBackground = st.background;
+    if (!sceneInfo.files.pano) scene.background = new THREE.Color(st.background);
+    hf = buildHeightField(st.group);
+  } else if (mode === 'glb') {
+    const g = await loader.loadAsync(`${WORLD}/${sceneInfo.files.environment}`);
+    envGroup = new THREE.Group(); envGroup.name = 'environment'; envGroup.add(g.scene); scene.add(envGroup);
+    applyEnvTransform(sceneInfo.environmentTransform);
+  }
   let splatPromise = Promise.resolve(0);
   if (mode === 'depth') {
     const bd = await loadDepthBackdrop(`${WORLD}/${sceneInfo.files.backdrop}`, { phone: IS_PHONE });
     backdropMeta = bd.meta; scene.add(bd.group); bdGroup = bd.group;
-    hf = buildHeightField(bd.front); // capybaras stand on the image's own ground
+    bdGroup.userData.front = bd.front; bdGroup.userData.back = bd.back;
+    wideArea(true); hf = buildHeightField(bd.front); // capybaras stand on the image's own ground
+    if (Q.get('parallax') == null && L.camera.parallax > 0.15) L.camera.parallax = 0.15;
+  }
+  if (mode === 'layers') {
+    try { const r = await fetch(`${WORLD}/${sceneInfo.files.layers}`); layersDef = r.ok ? await r.json() : { layers: [] }; } catch { layersDef = { layers: [] }; }
+    await rebuildLayers();
     if (Q.get('parallax') == null && L.camera.parallax > 0.15) L.camera.parallax = 0.15;
   }
   setupHero();
-  setView(Q.get('camera') === 'orbit' || L.camera.mode === 'orbit' ? 'free' : 'hero');
-  if (mode !== 'depth') {
+  // a 2.5D picture only works from its own camera: always start there
+  setView(Q.get('camera') === 'orbit' || (L.camera.mode === 'orbit' && mode !== 'depth' && mode !== 'layers') ? 'free' : 'hero');
+  if (mode === 'splat') {
     const set = pickSplatSet(sceneInfo.files);
     if (sceneInfo.files.splats?.['100k'] && !set.includes(sceneInfo.files.splats['100k'])) await loadSplats([sceneInfo.files.splats['100k']]);
     splatPromise = loadSplats(set);
   }
-  if (mode !== 'depth' && sceneInfo.files.collider) {
+  if (mode === 'splat' && sceneInfo.files.collider) {
     try {
       const g = await loader.loadAsync(`${WORLD}/${sceneInfo.files.collider}`);
       g.scene.visible = false; splatRoot.add(g.scene); hf = buildHeightField(g.scene);
     } catch (e) { console.warn('collider', e); }
   }
   buildNav(); buildSnow();
-  say('Waking the capybaras…');
-  for (let i = 0; i < Math.min(L.capy.count, TAGS.length); i++) await loadCapy(TAGS[i], i).catch(e => console.warn('capybara', TAGS[i], e));
-  applyCapyConfig();
+  say('Bringing in the models…');
+  let castList = null;
+  try { const r = await fetch(`${WORLD}/cast.json`); if (r.ok) castList = (await r.json()).characters; } catch { }
+  if (!Array.isArray(castList)) { castList = legacyList = legacyCast(); }
+  await loadCast(castList);
+  try { const r = await fetch(`${WORLD}/story.json`); if (r.ok) story = { ...story, ...(await r.json()) }; } catch { }
   const n = await splatPromise;
-  console.log(`[hotspring] ${renderer.backend.isWebGLBackend ? 'WebGL fallback' : 'WebGPU'} · backdrop ${mode}${mode === 'splat' ? ` (${n} splats, ${splats.length} layers)` : ''} · ${active().length} capybaras · nav ${nav.land.length} land / ${nav.water.length} water cells`);
+  console.log(`[hotspring] ${renderer.backend.isWebGLBackend ? 'WebGL fallback' : 'WebGPU'} · backdrop ${mode}${mode === 'splat' ? ` (${n} splats, ${splats.length} layers)` : ''} · ${active().length} models · nav ${nav.land.length} land / ${nav.water.length} water cells`);
   ui.loader.classList.add('done');
+  if (!EDIT && story.autoplay && story.steps?.length) { ui.hint.remove(); setTimeout(() => storyRunner.play(story), (story.startDelay ?? 1) * 1000); }
   if (EDIT) {
     ui.hint.remove();
     const { initEditor } = await import('./editor.js');
     if (destroyed) return;
     editorHandle = initEditor({
-      scene, camera, renderer, controls, world: WORLD, groundY, backdrop: mode, tags: TAGS,
+      scene, camera, renderer, controls, world: WORLD, groundY, backdrop: mode, get tags() { return TAGS; },
+      // cast + story
+      castInfo: () => capys.map(c => ({ id: c.tag, name: c.ch.name || c.tag, clips: c.clipNames, meshes: c.meshNames, outfit: c.outfit.length })),
+      getCast: () => structuredClone(cast),
+      setCast: list => { legacyList = null; return loadCast(structuredClone(list)); },
+      castName: id => { const n = cast.find(ch => ch.id === id)?.name || id; return capys.find(c => c.tag === id)?.placeholder ? `${n} (stand-in)` : n; },
+      tryOutfit: (id, url) => setOutfit(capys.find(c => c.tag === id), url),
+      getStory: () => structuredClone(story),
+      setStory: st => { story = structuredClone(st); },
+      playStory: from => storyRunner.play(story, { from }),
+      stopStory: () => { storyRunner.stop(); setView('free'); },
+      storyRunning: () => storyRunner.running,
+      onStoryStep: fn => { storyStepListener = fn; },
+      previewCamera: step => cameraTo(step),
+      cameraFeel: () => cameraFeel(),
+      cameraOperators: () => Object.entries(OPERATORS).map(([k, o]) => [k, o.label]),
+      sceneFiles: () => ({ mode: envMode, ...structuredClone(sceneInfoRef.files || {}) }),
+      // change scene.json file references (null removes); reload = save all and reload the editor
+      updateSceneFiles: async (patch, { reload = false } = {}) => {
+        const info = sceneInfoRef; info.files = info.files || {};
+        for (const [k, v] of Object.entries(patch.files || {})) { if (v === null) delete info.files[k]; else info.files[k] = v; }
+        for (const [k, v] of Object.entries(patch.top || {})) { if (v === null) delete info[k]; else info[k] = v; }
+        if (reload) await editorHandle.saveAll();
+        const at = await putJSON('scene.json', info);
+        if (reload) location.reload();
+        return at;
+      },
+      clearSky: () => { const g = gradientSky(); scene.background = stageBackground ? new THREE.Color(stageBackground) : g; scene.environment = g; },
+      reloadSplats: async () => { if (envMode === 'splat') return loadSplats(pickSplatSet(sceneInfoRef.files)); },
+      envInfo: () => ({ mode: envMode, file: sceneInfoRef.files?.environment || null, transform: { scale: 1, rotY: 0, x: 0, y: 0, z: 0, ...(sceneInfoRef.environmentTransform || {}) } }),
+      setEnvTransform: t => { sceneInfoRef.environmentTransform = { ...(sceneInfoRef.environmentTransform || {}), ...t }; applyEnvTransform(sceneInfoRef.environmentTransform); buildNav(); for (const c of capys) placeAtStart(c); },
+      // switch environment: save everything, then reload so the new one loads cleanly
+      setEnvironment: async kind => {
+        const info = structuredClone(sceneInfoRef);
+        info.files = info.files || {};
+        if (kind.glb) { info.files.environment = kind.glb; delete info.environment; delete info.files.backdrop; delete info.files.splats; info.environmentTransform = info.environmentTransform || { scale: 1, rotY: 0, y: 0 }; }
+        else if (kind.stage) { delete info.files.environment; info.environment = 'stage'; info.stage = info.stage || {}; }
+        await editorHandle.saveAll();
+        await putJSON('scene.json', info);
+        location.reload();
+      },
+      charPos: id => findChar(id)?.root.position.toArray() ?? null,
+      currentShot: () => ({ pos: camera.position.toArray().map(v => +v.toFixed(3)), target: (view === 'free' || view === 'top' ? controls.target : storyCam.target).toArray().map(v => +v.toFixed(3)), fov: +camera.fov.toFixed(1) }),
       navHeight: (x, z) => nav.height(x, z),
       getZones: () => structuredClone(zones), setZones,
       layout: () => L,
       applyLook: what => {
         applyLayout();
         if (what === 'snow') buildSnow();
+        if (what === 'lights') lighting.build();
         if (what === 'camera' && view === 'hero') setupHero();
       },
       view: () => view, setView,
@@ -780,14 +1311,59 @@ async function boot() {
       },
       files: { backdropDir: sceneInfo.files.backdrop ? sceneInfo.files.backdrop.replace(/[^/]*$/, '') : null, pano: sceneInfo.files.pano || null },
       reloadBackdrop, reloadSky,
-      importLayout: l => { L = deepMerge(L, l); applyLayout(); buildSnow(); if (view === 'hero') setupHero(); return L; },
+      importLayout: l => { L = deepMerge(L, l); applyLayout(); lighting.build(); buildSnow(); if (view === 'hero') setupHero(); return L; },
       put: putFile,
+      live: () => ({ on: live.on, left: Math.max(0, live.until - performance.now()) / 1000 }),
+      setLive: on => { live.on = on; live.until = 0; },
+      previewLive: (sec = 8) => { if (view === 'free' || view === 'top') setView('hero'); live.until = performance.now() + sec * 1000; },
+      depthView: on => setDepthView(on),
+      layers: () => layersDef ? structuredClone(layersDef) : null,
+      layersFile: () => sceneInfoRef.files?.layers || null,
+      setLayers: async (def, opts = {}) => { layersDef = structuredClone(def); if (opts.forget) for (const f of opts.forget) forgetLayerFile(`${WORLD}/${f}`); await rebuildLayers(opts); },
+      pickLayer: (ndcX, ndcY) => { if (!layersGroup) return null; _rc.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera); return pickLayer(layersGroup, _rc); },
+      // screen pixels per frame fraction (to drag pieces in the hero view)
+      frameScale: () => { if (!backdropMeta) return null; const fr = Math.tan(THREE.MathUtils.degToRad(backdropMeta.camera.vfov) / 2) / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2); const hpx = innerHeight * fr; return { x: hpx * backdropMeta.width / backdropMeta.height, y: hpx }; },
+      lightObject: (id, aim) => lighting.objectFor(id, aim),
+      sunLine: () => ({ from: key.position.toArray(), to: key.target.position.toArray() }),
+      pickLight: (ndcX, ndcY) => { _rc.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera); return lighting.pick(_rc); },
+      showLightHelpers: (on, sel) => lighting.showHelpers(on, sel),
+      lightMood: (name, secs) => lighting.mood(name, secs),
+      resetLights: () => lighting.reset(),
+      lookFromSide: () => {
+        if (view !== 'free') setView('free');
+        const tgt = hero.base.clone().addScaledVector(hero.dir, 6);
+        const side = new THREE.Vector3(-hero.dir.z, 0, hero.dir.x).normalize();
+        controls.target.copy(tgt);
+        camera.position.copy(tgt).addScaledVector(side, 9).addScaledVector(hero.dir, -3).add(new THREE.Vector3(0, 3, 0));
+        controls.update();
+      },
+      propObject: i => propsGroup.children.find(g => g.userData.prop === i) || null,
+      propGround: (x, z) => nav ? nav.height(x, z) : groundY(x, z),
+      objectSize: file => loadObject(file).then(o => o?.userData.size || null),
+      pickBackdrop: (ndcX, ndcY) => { // the point of the 2.5D picture under the pointer
+        const f = bdGroup?.userData.front; if (!f) return null;
+        _rc.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+        const hit = _rc.intersectObject(f, false)[0];
+        return hit && hit.point.y < 3 ? [hit.point.x, hit.point.z] : null;
+      },
+      propsAt: (ndcX, ndcY) => { // index of the object under the pointer
+        _rc.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+        const hit = _rc.intersectObject(propsGroup, true)[0]; let o = hit?.object;
+        while (o && o.userData.prop == null) o = o.parent;
+        return o ? o.userData.prop : null;
+      },
+      depth: { modelUrl: opts.depthModelUrl, inpaintModelUrl: opts.inpaintModelUrl, wasmPaths: opts.ortWasmPaths },
+      startHint: sceneInfo.start || null,
       container,
       save: async () => {
         const a = await putJSON('zones.json', zones);
-        if (view === 'free') { L.camera.pos = camera.position.toArray(); L.camera.target = controls.target.toArray(); }
+        if (envMode === 'layers' && layersDef && sceneInfoRef.files?.layers) await putJSON(sceneInfoRef.files.layers, layersDef);
+        if (view === 'free' && (envMode === 'splat' || envMode === 'depth')) { L.camera.pos = camera.position.toArray(); L.camera.target = controls.target.toArray(); }
+        if (envMode === 'glb' || envMode === 'stage') await putJSON('scene.json', sceneInfoRef);
         await putJSON('layout.json', L);
-        return `Saved zones.json and layout.json at ${a}`;
+        await putJSON('story.json', story);
+        await putJSON('cast.json', { characters: cast.map(({ sizeFactor, ...ch }) => ({ ...ch, ...(sizeFactor && sizeFactor !== 1 && !ch.height ? { height: +(L.capy.height * sizeFactor).toFixed(3) } : {}) })) });
+        return `Saved the scene at ${a}`;
       }
     });
   }
@@ -799,9 +1375,11 @@ function frame() {
   timer.update();
   const dt = Math.min(timer.getDelta(), 0.05), t = timer.getElapsed();
   for (const c of capys) updateCapy(c, dt);
-  updateSteam(dt); updateSnow(dt, t); updateRipples(dt); updatePathViz();
-  if (view === 'hero') updateHero(dt, t); else controls.update();
+  updateSteam(dt); updateSnow(dt, t); updateRipples(dt); updatePathViz(); lighting.update(t, dt);
+  if (view === 'hero') updateHero(dt, t); else if (view === 'story') updateStoryCam(dt); else controls.update();
+  const shaken = applyHandheld(t);
   renderer.render(scene, camera);
+  if (shaken) undoHandheld();
 }
 
 const ready = boot().catch(e => { console.error(e); say('Could not load the scene: ' + e.message); throw e; });
@@ -812,6 +1390,7 @@ function destroy() {
   if (destroyed) return;
   destroyed = true;
   renderer.setAnimationLoop(null);
+  storyRunner.stop();
   editorHandle?.dispose?.();
   for (const d of disposers.splice(0)) { try { d(); } catch { } }
   controls.dispose();
@@ -822,5 +1401,10 @@ function destroy() {
   if (globalThis.__scene?.renderer === renderer) delete globalThis.__scene;
 }
 
-return { ready, destroy };
+return {
+  ready, destroy,
+  playStory: () => storyRunner.play(story),
+  stopStory: () => storyRunner.stop(),
+  setOutfit: (id, url) => setOutfit(findChar(id), url)
+};
 }
