@@ -944,6 +944,7 @@ export function initEditor(ctx) {
       slider('Gusts', () => k.gusts ?? 0.4, v => { k.gusts = v; }, 0, 1, 0.05, 'look'),
       heading('Fog'),
       colorCtl('Colour', () => k.fog, v => { k.fog = v; }, 'look'),
+      checkCtl('Fog on the 2.5D picture / layers', () => k.pictureFog !== false, v => { k.pictureFog = v; }, 'look'),
       slider('Starts at (m)', () => k.fogNear, v => { k.fogNear = v; }, 0, 60, 0.5, 'look'),
       slider('Full at (m)', () => k.fogFar, v => { k.fogFar = v; }, 5, 150, 1, 'look'));
     if (ctx.backdrop === 'splat') body.append(heading('Splat colour'),

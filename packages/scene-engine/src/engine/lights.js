@@ -68,7 +68,8 @@ export function createLighting({ scene, camera, renderer, hemi, key, warm, getL,
     warm.intensity = look('warmIntensity');
     if (scene.fog && (L.look.fog || rt.mood)) scene.fog.color.set(look('fog') ?? L.look.fog);
     const tint = _c.set(look('pictureTint')).multiplyScalar(look('pictureBrightness'));
-    for (const m of getBackdrop()) { m.material.color.copy(tint); }
+    const pf = look('pictureFog') !== false; // fog also on the 2.5D picture (by depth)
+    for (const m of getBackdrop()) { m.material.color.copy(tint); if (m.material.fog !== pf) { m.material.fog = pf; m.material.needsUpdate = true; } }
   }
 
   // ------------------------------------------------ placed lights
