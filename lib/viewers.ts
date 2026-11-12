@@ -836,13 +836,15 @@ export async function createModelTexture(
   modelId: string,
   originalPhotoUrl: string,
   correctedTextureUrl: string,
-  uploadSourceViewerId?: string | null
+  uploadSourceViewerId?: string | null,
+  moderationStatus: 'pending' | 'approved' | 'rejected' = 'approved'
 ): Promise<ModelTextureRow> {
   const row: Partial<ModelTextureRow> = {
     id: textureId,
     model_id: modelId,
     original_photo_url: originalPhotoUrl,
     corrected_texture_url: correctedTextureUrl,
+    moderation_status: moderationStatus,
     ...(uploadSourceViewerId ? { upload_source_viewer_id: uploadSourceViewerId } : {})
   };
   

@@ -32,6 +32,7 @@ interface ViewerSettingsDialogProps {
   certificateBottomImageUrl?: string;
   showLogoInViewer?: boolean;
   classroomEnabled?: boolean;
+  textureModerationEnabled?: boolean;
 }
 
 export function ViewerSettingsDialog({
@@ -57,7 +58,8 @@ export function ViewerSettingsDialog({
   surveyLanguage: initialSurveyLanguage,
   certificateBottomImageUrl: initialCertificateBottomImageUrl,
   showLogoInViewer: initialShowLogoInViewer,
-  classroomEnabled: initialClassroomEnabled = false
+  classroomEnabled: initialClassroomEnabled = false,
+  textureModerationEnabled: initialTextureModerationEnabled = false
 }: ViewerSettingsDialogProps) {
   const [open, setOpen] = useState(false);
   
@@ -91,6 +93,8 @@ export function ViewerSettingsDialog({
 
   // Classroom Settings
   const [classroomEnabled, setClassroomEnabled] = useState(initialClassroomEnabled);
+  // Texture Moderation Settings
+  const [textureModerationEnabled, setTextureModerationEnabled] = useState(initialTextureModerationEnabled);
   
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -137,7 +141,8 @@ export function ViewerSettingsDialog({
           surveyLanguage,
           certificateBottomImageUrl,
           showLogoInViewer,
-          classroomEnabled
+          classroomEnabled,
+          textureModerationEnabled
         })
       });
 
@@ -738,6 +743,39 @@ export function ViewerSettingsDialog({
                 <p><strong>How it works:</strong> Teachers visit <strong>/klase</strong>, register their school,
                 and receive a unique classroom viewer link + PIN + printable worksheets with QR codes.
                 Their uploads appear only on the classroom display — this museum viewer continues showing all textures.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Texture Moderation Section */}
+          <div className="space-y-4 p-4 border rounded-lg">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-sm">Texture Moderation</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Require approval before uploaded textures appear in the viewer.
+                  Useful for preventing inappropriate hand-drawn content.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="textureModerationEnabled"
+                  checked={textureModerationEnabled}
+                  onChange={(e) => setTextureModerationEnabled(e.target.checked)}
+                  className="rounded"
+                />
+                <Label htmlFor="textureModerationEnabled" className="font-normal cursor-pointer text-sm">
+                  Enabled
+                </Label>
+              </div>
+            </div>
+
+            {textureModerationEnabled && (
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-xs text-blue-900">
+                <p><strong>How it works:</strong> New texture uploads will be held as <strong>pending</strong> until
+                you review them in the <strong>Texture Moderation</strong> section of this viewer&apos;s admin page.
+                Only approved textures will appear in the viewer. Existing textures are unaffected.</p>
               </div>
             )}
           </div>

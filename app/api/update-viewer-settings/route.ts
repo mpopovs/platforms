@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { viewerId, textureCycling, rotationSpeed, backgroundColor, showModelName, ambientLightIntensity, directionalLightIntensity, widgetEnabled, storageMode, enableArucoDetection, defaultModelId, surveyEnabled, surveyLanguage, certificateBottomImageUrl, showLogoInViewer, classroomEnabled } = body as {
+    const { viewerId, textureCycling, rotationSpeed, backgroundColor, showModelName, ambientLightIntensity, directionalLightIntensity, widgetEnabled, storageMode, enableArucoDetection, defaultModelId, surveyEnabled, surveyLanguage, certificateBottomImageUrl, showLogoInViewer, classroomEnabled, textureModerationEnabled } = body as {
       viewerId: string;
       textureCycling: TextureCyclingSettings;
       rotationSpeed?: number;
@@ -38,6 +38,7 @@ export async function POST(request: NextRequest) {
       certificateBottomImageUrl?: string;
       showLogoInViewer?: boolean;
       classroomEnabled?: boolean;
+      textureModerationEnabled?: boolean;
     };
 
     if (!viewerId) {
@@ -85,7 +86,8 @@ export async function POST(request: NextRequest) {
       surveyEnabled: surveyEnabled ?? viewer.settings?.surveyEnabled ?? true,
       surveyLanguage: surveyLanguage ?? viewer.settings?.surveyLanguage ?? 'en',
       certificateBottomImageUrl: certificateBottomImageUrl ?? viewer.settings?.certificateBottomImageUrl ?? '',
-      classroomEnabled: classroomEnabled ?? viewer.settings?.classroomEnabled ?? false
+      classroomEnabled: classroomEnabled ?? viewer.settings?.classroomEnabled ?? false,
+      textureModerationEnabled: textureModerationEnabled ?? viewer.settings?.textureModerationEnabled ?? false
     };
 
     const { error: updateError } = await supabase
