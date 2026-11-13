@@ -50,6 +50,23 @@ export const TEXTURE_POLL_INTERVAL_MS = 30_000;
 export const TEXTURE_PREFETCH_START_DELAY_MS = 15_000;
 // Pause between consecutive prefetch downloads, so the TV stays responsive.
 export const TEXTURE_PREFETCH_GAP_MS = 500;
+// Cached textures still in the display queue get their cache timestamp
+// refreshed at most this often, so cleanOldCache() never evicts textures the
+// viewer is still cycling through (refreshing re-writes the record, so not
+// on every run).
+export const TEXTURE_CACHE_TOUCH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+// ---------------------------------------------------------------------------
+// Texture size on the TV
+// ---------------------------------------------------------------------------
+// Corrected textures are stored at 2048x2048. Decoding that and uploading it to
+// the GPU on every texture switch is what made Tizen TVs stutter, and caching
+// 1000+ of them filled the TV's storage. The carousel requests a resized copy
+// through Supabase's image transformation endpoint instead (see
+// getStorageThumbnailUrl) — on a 3D model filling a 1080p screen 1024px looks
+// the same.
+export const TV_TEXTURE_MAX_DIM = 1024;
+export const TV_TEXTURE_QUALITY = 80;
 
 // ---------------------------------------------------------------------------
 // Connectivity probing
@@ -75,3 +92,11 @@ export const REFRESH_GATE_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 // viewer-display.tsx), otherwise it's deferred and re-checked every
 // REFRESH_GATE_CHECK_INTERVAL_MS until night.
 export const PREVENTIVE_RELOAD_AFTER_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+// ---------------------------------------------------------------------------
+// Startup loader
+// ---------------------------------------------------------------------------
+// The startup loading screen stays up until the first model and texture are on
+// screen; after this long it's hidden anyway, so a model that fails to load
+// can't leave the loader up forever.
+export const STARTUP_LOADER_MAX_MS = 60_000;

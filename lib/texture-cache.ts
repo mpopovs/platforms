@@ -353,6 +353,94 @@ export async function getCachedTextureUrls(urls: string[]): Promise<Set<string>>
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
+const RENDER_IMAGE_PATH = '/storage/v1/render/image/public/';
+const OBJECT_PATH = '/storage/v1/object/public/';
+
+/**
+ * Fetch a texture image. Asks for WebP (the image transformation endpoint only
+ * converts when the Accept header allows it — fetch() sends *\/* by default),
+ * and if a resized (render/image) URL fails, falls back to the original file so
+ * a transformation error never leaves the model untextured.
+ */
+export async function fetchTexture(url: string, signal?: AbortSignal): Promise<Response> {
+  const headers = { Accept: 'image/webp,image/*;q=0.8' };
+  const response = await fetch(url, { signal, headers });
+  if (response.ok || !url.includes(RENDER_IMAGE_PATH)) return response;
+
+  console.warn(`[Texture] Resized texture failed (HTTP ${response.status}), using original:`, url);
+  const originalUrl = url.replace(RENDER_IMAGE_PATH, OBJECT_PATH).split('?')[0];
+  return fetch(originalUrl, { signal, headers });
+}
+
+/**
+ * Refreshes the cache timestamp of the given cached textures if it's older than
+ * `minIntervalMs`, so age-based cleanup (cleanOldCache) keeps textures that are
+ * still in use. Works in small transactions with a pause between them, since a
+ * refresh re-writes each record.
+ */
+export async function touchCachedTextures(
+  urls: string[],
+  minIntervalMs: number,
+  signal?: AbortSignal,
+  batchSize = 25
+): Promise<number> {
+  const cutoff = Date.now() - minIntervalMs;
+  let touched = 0;
+
+  for (let i = 0; i < urls.length; i += batchSize) {
+    if (signal?.aborted) return touched;
+    const batch = urls.slice(i, i + batchSize);
+    const db = await openDB();
+
+    touched += await new Promise<number>((resolve, reject) => {
+      const transaction = db.transaction([TEXTURE_STORE], 'readwrite');
+      const store = transaction.objectStore(TEXTURE_STORE);
+      let count = 0;
+
+      for (const url of batch) {
+        const request = store.get(url);
+        request.onsuccess = () => {
+          const record = request.result as CachedTexture | undefined;
+          if (record && record.timestamp < cutoff) {
+            store.put({ ...record, timestamp: Date.now() });
+            count++;
+          }
+        };
+      }
+
+      transaction.oncomplete = () => {
+        db.close();
+        resolve(count);
+      };
+      transaction.onerror = () => reject(transaction.error);
+    });
+
+    await sleep(200);
+  }
+  return touched;
+}
+
+/**
+ * Deletes the given texture URLs from the cache, in a single transaction.
+ * Used to drop the full-size (2048px) copies the TV viewer cached before it
+ * switched to resized textures — they'd otherwise just fill the storage quota.
+ */
+export async function deleteCachedTextures(urls: string[]): Promise<void> {
+  const db = await openDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([TEXTURE_STORE], 'readwrite');
+    const store = transaction.objectStore(TEXTURE_STORE);
+    for (const url of urls) store.delete(url);
+
+    transaction.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
 /**
  * Background-prefetch a list of textures into IndexedDB, in the given order.
  * Already-cached URLs are skipped. Downloads run one at a time with `gapMs`
@@ -364,9 +452,9 @@ const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, m
 export async function prefetchTextures(
   textures: Array<{ url: string; modelId: string; textureId: string }>,
   signal?: AbortSignal,
-  options: { gapMs?: number; isBusy?: () => boolean; maxBusyWaitMs?: number } = {}
+  options: { gapMs?: number; isBusy?: () => boolean; maxBusyWaitMs?: number; touchIntervalMs?: number } = {}
 ): Promise<void> {
-  const { gapMs = 500, isBusy, maxBusyWaitMs = 30_000 } = options;
+  const { gapMs = 500, isBusy, maxBusyWaitMs = 30_000, touchIntervalMs } = options;
 
   let cached: Set<string>;
   try {
@@ -390,7 +478,7 @@ export async function prefetchTextures(
 
     const { url, modelId, textureId } = uncached[i];
     try {
-      const response = await fetch(url, { signal });
+      const response = await fetchTexture(url, signal);
       if (response.ok) {
         const blob = await response.blob();
         if (signal?.aborted) return;
@@ -404,6 +492,16 @@ export async function prefetchTextures(
 
     // Pause between downloads — keeps Samsung TV responsive
     if (!signal?.aborted) await sleep(gapMs);
+  }
+
+  // Keep textures still in use from expiring out of the cache
+  if (touchIntervalMs && cached.size > 0 && !signal?.aborted) {
+    try {
+      const touched = await touchCachedTextures([...cached], touchIntervalMs, signal);
+      if (touched > 0) console.log(`[Prefetch] Refreshed cache timestamp of ${touched} textures`);
+    } catch (err) {
+      console.warn('[Prefetch] Failed to refresh cache timestamps:', err);
+    }
   }
 }
 

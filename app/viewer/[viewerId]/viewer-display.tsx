@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Eye, Lock, Loader2 } from 'lucide-react';
 import { ModelCarousel } from '@/components/model-carousel';
+import { ViewerStartupLoader } from '@/components/viewer-startup-loader';
 import { ServiceWorkerRegistration } from '@/components/service-worker-registration';
 import { createClient } from '@/lib/supabase/client';
 import type { ViewerModelWithTexture, ViewerSettings } from '@/lib/types/viewer';
@@ -373,22 +374,10 @@ function ViewerContent({ viewerId, config }: { viewerId: string; config: ViewerC
 
   if (loading || contextLost) {
     return (
-      <div 
-        style={{ 
-          minHeight: '100vh', 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'center',
-          background: settings.backgroundColor || '#000000' 
-        }}
-      >
-        <div style={{ textAlign: 'center' }}>
-          <Loader2 className="h-12 w-12 animate-spin text-white mx-auto mb-4" style={{ width: '80px', height: '80px', marginBottom: '20px' }} />
-          {contextLost && (
-            <p style={{ color: '#ffffff', fontSize: '32px' }}>Recovering display...</p>
-          )}
-        </div>
-      </div>
+      <ViewerStartupLoader
+        backgroundColor={settings.backgroundColor || '#000000'}
+        status={contextLost ? 'Recovering display…' : 'Loading…'}
+      />
     );
   }
 

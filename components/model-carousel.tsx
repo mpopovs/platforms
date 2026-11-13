@@ -6,10 +6,20 @@ import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import type { ViewerModelWithTexture, DisplayModeSettings, TextureCyclingSettings, ViewerModelWithAllTextures, ModelTexturePair } from '@/lib/types/viewer';
 import { Maximize, Play } from 'lucide-react';
 import { Model3D, Model3DHandle } from './model-3d';
+import { ViewerStartupLoader } from './viewer-startup-loader';
 import { preloadTexture } from './model-3d';
-import { prefetchTextures } from '@/lib/texture-cache';
+import { deleteCachedTextures, prefetchTextures } from '@/lib/texture-cache';
+import { getStorageThumbnailUrl } from '@/lib/storage';
 import { getIsOnline, subscribeConnectivity } from '@/lib/connectivity-monitor';
-import { TEXTURE_POLL_INTERVAL_MS, TEXTURE_PREFETCH_GAP_MS, TEXTURE_PREFETCH_START_DELAY_MS } from '@/lib/viewer-runtime-config';
+import {
+  TEXTURE_CACHE_TOUCH_INTERVAL_MS,
+  TEXTURE_POLL_INTERVAL_MS,
+  TEXTURE_PREFETCH_GAP_MS,
+  TEXTURE_PREFETCH_START_DELAY_MS,
+  STARTUP_LOADER_MAX_MS,
+  TV_TEXTURE_MAX_DIM,
+  TV_TEXTURE_QUALITY,
+} from '@/lib/viewer-runtime-config';
 
 interface ModelCarouselProps {
   models: ViewerModelWithTexture[];
@@ -25,6 +35,33 @@ interface ModelCarouselProps {
 }
 
 type DisplayMode = 'standard' | 'new-upload' | 'showcase' | 'detailed';
+
+type TextureUrls = { corrected_texture_url?: string; original_photo_url?: string } | null;
+
+// Full-size texture URL (skip local:// placeholder URLs)
+function getSourceTextureUrl(texture: TextureUrls, templateUrl: string | null): string | null {
+  if (texture) {
+    // If corrected texture is a local placeholder, fall back to original photo
+    if (texture.corrected_texture_url && !texture.corrected_texture_url.startsWith('local://')) {
+      return texture.corrected_texture_url;
+    }
+    // Fall back to original photo URL
+    if (texture.original_photo_url) {
+      return texture.original_photo_url;
+    }
+  }
+  // Fall back to template
+  return templateUrl || null;
+}
+
+// URL of the resized copy the TV displays and caches (see TV_TEXTURE_MAX_DIM)
+function getTvTextureUrl(texture: TextureUrls, templateUrl: string | null): string | null {
+  const url = getSourceTextureUrl(texture, templateUrl);
+  return url ? getStorageThumbnailUrl(url, { width: TV_TEXTURE_MAX_DIM, quality: TV_TEXTURE_QUALITY }) : null;
+}
+
+// Set once this device's old full-size texture cache entries have been deleted
+const FULL_SIZE_CACHE_CLEANUP_KEY = 'viewer-full-size-texture-cleanup-v1';
 
 /**
  * Model Carousel Component with Museum Display Algorithm
@@ -68,6 +105,8 @@ export function ModelCarousel({
   isModelLoadingRef.current = isModelLoading;
   const firstItemShownRef = useRef(false);
   if (!isModelLoading) firstItemShownRef.current = true;
+  // Startup loader over the canvas until the first item is on screen, then fades out
+  const [startupLoader, setStartupLoader] = useState<'visible' | 'fading' | 'gone'>('visible');
 
   // Animation state
   const [modelHasAnimations, setModelHasAnimations] = useState(false);;
@@ -249,9 +288,7 @@ export function ModelCarousel({
       for (let offset = 0; offset < displayQueue.length; offset++) {
         const pair = displayQueue[(start + offset) % displayQueue.length];
         if (!pair.texture) continue;
-        const url = pair.texture.corrected_texture_url && !pair.texture.corrected_texture_url.startsWith('local://')
-          ? pair.texture.corrected_texture_url
-          : pair.texture.original_photo_url;
+        const url = getTvTextureUrl(pair.texture, null);
         if (!url || seen.has(url)) continue;
         seen.add(url);
         toFetch.push({ url, modelId: pair.model.id, textureId: pair.texture.id });
@@ -262,6 +299,7 @@ export function ModelCarousel({
         prefetchTextures(toFetch, controller.signal, {
           gapMs: TEXTURE_PREFETCH_GAP_MS,
           isBusy: () => isModelLoadingRef.current,
+          touchIntervalMs: TEXTURE_CACHE_TOUCH_INTERVAL_MS,
         }).catch(err => {
           if ((err as Error)?.name !== 'AbortError') {
             console.warn('[Carousel] Prefetch failed:', err);
@@ -287,6 +325,25 @@ export function ModelCarousel({
     };
   }, [displayQueue, settings.textureCycling.enabled]);
 
+  // Fade the startup loader out once the first item has loaded — or after
+  // STARTUP_LOADER_MAX_MS, so a model that fails to load can't leave it up forever.
+  useEffect(() => {
+    if (startupLoader === 'visible' && !isModelLoading) setStartupLoader('fading');
+  }, [isModelLoading, startupLoader]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setStartupLoader(state => (state === 'visible' ? 'fading' : state));
+    }, STARTUP_LOADER_MAX_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (startupLoader !== 'fading') return;
+    const timer = setTimeout(() => setStartupLoader('gone'), 700);
+    return () => clearTimeout(timer);
+  }, [startupLoader]);
+
   // Look-ahead: pre-decode the next texture while the current one is on screen.
   // When the carousel advances, Model3D picks it from the preload cache instantly.
   // Waits until the current item has finished loading so it gets the TV's full attention.
@@ -296,12 +353,38 @@ export function ModelCarousel({
     for (let ahead = 1; ahead <= 2; ahead++) {
       const nextPair = displayQueue[(currentIndex + ahead) % displayQueue.length];
       if (!nextPair?.texture) continue;
-      const url = nextPair.texture.corrected_texture_url && !nextPair.texture.corrected_texture_url.startsWith('local://')
-        ? nextPair.texture.corrected_texture_url
-        : nextPair.texture.original_photo_url;
+      const url = getTvTextureUrl(nextPair.texture, null);
       if (url) preloadTexture(url).catch(() => {}); // fire-and-forget
     }
   }, [currentIndex, displayQueue, isModelLoading]);
+
+  // One-time per device: delete the full-size copies of the queue's textures that
+  // were cached before the viewer switched to resized ones. Exact keys only, so
+  // other pages' cache entries are left alone.
+  useEffect(() => {
+    if (displayQueue.length === 0) return;
+    try {
+      if (localStorage.getItem(FULL_SIZE_CACHE_CLEANUP_KEY)) return;
+    } catch {
+      return; // no storage to remember it in — don't repeat on every load
+    }
+
+    const timer = setTimeout(() => {
+      const urls = new Set<string>();
+      for (const pair of displayQueue) {
+        const url = getSourceTextureUrl(pair.texture, pair.model.texture_template_url);
+        if (url) urls.add(url);
+      }
+      deleteCachedTextures([...urls])
+        .then(() => {
+          console.log(`[Carousel] Removed full-size texture cache entries (${urls.size} checked)`);
+          try { localStorage.setItem(FULL_SIZE_CACHE_CLEANUP_KEY, String(Date.now())); } catch {}
+        })
+        .catch(err => console.warn('[Carousel] Full-size cache cleanup failed:', err));
+    }, TEXTURE_PREFETCH_START_DELAY_MS);
+
+    return () => clearTimeout(timer);
+  }, [displayQueue]);
 
   // Sort models by texture upload time (newest first) and jump to newest when updated
   useEffect(() => {
@@ -638,22 +721,7 @@ export function ModelCarousel({
 
   // Check if we have texture data ready
   if (useTextureCycling && displayQueue.length === 0) {
-    return (
-      <div 
-        style={{ 
-          width: '100%', 
-          height: '100%', 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'center', 
-          backgroundColor 
-        }}
-      >
-        <div style={{ color: '#ffffff', textAlign: 'center' }}>
-          <p style={{ fontSize: '48px' }}>Loading textures...</p>
-        </div>
-      </div>
-    );
+    return <ViewerStartupLoader backgroundColor={backgroundColor} status="Loading textures…" />;
   }
 
   if (!useTextureCycling && sortedModels.length === 0) {
@@ -676,25 +744,9 @@ export function ModelCarousel({
     );
   }
   
-  // Helper to get valid texture URL (skip local:// placeholder URLs)
-  const getValidTextureUrl = (texture: { corrected_texture_url?: string; original_photo_url?: string } | null, templateUrl: string | null): string | null => {
-    if (texture) {
-      // If corrected texture is a local placeholder, fall back to original photo
-      if (texture.corrected_texture_url && !texture.corrected_texture_url.startsWith('local://')) {
-        return texture.corrected_texture_url;
-      }
-      // Fall back to original photo URL
-      if (texture.original_photo_url) {
-        return texture.original_photo_url;
-      }
-    }
-    // Fall back to template
-    return templateUrl || null;
-  };
-
   const textureUrl = useTextureCycling && currentPair
-    ? getValidTextureUrl(currentPair.texture, currentPair.model.texture_template_url)
-    : getValidTextureUrl(currentLegacyModel?.latest_texture || null, currentLegacyModel?.texture_template_url || null);
+    ? getTvTextureUrl(currentPair.texture, currentPair.model.texture_template_url)
+    : getTvTextureUrl(currentLegacyModel?.latest_texture || null, currentLegacyModel?.texture_template_url || null);
   
   const textureId = useTextureCycling && currentPair?.texture
     ? currentPair.texture.id
@@ -746,8 +798,10 @@ export function ModelCarousel({
 
   return (
     <div className="w-full h-full relative" style={{ backgroundColor, cursor: isFullscreen && !showControls ? 'none' : 'default' }}>
+      {/* No shadows/preserveDrawingBuffer and dpr 1: each costs GPU time every
+          frame on TV hardware, and nothing here needs them. */}
       <Canvas 
-        shadows 
+        dpr={1}
         style={{ 
           width: '100%', 
           height: '100%',
@@ -756,7 +810,6 @@ export function ModelCarousel({
           left: 0
         }}
         gl={{
-          preserveDrawingBuffer: true,
           powerPreference: 'high-performance'
         }}
       >
@@ -828,9 +881,19 @@ export function ModelCarousel({
         />
       </Canvas>
 
-      {/* Subtle loading indicator: soft blurred pulsing glow instead of a hard spinner.
-          Barely visible on a dark background — just enough to indicate activity. */}
-      {isModelLoading && (
+      {/* Startup: full loader until the first item is on screen */}
+      {startupLoader !== 'gone' && (
+        <ViewerStartupLoader
+          overlay
+          backgroundColor={backgroundColor}
+          status="Preparing display…"
+          fadingOut={startupLoader === 'fading'}
+        />
+      )}
+
+      {/* Between items: subtle loading indicator — soft blurred pulsing glow instead of a
+          hard spinner. Barely visible on a dark background — just enough to indicate activity. */}
+      {isModelLoading && startupLoader === 'gone' && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div
             className="animate-pulse rounded-full"

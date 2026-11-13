@@ -1,18 +1,80 @@
 'use client';
 
 import { useRef, useState, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import * as THREE from 'three';
-import { getModel, storeModel, getTexture, storeTexture } from '@/lib/texture-cache';
+import { getModel, storeModel, getTexture, storeTexture, fetchTexture } from '@/lib/texture-cache';
 import { getIsOnline } from '@/lib/connectivity-monitor';
 
+// ─── Texture decoding ─────────────────────────────────────────────────────────
+// Textures decoded by decodeTexture(). Their lifetime is owned by the texture
+// effect / preload cache, so disposing a model must not dispose them too.
+const managedTextures = new WeakSet<THREE.Texture>();
+
+function loadWithImageElement(blob: Blob): Promise<THREE.Texture> {
+  const objectURL = URL.createObjectURL(blob);
+  return new Promise((resolve, reject) => {
+    new THREE.TextureLoader().load(
+      objectURL,
+      (t) => { URL.revokeObjectURL(objectURL); resolve(t); },
+      undefined,
+      (err) => { URL.revokeObjectURL(objectURL); reject(err); }
+    );
+  });
+}
+
+/**
+ * Decode an image blob into a THREE.Texture. Uses createImageBitmap, which
+ * decodes off the main thread — with an <img> the browser decodes lazily on the
+ * main thread during the GPU upload, which froze the display on Tizen TVs at
+ * every texture switch. Falls back to <img> where createImageBitmap is missing.
+ */
+async function decodeTexture(blob: Blob): Promise<THREE.Texture> {
+  let texture: THREE.Texture | null = null;
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bitmap = await createImageBitmap(blob, { premultiplyAlpha: 'none' });
+      texture = new THREE.Texture(bitmap);
+      texture.needsUpdate = true;
+      texture.addEventListener('dispose', () => bitmap.close());
+    } catch (err) {
+      console.warn('[Texture] createImageBitmap failed, falling back to <img>:', err);
+    }
+  }
+  if (!texture) texture = await loadWithImageElement(blob);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.flipY = false;
+  managedTextures.add(texture);
+  return texture;
+}
+
+/** Dispose a loaded model's geometry and materials (but not managed textures). */
+function disposeModel(object: THREE.Object3D) {
+  object.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    child.geometry?.dispose();
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    for (const mat of materials) {
+      if (!mat) continue;
+      const map = (mat as THREE.MeshStandardMaterial).map;
+      if (map && !managedTextures.has(map)) map.dispose();
+      mat.dispose();
+    }
+  });
+}
+
+// Renderer used to upload preloaded textures to the GPU ahead of time (set by
+// the first mounted Model3D).
+let uploadRenderer: THREE.WebGLRenderer | null = null;
+
 // ─── Module-level decoded-texture preload cache ───────────────────────────────
-// The carousel pre-decodes the next texture into a THREE.Texture while the
-// current one is on screen. Model3D consumes it instantly (no decode delay).
+// The carousel pre-decodes the next texture into a THREE.Texture — and uploads
+// it to the GPU — while the current one is on screen. Model3D consumes it
+// instantly (no decode or upload at switch time).
 const preloadCache = new Map<string, THREE.Texture>();
-const MAX_PRELOAD_CACHE = 6;
+const MAX_PRELOAD_CACHE = 3;
 
 /**
  * Pre-decode a texture from IndexedDB / network into a THREE.Texture.
@@ -24,33 +86,25 @@ export async function preloadTexture(url: string, signal?: AbortSignal): Promise
     let blob: Blob | null = await getTexture(url);
     if (signal?.aborted) return;
     if (!blob) {
-      const res = await fetch(url, { signal });
+      const res = await fetchTexture(url, signal);
       if (!res.ok || signal?.aborted) return;
       blob = await res.blob();
     }
     if (signal?.aborted) return;
-    const objectURL = URL.createObjectURL(blob);
-    await new Promise<void>((resolve) => {
-      new THREE.TextureLoader().load(
-        objectURL,
-        (t) => {
-          URL.revokeObjectURL(objectURL);
-          if (signal?.aborted) { t.dispose(); resolve(); return; }
-          t.colorSpace = THREE.SRGBColorSpace;
-          t.flipY = false;
-          // Evict LRU entry if over limit
-          if (preloadCache.size >= MAX_PRELOAD_CACHE) {
-            const oldest = preloadCache.keys().next().value;
-            if (oldest) { preloadCache.get(oldest)?.dispose(); preloadCache.delete(oldest); }
-          }
-          preloadCache.set(url, t);
-          console.log('[Preload] Texture ready:', url.split('/').pop());
-          resolve();
-        },
-        undefined,
-        (err) => { URL.revokeObjectURL(objectURL); console.warn('[Preload] Decode error:', err); resolve(); }
-      );
-    });
+    const t = await decodeTexture(blob);
+    if (signal?.aborted || preloadCache.has(url)) { t.dispose(); return; }
+    try {
+      uploadRenderer?.initTexture(t);
+    } catch (err) {
+      console.warn('[Preload] GPU upload failed, will upload on first draw:', err);
+    }
+    // Evict LRU entry if over limit
+    if (preloadCache.size >= MAX_PRELOAD_CACHE) {
+      const oldest = preloadCache.keys().next().value;
+      if (oldest) { preloadCache.get(oldest)?.dispose(); preloadCache.delete(oldest); }
+    }
+    preloadCache.set(url, t);
+    console.log('[Preload] Texture ready:', url.split('/').pop());
   } catch (err: unknown) {
     if ((err as Error)?.name !== 'AbortError') console.warn('[Preload] Failed:', url, err);
   }
@@ -133,6 +187,14 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
   const [isModelReady, setIsModelReady] = useState(false);
   const [isTextureReady, setIsTextureReady] = useState<boolean>(!textureUrl);
 
+  const gl = useThree((state) => state.gl);
+  useEffect(() => {
+    if (!uploadRenderer) uploadRenderer = gl;
+    return () => {
+      if (uploadRenderer === gl) uploadRenderer = null;
+    };
+  }, [gl]);
+
   // Play animation function
   const playAnimation = useCallback(() => {
     if (mixerRef.current && animationsRef.current.length > 0) {
@@ -198,57 +260,74 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
     }
     animationsRef.current = [];
 
+    // cancelled: the URL changed (or unmounted) before loading finished — the
+    // late result is disposed instead of replacing the current model.
+    let cancelled = false;
+    // The model this effect run loaded; disposed in cleanup.
+    let loadedModel: THREE.Object3D | null = null;
+
+    const onModelLoaded = (scene: THREE.Group, animations: THREE.AnimationClip[] = []) => {
+      if (cancelled) {
+        disposeModel(scene);
+        return;
+      }
+      loadedModel = scene;
+      setModel(scene);
+      setIsModelReady(true);
+
+      // Setup animations if present
+      if (animations.length > 0) {
+        console.log('[Model3D] Found animations:', animations.length);
+        animationsRef.current = animations;
+        setHasAnimations(true);
+
+        // Create mixer
+        mixerRef.current = new THREE.AnimationMixer(scene);
+
+        // Listen for animation finished
+        mixerRef.current.addEventListener('finished', () => {
+          setIsPlaying(false);
+          console.log('[Model3D] Animation finished');
+        });
+      }
+    };
+
+    const parseModelBlob = (blob: Blob, source: string) => {
+      const objectURL = URL.createObjectURL(blob);
+      const fileExtension = modelUrl.split('.').pop()?.toLowerCase();
+
+      if (fileExtension === 'glb' || fileExtension === 'gltf') {
+        new GLTFLoader().load(objectURL, (gltf) => {
+          URL.revokeObjectURL(objectURL);
+          onModelLoaded(gltf.scene, gltf.animations);
+        }, undefined, (err) => {
+          console.error(`[Model3D] Failed to load GLB from ${source}:`, err);
+          URL.revokeObjectURL(objectURL);
+        });
+      } else if (fileExtension === 'obj') {
+        new OBJLoader().load(objectURL, (obj) => {
+          URL.revokeObjectURL(objectURL);
+          onModelLoaded(obj);
+        }, undefined, (err) => {
+          console.error(`[Model3D] Failed to load OBJ from ${source}:`, err);
+          URL.revokeObjectURL(objectURL);
+        });
+      } else {
+        URL.revokeObjectURL(objectURL);
+      }
+    };
+
     const loadModelWithCache = async () => {
       try {
         // Skip cache if disabled or using blob URLs (temporary)
         const shouldUseCache = !disableCache && !modelUrl.startsWith('blob:');
-        
+
         // Check IndexedDB cache first
         const cachedBlob = shouldUseCache ? await getModel(modelUrl) : null;
-        
+        if (cancelled) return;
+
         if (cachedBlob) {
-          // Load from cached blob
-          const objectURL = URL.createObjectURL(cachedBlob);
-          const fileExtension = modelUrl.split('.').pop()?.toLowerCase();
-          
-          if (fileExtension === 'glb' || fileExtension === 'gltf') {
-            const loader = new GLTFLoader();
-            loader.load(objectURL, (gltf) => {
-              setModel(gltf.scene);
-              setIsModelReady(true);
-              
-              // Setup animations if present
-              if (gltf.animations && gltf.animations.length > 0) {
-                console.log('[Model3D] Found animations:', gltf.animations.length);
-                animationsRef.current = gltf.animations;
-                setHasAnimations(true);
-                
-                // Create mixer
-                mixerRef.current = new THREE.AnimationMixer(gltf.scene);
-                
-                // Listen for animation finished
-                mixerRef.current.addEventListener('finished', () => {
-                  setIsPlaying(false);
-                  console.log('[Model3D] Animation finished');
-                });
-              }
-              
-              URL.revokeObjectURL(objectURL);
-            }, undefined, (err) => {
-              console.error('[Model3D] Failed to load GLB from cache:', err);
-              URL.revokeObjectURL(objectURL);
-            });
-          } else if (fileExtension === 'obj') {
-            const loader = new OBJLoader();
-            loader.load(objectURL, (obj) => {
-              setModel(obj);
-              setIsModelReady(true);
-              URL.revokeObjectURL(objectURL);
-            }, undefined, (err) => {
-              console.error('[Model3D] Failed to load OBJ from cache:', err);
-              URL.revokeObjectURL(objectURL);
-            });
-          }
+          parseModelBlob(cachedBlob, 'cache');
         } else {
           // Not cached. While offline, skip the network attempt entirely —
           // it would just fail (or hang until a slow timeout) and log noise.
@@ -260,63 +339,25 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
 
           // Fetch from network and cache
           const response = await fetch(modelUrl);
-          
+          if (cancelled) return;
+
           if (!response.ok) {
             console.error(`[Model3D] Failed to fetch model: HTTP ${response.status}`);
             setIsLoading(false);
             return;
           }
-          
+
           const blob = await response.blob();
-          
+
           // Store in IndexedDB for next time (skip if caching disabled)
           if (shouldUseCache && modelId) {
-            await storeModel(modelUrl, blob, modelId).catch((err: unknown) => 
+            await storeModel(modelUrl, blob, modelId).catch((err: unknown) =>
               console.warn('[Cache] Failed to store model:', err)
             );
           }
-          
-          const objectURL = URL.createObjectURL(blob);
-          const fileExtension = modelUrl.split('.').pop()?.toLowerCase();
-          
-          if (fileExtension === 'glb' || fileExtension === 'gltf') {
-            const loader = new GLTFLoader();
-            loader.load(objectURL, (gltf) => {
-              setModel(gltf.scene);
-              setIsModelReady(true);
-              
-              // Setup animations if present
-              if (gltf.animations && gltf.animations.length > 0) {
-                console.log('[Model3D] Found animations:', gltf.animations.length);
-                animationsRef.current = gltf.animations;
-                setHasAnimations(true);
-                
-                // Create mixer
-                mixerRef.current = new THREE.AnimationMixer(gltf.scene);
-                
-                // Listen for animation finished
-                mixerRef.current.addEventListener('finished', () => {
-                  setIsPlaying(false);
-                  console.log('[Model3D] Animation finished');
-                });
-              }
-              
-              URL.revokeObjectURL(objectURL);
-            }, undefined, (err) => {
-              console.error('[Model3D] Failed to load GLB from network:', err);
-              URL.revokeObjectURL(objectURL);
-            });
-          } else if (fileExtension === 'obj') {
-            const loader = new OBJLoader();
-            loader.load(objectURL, (obj) => {
-              setModel(obj);
-              setIsModelReady(true);
-              URL.revokeObjectURL(objectURL);
-            }, undefined, (err) => {
-              console.error('[Model3D] Failed to load OBJ from network:', err);
-              URL.revokeObjectURL(objectURL);
-            });
-          }
+          if (cancelled) return;
+
+          parseModelBlob(blob, 'network');
         }
       } catch (error) {
         console.error('[Model3D] Error loading model from URL:', modelUrl, error);
@@ -326,29 +367,15 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
 
     loadModelWithCache();
 
-    // Cleanup function to dispose of previous model
+    // Dispose the model this run loaded (the closure's `model` state would be
+    // the previous one, which leaked every loaded model's geometry/materials)
     return () => {
-      if (model) {
-        model.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            if (child.geometry) {
-              child.geometry.dispose();
-            }
-            if (child.material) {
-              if (Array.isArray(child.material)) {
-                child.material.forEach(mat => {
-                  if (mat.map) mat.map.dispose();
-                  mat.dispose();
-                });
-              } else {
-                if (child.material.map) child.material.map.dispose();
-                child.material.dispose();
-              }
-            }
-          }
-        });
+      cancelled = true;
+      if (loadedModel) {
+        disposeModel(loadedModel);
+        loadedModel = null;
       }
-      
+
       if (mixerRef.current) {
         mixerRef.current.stopAllAction();
         mixerRef.current.uncacheRoot(mixerRef.current.getRoot());
@@ -427,25 +454,10 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
         const cachedBlob = shouldUseCache ? await getTexture(textureUrl) : null;
         if (cancelled) return;
         
+        let blob: Blob;
         if (cachedBlob) {
           console.log('[Texture] Found in cache');
-          const objectURL = URL.createObjectURL(cachedBlob);
-          const textureLoader = new THREE.TextureLoader();
-          textureLoader.load(objectURL, (t) => {
-            URL.revokeObjectURL(objectURL);
-            if (cancelled) { t.dispose(); return; }
-            t.colorSpace = THREE.SRGBColorSpace;
-            t.flipY = false;
-            loadedTexture = t;
-            setTexture(t);
-            setIsTextureReady(true);
-            console.log('[Texture] Loaded from cache successfully');
-          }, undefined, (err) => {
-            console.error('[Texture] Failed to load from cache:', err);
-            URL.revokeObjectURL(objectURL);
-            // Allow model to show even without texture rather than blocking forever
-            if (!cancelled) setIsTextureReady(true);
-          });
+          blob = cachedBlob;
         } else {
           // Not cached. While offline, skip the network attempt entirely — it
           // would just fail and log noise; unblock rendering immediately so
@@ -457,7 +469,7 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
           }
 
           console.log('[Texture] Not in cache, fetching from network:', textureUrl);
-          const response = await fetch(textureUrl);
+          const response = await fetchTexture(textureUrl);
           if (cancelled) return;
           
           if (!response.ok) {
@@ -467,7 +479,7 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
             return;
           }
           
-          const blob = await response.blob();
+          blob = await response.blob();
           if (cancelled) return;
           console.log('[Texture] Fetched successfully, size:', blob.size);
           
@@ -478,25 +490,14 @@ export const Model3D = forwardRef<Model3DHandle, Model3DProps>(({
             );
           }
           if (cancelled) return;
-          
-          const objectURL = URL.createObjectURL(blob);
-          const textureLoader = new THREE.TextureLoader();
-          textureLoader.load(objectURL, (t) => {
-            URL.revokeObjectURL(objectURL);
-            if (cancelled) { t.dispose(); return; }
-            t.colorSpace = THREE.SRGBColorSpace;
-            t.flipY = false;
-            loadedTexture = t;
-            setTexture(t);
-            setIsTextureReady(true);
-            console.log('[Texture] Loaded from network successfully');
-          }, undefined, (err) => {
-            console.error('[Texture] Failed to load from network:', err);
-            URL.revokeObjectURL(objectURL);
-            // Unblock rendering so a fetch error doesn't freeze the display
-            if (!cancelled) setIsTextureReady(true);
-          });
         }
+
+        const t = await decodeTexture(blob);
+        if (cancelled) { t.dispose(); return; }
+        loadedTexture = t;
+        setTexture(t);
+        setIsTextureReady(true);
+        console.log(`[Texture] Loaded from ${cachedBlob ? 'cache' : 'network'} successfully`);
       } catch (error) {
         console.error('[Texture] Error loading texture from URL:', textureUrl, error);
         // Unblock rendering on unexpected errors
